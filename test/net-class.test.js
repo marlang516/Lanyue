@@ -146,8 +146,12 @@ test(' 更新器不再自带第二份正则', () => {
 });
 
 test(' 引擎侧的认领只问判据，不再自己列一遍网络码', () => {
-  const code = stripComments(read('src/main/downloadQueue.js'));
-  assert.ok(/require\(['"]\.\.\/shared\/netClass['"]\)/.test(code), '下载引擎没接 netClass 判据');
+  // ADR 0003 §5 步骤 6：失败终态的 transportCode 补码迁到 downloadQueue/songTask.js。
+  const code = stripComments([
+    'src/main/downloadQueue.js',
+    'src/main/downloadQueue/songTask.js',
+  ].map((p) => read(p)).join('\n'));
+  assert.ok(/require\(['"](?:\.\.\/)+shared\/netClass['"]\)/.test(code), '下载引擎没接 netClass 判据');
   assert.ok(!/['"]NETWORK_(?:TIMEOUT|ERROR)['"]/.test(code),
     '引擎里不许再列一遍网络码字面量：清单的家在 netClass，抄一份就意味着两边会漂');
 });

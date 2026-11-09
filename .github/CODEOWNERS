@@ -1,0 +1,77 @@
+# CODEOWNERS — 代码责任人（占位版）
+#
+# 作用：PR 命中下列路径时自动请求对应责任人评审（需仓库开启 "Require review from Code Owners"）。
+#
+# ⚠️ 占位说明（必须替换）：
+#   本文件中的 @owner、@owner-main、@owner-renderer、@owner-contract、@owner-release、
+#   @owner-docs、@owner-tooling、@owner-test 均为**占位串**，不是真实 GitHub 账号。
+#   上线前必须逐个替换为真实 GitHub 用户名或团队（如 @lanyue/maintainers），否则：
+#     - GitHub 会把无法解析的 owner 视为无效规则；
+#     - 可能导致 PR 无法自动请求评审，或所有人被误请求评审。
+#
+# 语法提醒：CODEOWNERS 按「最后匹配的规则生效」（last matching pattern wins），
+#   因此具体目录规则必须写在通配规则 `*` 之后。`*` 只保证兜底，不覆盖后续更具体的规则。
+
+# ---------------------------------------------------------------------------
+# 兜底：未命中任何具体目录的文件
+# ---------------------------------------------------------------------------
+*                           @owner
+
+# ---------------------------------------------------------------------------
+# 主进程（Electron main）：bootstrap / ipc / domain / infra / platforms / mcp
+# ---------------------------------------------------------------------------
+/src/main/                  @owner-main
+/src/main/bootstrap/        @owner-main
+/src/main/ipc/              @owner-main
+/src/main/domain/           @owner-main
+/src/main/infra/            @owner-main
+/src/main/platforms/        @owner-main
+/src/main/mcp/              @owner-main
+
+# ---------------------------------------------------------------------------
+# 渲染层（Vue 3）
+# ---------------------------------------------------------------------------
+/src/renderer/              @owner-renderer
+/src/renderer/app/          @owner-renderer
+/src/renderer-legacy/       @owner-renderer
+
+# ---------------------------------------------------------------------------
+# 共享契约（唯一事实源：channels / schema / methods / events / DTO / 错误码）
+# 契约变更影响主进程、渲染层与 MCP，必须由契约责任人评审
+# ---------------------------------------------------------------------------
+/src/shared/                @owner-contract
+/src/shared/contract/       @owner-contract
+/src/shared/dto/            @owner-contract
+/src/shared/generated/      @owner-contract
+
+# ---------------------------------------------------------------------------
+# 构建、发布与 CI（签名、灰度、更新通道相关改动视为发布变更）
+# ---------------------------------------------------------------------------
+/.github/                   @owner-release
+/.github/workflows/         @owner-release
+/build/                     @owner-release
+/scripts/                   @owner-tooling
+
+# ---------------------------------------------------------------------------
+# 测试与质量工程
+# ---------------------------------------------------------------------------
+/test/                      @owner-test
+/test/quarantine/           @owner-test
+
+# ---------------------------------------------------------------------------
+# 文档与流程（架构、ADR、发布清单、流程规范）
+# ---------------------------------------------------------------------------
+/docs/                      @owner-docs
+/docs/adr/                  @owner-docs
+/docs/architecture/         @owner-docs
+/docs/process/              @owner-docs
+/README.md                  @owner-docs
+/CONTRIBUTING.md            @owner-docs
+/SECURITY.md                @owner-docs
+/CHANGELOG.md               @owner-release
+
+# ---------------------------------------------------------------------------
+# 依赖与供应链（lockfile 与依赖升级须由发布/工具责任人共同评审）
+# ---------------------------------------------------------------------------
+/package.json               @owner-release @owner-tooling
+/package-lock.json          @owner-release @owner-tooling

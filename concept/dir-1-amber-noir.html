@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>方向一 · 琥珀夜色 Amber Noir</title>
+<style>
+:root{
+  --bg:#100e0b; --bg2:#171410; --card:#1e1a14; --card-hi:#26211a;
+  --ink:#f2ece1; --ink2:#a89e8c; --ink3:#6e675a;
+  --acc:#e8b04b; --acc-deep:#b3822f; --acc-soft:rgba(232,176,75,.12);
+  --line:#2b251c; --danger:#d4574a;
+  --r-s:6px; --r-m:14px; --r-l:22px;
+  --ease:cubic-bezier(.16,1,.3,1);
+  font-size:15px;
+}
+*{margin:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;display:flex;flex-direction:column;height:100vh;overflow:hidden}
+.frame{display:flex;flex:1;min-height:0}
+aside{width:236px;flex-shrink:0;background:var(--bg2);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:26px 0 18px}
+.brand{padding:0 24px 26px;font-size:21px;font-weight:800;letter-spacing:.02em}
+.brand em{font-style:normal;color:var(--acc)}
+.brand small{display:block;font-size:10.5px;font-weight:400;color:var(--ink3);letter-spacing:.22em;margin-top:5px;text-transform:uppercase}
+nav{flex:1}
+.nav-item{display:flex;align-items:center;gap:13px;padding:11px 24px;color:var(--ink2);font-size:14.5px;cursor:pointer;border-left:3px solid transparent}
+.nav-item svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8}
+.nav-item:hover{color:var(--ink);background:var(--card)}
+.nav-item.on{color:var(--acc);border-left-color:var(--acc);background:linear-gradient(90deg,var(--acc-soft),transparent)}
+.nav-label{padding:22px 24px 8px;font-size:10.5px;letter-spacing:.18em;color:var(--ink3)}
+.pl-item{padding:8px 24px 8px 41px;font-size:13.5px;color:var(--ink2);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pl-item:hover{color:var(--ink)}
+.pl-item b{color:var(--ink3);font-weight:400;font-size:11.5px;margin-left:8px}
+.side-foot{padding:14px 24px 0;border-top:1px solid var(--line);font-size:11.5px;color:var(--ink3)}
+main{flex:1;min-width:0;display:flex;flex-direction:column;overflow-y:auto}
+/* flex column 滚动容器里子项默认会被压缩（截图实测 hero 标题被压半截）：全部禁止收缩 */
+main>*{flex-shrink:0}
+.topbar{display:flex;align-items:center;gap:18px;padding:20px 34px 0}
+.search{flex:1;max-width:430px;display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:10px 18px;color:var(--ink3);font-size:13.5px}
+.search svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2}
+.top-actions{margin-left:auto;display:flex;gap:10px;align-items:center}
+.avatar{width:34px;height:34px;border-radius:50%;background:conic-gradient(from 210deg,var(--acc),var(--acc-deep),var(--acc));box-shadow:0 0 0 2px var(--bg),0 0 0 3px var(--line)}
+.chip{font-size:12px;color:var(--ink2);border:1px solid var(--line);border-radius:999px;padding:6px 13px}
+.hero{margin:28px 34px 0;border-radius:var(--r-l);background:radial-gradient(120% 150% at 85% 0%,#3a2c14 0%,var(--card) 45%,var(--bg2) 100%);padding:38px 42px;position:relative;overflow:hidden}
+.hero::after{content:"";position:absolute;right:-70px;top:-70px;width:300px;height:300px;border-radius:50%;border:1px solid rgba(232,176,75,.25);box-shadow:0 0 0 40px rgba(232,176,75,.05),0 0 0 90px rgba(232,176,75,.03)}
+.kicker{font-size:11px;letter-spacing:.3em;color:var(--acc);font-weight:600}
+.hero h1{font-size:clamp(30px,3.4vw,44px);line-height:1.15;margin:12px 0 10px;font-weight:800;max-width:560px}
+.hero p{color:var(--ink2);font-size:14px;max-width:460px;line-height:1.65}
+.hero-btns{display:flex;gap:12px;margin-top:24px}
+.btn{border:0;border-radius:999px;padding:12px 26px;font-size:14px;font-weight:600;cursor:pointer;display:inline-flex;gap:9px;align-items:center}
+.btn-p{background:var(--acc);color:#221703}
+.btn-p:hover{filter:brightness(1.08)}
+.btn-g{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.sec{margin:36px 34px 0}
+.sec-head{display:flex;align-items:baseline;gap:14px;margin-bottom:16px}
+.sec-head h2{font-size:19px;font-weight:700}
+.sec-head span{font-size:12px;color:var(--ink3)}
+.sec-head a{margin-left:auto;font-size:12.5px;color:var(--acc);cursor:pointer}
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+.mcard{border-radius:var(--r-m);overflow:hidden;background:var(--card);border:1px solid var(--line);cursor:pointer;transition:transform .25s var(--ease)}
+.mcard:hover{transform:translateY(-4px)}
+.mcover{aspect-ratio:1;position:relative;display:flex;align-items:flex-end;padding:14px}
+.mcover .p{position:absolute;right:12px;bottom:12px;width:42px;height:42px;border-radius:50%;background:var(--acc);color:#221703;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .2s;box-shadow:0 8px 20px rgba(0,0,0,.45)}
+.mcard:hover .p{opacity:1}
+.mcover .p svg{width:17px;height:17px;fill:currentColor}
+.m1{background:linear-gradient(135deg,#7c4a12,#3a2c14 60%,#171410)}
+.m2{background:linear-gradient(200deg,#8a6a2f,#2c2417 55%,#12100b)}
+.m3{background:radial-gradient(90% 90% at 20% 10%,#a5622a,#4a2f12 50%,#141009)}
+.m4{background:conic-gradient(from 300deg at 60% 40%,#c08a3a,#4a3213 40%,#1a150e 70%,#8a5a20)}
+.mtitle{font-weight:700;font-size:13.5px;text-shadow:0 1px 6px rgba(0,0,0,.6)}
+.rows{border:1px solid var(--line);border-radius:var(--r-m);background:var(--card);overflow:hidden}
+.row{display:grid;grid-template-columns:34px 1fr 130px 84px 60px;align-items:center;gap:14px;padding:11px 18px;border-bottom:1px solid var(--line);font-size:13.5px;cursor:pointer}
+.row:last-child{border-bottom:0}
+.row:hover{background:var(--card-hi)}
+.row .idx{color:var(--ink3);font-variant-numeric:tabular-nums;font-size:12.5px}
+.row.playing .idx{color:var(--acc)}
+.tl{display:flex;flex-direction:column;gap:3px;min-width:0}
+.tt{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ar{color:var(--ink3);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .al{color:var(--ink2);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .du{color:var(--ink3);font-size:12.5px;text-align:right;font-variant-numeric:tabular-nums}
+.badge{justify-self:end;font-size:10.5px;color:var(--acc);border:1px solid var(--acc-deep);padding:2.5px 8px;border-radius:999px}
+.playing .tt{color:var(--acc)}
+.eq{display:inline-flex;gap:2px;align-items:flex-end;height:11px;margin-right:7px;vertical-align:-1px}
+.eq i{width:2.5px;background:var(--acc);animation:q 1s infinite}
+.eq i:nth-child(2){animation-delay:.25s}.eq i:nth-child(3){animation-delay:.5s}
+@keyframes q{0%,100%{height:3px}50%{height:11px}}
+footer{flex-shrink:0;height:84px;background:var(--bg2);border-top:1px solid var(--line);display:grid;grid-template-columns:1fr 2fr 1fr;align-items:center;padding:0 24px;gap:18px}
+.np{display:flex;gap:13px;align-items:center;min-width:0;cursor:pointer}
+.np .art{width:52px;height:52px;border-radius:10px;background:linear-gradient(140deg,#a5622a,#26190a);box-shadow:0 4px 14px rgba(0,0,0,.5)}
+.np .tt{font-size:13.5px;font-weight:700}.np .ar{font-size:12px;color:var(--ink3)}
+.mid{display:flex;flex-direction:column;gap:8px}
+.ctrls{display:flex;gap:20px;align-items:center;justify-content:center}
+.ic{width:18px;height:18px;stroke:var(--ink2);fill:none;stroke-width:1.9;cursor:pointer}
+.ic:hover{stroke:var(--ink)}
+.pp{width:40px;height:40px;border-radius:50%;background:var(--acc);display:flex;align-items:center;justify-content:center;cursor:pointer}
+.pp svg{width:16px;height:16px;fill:#221703}
+.prog{display:flex;align-items:center;gap:11px;font-size:11px;color:var(--ink3);font-variant-numeric:tabular-nums}
+.bar{flex:1;height:4px;background:var(--line);border-radius:999px;position:relative}
+.bar i{position:absolute;left:0;top:0;bottom:0;width:38%;background:var(--acc);border-radius:999px}
+.bar u{position:absolute;left:38%;top:50%;width:11px;height:11px;margin:-5.5px 0 0 -5.5px;border-radius:50%;background:#fff;box-shadow:0 0 8px rgba(232,176,75,.8)}
+.right{display:flex;gap:16px;align-items:center;justify-content:flex-end}
+.stage{position:fixed;inset:0;background:linear-gradient(160deg,#1b160e 0%,var(--bg) 60%);z-index:50;display:flex;opacity:0;pointer-events:none;transition:opacity .3s}
+.stage.show{opacity:1;pointer-events:auto}
+.stage .lft{flex:1.2;display:flex;flex-direction:column;justify-content:center;padding:0 7vw}
+.s-kick{font-size:11px;letter-spacing:.3em;color:var(--acc)}
+.stage h2{font-size:clamp(34px,4.6vw,58px);font-weight:800;margin:14px 0 8px;line-height:1.1}
+.stage h3{font-size:18px;color:var(--ink2);font-weight:400}
+.stage .meta{margin-top:26px;font-size:12.5px;color:var(--ink3);display:flex;gap:22px}
+.s-bar{margin-top:30px;max-width:520px}
+.s-art{flex:1;display:flex;align-items:center;justify-content:center;padding:56px}
+.s-art .box{width:min(72%,440px);aspect-ratio:1;border-radius:26px;background:conic-gradient(from 210deg at 55% 45%,#c08a3a,#4a3213 35%,#171008 65%,#8a5a20);box-shadow:0 40px 90px rgba(0,0,0,.6),inset 0 0 0 1px rgba(232,176,75,.25)}
+.s-ctrl{display:flex;gap:26px;margin-top:38px;align-items:center}
+</style>
+</head>
+<body>
+<div class="frame">
+<aside>
+  <div class="brand">揽乐<em>·</em><small>Amber Noir</small></div>
+  <nav>
+    <div class="nav-item on"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>发现</div>
+    <div class="nav-item"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>搜索歌曲</div>
+    <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>本地曲库</div>
+    <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M6 9l6 6 6-6"/><path d="M4 21h16"/></svg>下载队列</div>
+    <div class="nav-label">我的歌单</div>
+    <div class="pl-item">深夜爵士清单 <b>42</b></div>
+    <div class="pl-item">通勤循环 <b>118</b></div>
+    <div class="pl-item">民谣电台收藏 <b>76</b></div>
+    <div class="pl-item">无损母带精选 <b>23</b></div>
+  </nav>
+  <div class="side-foot">音源健康 · 8/8 在线</div>
+</aside>
+
+<main>
+  <div class="topbar">
+    <div class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>搜索 8 个平台，或粘贴分享链接…</div>
+    <div class="top-actions"><span class="chip">⌘K 命令面板</span><div class="avatar"></div></div>
+  </div>
+
+  <div class="hero">
+    <div class="kicker">TONIGHT'S PICK</div>
+    <h1>把一天的杂音，<br>收进琥珀色的晚上</h1>
+    <p>根据你的红心与播放记录，每晚 21:00 更新一份跨平台聚合精选 —— 网易、QQ、酷狗一次听全。</p>
+    <div class="hero-btns">
+      <button class="btn btn-p"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>立即播放</button>
+      <button class="btn btn-g">换一批</button>
+    </div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-head"><h2>最近在听</h2><span>来自本地播放记录</span><a>全部 →</a></div>
+    <div class="rows">
+      <div class="row playing"><span class="idx"><span class="eq"><i></i><i></i><i></i></span></span><span class="tl"><span class="tt">Blue in Green</span><span class="ar">Bill Evans</span></span><span class="al">Waltz for Debby</span><span class="du">5:37</span><span class="badge">FLAC</span></div>
+      <div class="row"><span class="idx">2</span><span class="tl"><span class="tt">夜航船</span><span class="ar">陈粒</span></span><span class="al">小梦大半</span><span class="du">4:12</span><span class="badge">320k</span></div>
+      <div class="row"><span class="idx">3</span><span class="tl"><span class="tt">Merry Christmas Mr. Lawrence</span><span class="ar">坂本龍一</span></span><span class="al">Coda</span><span class="du">6:02</span><span class="badge">FLAC</span></div>
+      <div class="row"><span class="idx">4</span><span class="tl"><span class="tt">山丘</span><span class="ar">李宗盛</span></span><span class="al">山丘 (Single)</span><span class="du">4:35</span><span class="badge">320k</span></div>
+    </div>
+  </div>
+
+  <div class="sec" style="margin-bottom:40px">
+    <div class="sec-head"><h2>编辑精选</h2><span>跨平台聚合</span><a>更多 →</a></div>
+    <div class="cards">
+      <div class="mcard"><div class="mcover m1"><span class="mtitle">深夜爵士清单</span><span class="p"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></span></div></div>
+      <div class="mcard"><div class="mcover m2"><span class="mtitle">华语民谣 2026</span><span class="p"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></span></div></div>
+      <div class="mcard"><div class="mcover m3"><span class="mtitle">钢琴独白</span><span class="p"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></span></div></div>
+      <div class="mcard"><div class="mcover m4"><span class="mtitle">电子暖流</span><span class="p"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></span></div></div>
+    </div>
+  </div>
+</main>
+</div>
+
+<footer>
+  <div class="np"><div class="art"></div><div class="tl"><div class="tt">Blue in Green</div><div class="ar">Bill Evans · 网易云</div></div></div>
+  <div class="mid">
+    <div class="ctrls">
+      <svg class="ic" viewBox="0 0 24 24"><path d="M11 19L2 12l9-7v14zM22 19l-9-7 9-7v14z"/></svg>
+      <div class="pp"><svg viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg></div>
+      <svg class="ic" viewBox="0 0 24 24"><path d="M13 19l9-7-9-7v14zM2 19l9-7-9-7v14z"/></svg>
+    </div>
+    <div class="prog"><span>2:07</span><div class="bar"><i></i><u></u></div><span>5:37</span></div>
+  </div>
+  <div class="right">
+    <svg class="ic" viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+    <svg class="ic" viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 010 7"/></svg>
+  </div>
+</footer>
+
+<div class="stage" id="stage">
+  <div class="lft">
+    <div class="s-kick">NOW PLAYING · 本地 FLAC</div>
+    <h2>Blue in Green</h2>
+    <h3>Bill Evans — Waltz for Debby (1961)</h3>
+    <div class="meta"><span>♾ 循环 · 随机关</span><span>歌词 逐行</span><span>源 · 网易云 / QQ 可比价</span></div>
+    <div class="s-bar prog" style="width:100%"><span>2:07</span><div class="bar"><i></i><u></u></div><span>5:37</span></div>
+    <div class="s-ctrl">
+      <svg class="ic" viewBox="0 0 24 24" style="width:22px;height:22px"><path d="M11 19L2 12l9-7v14zM22 19l-9-7 9-7v14z"/></svg>
+      <div class="pp" style="width:54px;height:54px"><svg viewBox="0 0 24 24" style="width:22px;height:22px"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg></div>
+      <svg class="ic" viewBox="0 0 24 24" style="width:22px;height:22px"><path d="M13 19l9-7-9-7v14zM2 19l9-7-9-7v14z"/></svg>
+      <span class="chip" style="margin-left:18px" onclick="hideStage()">✕ 收起全屏</span>
+    </div>
+  </div>
+  <div class="s-art"><div class="box"></div></div>
+</div>
+
+<script>
+const np = document.querySelector('.np');
+function showStage(){document.getElementById('stage').classList.add('show')}
+function hideStage(){document.getElementById('stage').classList.remove('show')}
+np.addEventListener('click', showStage);
+</script>
+</body>
+</html>

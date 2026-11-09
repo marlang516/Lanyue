@@ -17,6 +17,8 @@ const approvedDirs = require('../approvedDirs');
 const { DIR_PREF_KEYS } = approvedDirs;
 const path = require('path');
 const logger = require('../../utils/logger');
+// 备份 schema 的唯一权威：导出写它、导入按它升级（见 utils/dataMigration.js）
+const { BACKUP_SCHEMA_VERSION, migrateBackup } = require('../../utils/dataMigration');
 // 主进程即 UI 线程：文件 IO 必须异步
 const fsa = require('../../utils/fsAsync');
 
@@ -90,7 +92,7 @@ function register() {
       // （跨机不可解），url/user 属本机同步配置，带走只会让另一台设备误连
       const exportedPrefs = pickExportablePrefs(prefs.getAll ? prefs.getAll() : await getAllPrefs());
       const exportData = {
-        version: 2,
+        version: BACKUP_SCHEMA_VERSION,
         exportedAt: new Date().toISOString(),
         app: 'music-downloader',
         data: {
@@ -131,17 +133,25 @@ function register() {
         return { success: false, error: '无法读取所选文件' };
       }
       const importData = JSON.parse(content);
+      // 备份是外部文件：先把 schema 升到当前版本，之后所有读取（含格式校验）
+      // 都只看迁移后的 payload —— 否则每加一版 schema，版本判断就得散落在
+      // 各处读取点上，漏一处就是静默丢数据。
+      const migrated = migrateBackup(importData);
+      if (migrated.skipped) {
+        return { success: false, error: '备份文件版本过新，请升级揽乐后再导入' };
+      }
+      const payload = migrated.payload;
 
       // 验证格式
-      if (!importData.app || !importData.data) {
+      if (!payload.app || !payload.data) {
         return { success: false, error: '文件格式无效，不是有效的备份文件' };
       }
 
-      if (importData.app !== 'music-downloader') {
+      if (payload.app !== 'music-downloader') {
         return { success: false, error: '该文件来自其他应用，不匹配' };
       }
 
-      const { data } = importData;
+      const { data } = payload;
       const results = [];
 
       // 恢复歌单 / 模板 / 活动模板（真实存储键）
@@ -191,9 +201,16 @@ function register() {
         if (droppedDirs) results.push(`目录设置: ${droppedDirs} 项被忽略（需在设置中重新选择）`);
       }
 
+      // 迁移过才追加这一行：用户排障时需要知道"这份文件被改写过"，
+      // 而没升级过的备份（applied 为空）不该多出一条无意义的版本跃迁。
+      let message = `导入成功:\n${results.join('\n')}`;
+      if (migrated.applied.length) {
+        message += `\n数据版本: v${migrated.fromVersion}→v${migrated.toVersion}`;
+      }
+
       return {
         success: true,
-        message: `导入成功:\n${results.join('\n')}`,
+        message,
       };
     } catch (e) {
       logger.warn('导入失败:', e);

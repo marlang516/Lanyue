@@ -141,9 +141,16 @@ test('红心分支不登记上限（红心没有截断这回事）', () => {
 });
 
 test('平台歌单取数用的是共享常量，与聚合判据同源', () => {
-  const IPC = read('src/main/ipc/playlist.js');
-  assert.match(IPC, /getPlaylistSongs\(\s*platformIdOf\(source\)\s*,\s*playlistId\s*,\s*SOURCE_FETCH_LIMIT\s*\)/,
+  // 取数在 playlist/infra/api.js；playlist.js 已瘦身为 IPC 壳，不该再直接调 API
+  const API = read('src/main/ipc/playlist/infra/api.js');
+  assert.match(API, /getPlaylistSongs\(\s*platformIdOf\(source\)\s*,\s*playlistId\s*,\s*SOURCE_FETCH_LIMIT\s*\)/,
     '取数上限须引用 SOURCE_FETCH_LIMIT，写死 2000 会让判据与实际脱钩');
+  // 「同源」不只是名字相同：必须从聚合判据模块导入同一个常量
+  assert.match(API,
+    /const \{ SOURCE_FETCH_LIMIT \} = require\('\.\.\/\.\.\/\.\.\/\.\.\/utils\/crossSourceAggregate'\)/,
+    'infra/api.js 必须引用 crossSourceAggregate 的 SOURCE_FETCH_LIMIT，不能自建副本');
+  const agg = read('src/utils/crossSourceAggregate.js');
+  assert.match(agg, /SOURCE_FETCH_LIMIT/, '聚合判据模块没导出 SOURCE_FETCH_LIMIT');
 });
 
 test('界面文案键齐备，且与 failed / undecidable 分开', () => {

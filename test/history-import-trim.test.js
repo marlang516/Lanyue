@@ -28,11 +28,13 @@ function tmpDir() {
 }
 
 test('本机历史满额后导入的条目仍留在库里，且计数如实', () => {
-  const dir = tmpDir();
+  // 本用例要先把库填到 MAX_ENTRIES（5000 条），只关心 seq 顺序与 _trim 的取舍，
+  // 不关心落盘：freshHistory() 拿到的是未 init 的新实例 ⇒ 走模块自带的内存库。
+  // 落盘跑的话，add() 逐条提交 + WAL fsync（本机 F: 盘 ~36ms/条）≈ 3 分钟，
+  // 且全程同步阻塞，--test-timeout 无法打断（详见 docs/process/TEST-STABILITY.md）。
   const history = freshHistory();
   const MAX = history.MAX_ENTRIES;
   try {
-    history.init(dir);
     // 填满上限（add 的 seq 由 AUTOINCREMENT 递增，最后一条 seq 最大）
     for (let i = 0; i < MAX; i++) {
       history.add({ id: `old_${i}`, source: 'q', title: `旧记录 ${i}`, status: 'done' });
@@ -56,7 +58,6 @@ test('本机历史满额后导入的条目仍留在库里，且计数如实', ()
     }
   } finally {
     try { history.destroy(); } catch (_e) { /* 忽略 */ }
-    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 

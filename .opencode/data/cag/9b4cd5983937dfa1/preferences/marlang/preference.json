@@ -1,0 +1,38 @@
+[
+  {
+    "id": "4122f07c413c49768d5d8e9b6f51858b",
+    "userID": "marlang",
+    "domainID": "marlang",
+    "type": "Language preference",
+    "content": "uses Chinese (native language) to interact, e.g. replying \"继续\" for continuation",
+    "remark": "new",
+    "namespace": "DevMate",
+    "createTime": "2026-11-07T06:52:31.754Z",
+    "updateTime": "2026-11-07T06:52:31.754Z",
+    "isDeleted": false
+  },
+  {
+    "id": "4deb2d68f6cc43b29337971b0db6a4fb",
+    "userID": "marlang",
+    "domainID": "marlang",
+    "type": "Explanation preference",
+    "content": "prefers AI to directly proceed with suggestions without waiting for user confirmation",
+    "remark": "new",
+    "namespace": "DevMate",
+    "createTime": "2026-11-07T17:16:17.474Z",
+    "updateTime": "2026-11-07T17:16:17.474Z",
+    "isDeleted": false
+  },
+  {
+    "id": "2d45e0f8bb584d828918e937bf86386c",
+    "userID": "marlang",
+    "domainID": "marlang",
+    "type": "Language preference",
+    "content": "prefers Chinese for interaction",
+    "remark": "new",
+    "namespace": "DevMate",
+    "createTime": "2026-11-08T03:25:36.739Z",
+    "updateTime": "2026-11-08T03:25:36.739Z",
+    "isDeleted": false
+  }
+]

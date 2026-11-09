@@ -50,6 +50,18 @@ jobs:
       - name: ESLint
         run: npm run lint
 
+      - name: Typecheck (JSDoc)
+        run: npm run typecheck
+
+      # 渲染层 strict 基线（M1.1 新增，2026-11-07；M1.2 起转为阻断门禁）。
+      #
+      # src/renderer/app 已完成 TS 化（.vue 全部 <script setup lang="ts">，入口 main.ts /
+      # player.ts），typecheck:renderer 全仓 0 error，tsconfig.renderer.json 的 strict 保持 true。
+      # 按 docs/process/M1-TS-STRICT-BASELINE.md 第五节：错误归零后已撤销临时豁免（宽松开关已删除），
+      # 渲染层类型错误自此阻断合并。
+      - name: Typecheck (Renderer)
+        run: npm run typecheck:renderer
+
       # 依赖漏洞：走 scripts/audit-gate.cjs —— 它读 audit-allowlist.json 的显式豁免，
       # **剩余的 high/critical 仍然阻断**。直接用 `npm audit --audit-level=high`
       # 会把「不可达且已排除出包的 jade 依赖链」也算成失败，于是发版被永久堵死

@@ -251,7 +251,7 @@ grep -nE '^(EXIT=|# (tests|pass|fail|cancelled|skipped)|not ok |npm error)' "$LO
 | **B2 必须重新锚定** | 命中任一：HEAD 变了（工程师提交了修复）；porcelain 新增/删除/改名任意一行；改动落在本次验收条件的观测点上 | 重跑 `git rev-parse HEAD` 与 `git status --porcelain`，台账换新基线并登记新清单；旧证据只作历史留存、**不得复用** |
 | **B3 整轮重验门槛** | 命中任一：差异落在 `src/`、`test/`、`build/`、`scripts/`、`package.json`；或 porcelain 总项数与台账登记数不一致（无论增减） | **整轮重验**（不是只重跑失败那条），并出执行单 `r<n+1>` |
 
-**B3 的例外（须书面声明）**：差异仅落在 `deliverables/`、`docs/` 等不影响判据的路径 → 只重验受影响条件，并在「备注」写「差异项 + 为何不影响判据」。
+**B3 的例外（须书面声明）**：差异仅落在本地交付物目录 deliverables（已被 `.gitignore` 排除）、`docs/` 等不影响判据的路径 → 只重验受影响条件，并在「备注」写「差异项 + 为何不影响判据」。
 
 > 为什么要求「逐行完全一致」：基线铁律要求把未提交清单登记进台账。清单一旦变化，「这一轮的改动集」就不再是台账那一份——
 > 那时仍引用旧 SHA 的验收单，等于用 A 的靶子给 B 打勾。
@@ -290,7 +290,7 @@ grep -nE '^(EXIT=|# (tests|pass|fail|cancelled|skipped)|not ok |npm error)' "$LO
 | 完整命令日志（原始数千行） | `verify-<YYYYMMDD-HHMMSS>.log` | 系统临时目录（**不入库**），只在执行单注明路径与抽取行 |
 
 `<需求ID>` 取 `DEMAND.md` §6.3 的 `<YYYYMMDD>-<序号>`；`<类型>` 枚举：`smoke-install` / `smoke-start` / `smoke-search` /
-`smoke-queue` / `smoke-download` / `smoke-play` / `smoke-update` / `ui` / `log`。只使用仓库既有目录（`docs/`、`deliverables/`），不新增顶层目录。
+`smoke-queue` / `smoke-download` / `smoke-play` / `smoke-update` / `ui` / `log`。只使用仓库既有目录（`docs/`）与本地交付物目录 deliverables（已被 `.gitignore` 排除），不新增顶层目录。
 
 **硬规则**：证据**不得只存在于对话里**。聊天里的截图、临时粘贴的输出、口头描述都不构成证据——它们无法被第三方在仓库里读到，
 也无法在下一轮复测时被检索（`COLLABORATION.md` I1/I2）。

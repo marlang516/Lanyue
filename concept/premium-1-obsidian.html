@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>高级感 · 一 · 曜金 Obsidian</title>
+<style>
+/* 判据：一屏一个重心；强调只靠字号/留白/字重，色彩只在 1% 面积出现；
+   发丝线只用于分组；间距三档 8/24/48；默认左对齐；数字等宽。 */
+:root{
+  --bg:#0c0d10; --s1:#121317; --s2:#17191e; --line:rgba(255,255,255,.065);
+  --ink:#f5f4f1; --ink2:#a0a2a8; --ink3:#5a5c63;
+  --au:#c9b07a; --au-ink:#141007;
+  --e:cubic-bezier(.22,1,.36,1);
+  font-size:14px;
+}
+*{margin:0;box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font-family:"Microsoft YaHei UI","PingFang SC",system-ui,sans-serif;overflow:hidden;display:flex;flex-direction:column}
+.app{flex:1;display:flex;min-height:0}
+
+/* ── 轨道导航：只有图标，重心让给内容 ── */
+.rail{width:72px;flex-shrink:0;border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:24px 0}
+.mark{font-size:17px;font-weight:700;letter-spacing:.08em;color:var(--ink)}
+.mark i{font-style:normal;color:var(--au)}
+.rail nav{margin-top:44px;display:flex;flex-direction:column;gap:8px;flex:1}
+.rail a{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;color:var(--ink3);cursor:pointer;transition:.2s var(--e)}
+.rail a svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.6}
+.rail a:hover{color:var(--ink2);background:var(--s1)}
+.rail a.on{color:var(--au);background:var(--s2)}
+
+/* ── 内容 ── */
+main{flex:1;min-width:0;overflow-y:auto;scrollbar-width:none}
+.pad{padding:48px 56px}
+.eyebrow{font-size:11px;letter-spacing:.42em;color:var(--ink3);text-transform:uppercase}
+.hero{display:grid;grid-template-columns:260px 1fr;gap:48px;align-items:center}
+.cover{width:260px;height:260px;border-radius:18px;position:relative;background:radial-gradient(120% 120% at 25% 15%,#2a2c33 0%,#15161a 55%,#0a0b0d 100%);box-shadow:inset 0 0 0 1px var(--line),0 30px 60px -30px rgba(0,0,0,.8)}
+.cover::after{content:"";position:absolute;inset:0;border-radius:18px;background:conic-gradient(from 200deg at 62% 38%,transparent 0 60%,rgba(201,176,122,.14) 72%,transparent 80%)}
+.cover b{position:absolute;left:22px;bottom:20px;font-size:12px;font-weight:400;color:var(--ink3);letter-spacing:.2em}
+.hero h1{font-size:52px;font-weight:700;line-height:1.12;letter-spacing:.01em}
+.hero .sub{margin-top:14px;color:var(--ink2);font-size:14.5px;line-height:1.8;font-weight:300;max-width:44ch}
+.hero .meta{margin-top:22px;display:flex;gap:32px;color:var(--ink3);font-size:12px}
+.hero .meta b{display:block;color:var(--ink);font-size:15px;font-weight:600;margin-bottom:3px;font-variant-numeric:tabular-nums}
+.cta{margin-top:34px;display:flex;gap:14px}
+.play{background:var(--au);color:var(--au-ink);border:0;border-radius:999px;padding:15px 34px;font-size:14px;font-weight:700;letter-spacing:.06em;cursor:pointer;display:flex;gap:10px;align-items:center;transition:.2s var(--e)}
+.play:hover{transform:translateY(-1px);box-shadow:0 12px 28px -10px rgba(201,176,122,.45)}
+.play svg{width:14px;height:14px;fill:currentColor}
+.ghost{background:transparent;color:var(--ink2);border:1px solid var(--line);border-radius:999px;padding:15px 26px;font-size:14px;cursor:pointer;transition:.2s}
+.ghost:hover{color:var(--ink);border-color:rgba(255,255,255,.18)}
+
+/* ── 曲目列表：无斑马纹、无图标堆砌，靠对齐与留白 ── */
+.tracks{margin-top:56px}
+.tracks .head{display:flex;align-items:baseline;border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:6px}
+.tracks .head h2{font-size:15px;font-weight:600;letter-spacing:.14em}
+.tracks .head span{margin-left:16px;font-size:11px;color:var(--ink3);letter-spacing:.1em}
+.tracks .head em{margin-left:auto;font-style:normal;font-size:11px;color:var(--ink3);letter-spacing:.2em}
+.tr{display:grid;grid-template-columns:52px 1fr 200px 96px 64px;gap:16px;align-items:center;padding:17px 12px 17px 0;border-bottom:1px solid var(--line);cursor:pointer;position:relative;transition:background .18s}
+.tr::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--au);transform:scaleY(0);transition:transform .22s var(--e)}
+.tr:hover{background:var(--s1)}
+.tr:hover::before,.tr.on::before{transform:scaleY(1)}
+.tr .no{color:var(--ink3);font-size:12px;padding-left:22px;font-variant-numeric:tabular-nums}
+.tr.on .no{color:var(--au)}
+.tr .t{font-size:14.5px;font-weight:600;letter-spacing:.01em}
+.tr.on .t{color:var(--au)}
+.tr .a{font-size:12.5px;color:var(--ink3);font-weight:300}
+.tr .al{font-size:12.5px;color:var(--ink2);font-weight:300;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tr .src{font-size:11px;color:var(--ink3);letter-spacing:.08em;text-align:right}
+.tr .du{font-size:12px;color:var(--ink3);text-align:right;font-variant-numeric:tabular-nums}
+
+/* ── 播放条：细、静、精确 ── */
+.bar{flex-shrink:0;height:76px;border-top:1px solid var(--line);background:var(--s1);display:grid;grid-template-columns:1fr 2fr 1fr;align-items:center;padding:0 28px;gap:24px}
+.np{display:flex;gap:14px;align-items:center;min-width:0;cursor:pointer}
+.np .th{width:42px;height:42px;border-radius:9px;background:radial-gradient(120% 120% at 30% 20%,#2a2c33,#0c0d10);box-shadow:inset 0 0 0 1px var(--line);flex-shrink:0}
+.np .t{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.np .a{font-size:11.5px;color:var(--ink3);font-weight:300}
+.ctr{display:flex;flex-direction:column;gap:10px;align-items:center}
+.ctl{display:flex;gap:26px;align-items:center}
+.ctl svg{width:16px;height:16px;stroke:var(--ink2);fill:none;stroke-width:1.6;cursor:pointer;transition:.15s}
+.ctl svg:hover{stroke:var(--ink)}
+.ctl .pp{width:34px;height:34px;border-radius:50%;border:1px solid rgba(201,176,122,.5);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:.2s var(--e)}
+.ctl .pp:hover{background:rgba(201,176,122,.1)}
+.ctl .pp svg{stroke:none;fill:var(--au);width:12px;height:12px}
+.scrub{display:flex;align-items:center;gap:12px;width:100%;max-width:520px;font-size:10.5px;color:var(--ink3);font-variant-numeric:tabular-nums}
+.scrub .rail2{flex:1;height:2px;background:rgba(255,255,255,.1);position:relative;cursor:pointer}
+.scrub .rail2 i{position:absolute;left:0;top:0;bottom:0;width:34%;background:var(--au)}
+.scrub .rail2 u{position:absolute;left:34%;top:50%;width:9px;height:9px;margin:-4.5px 0 0 -4.5px;border-radius:50%;background:var(--ink);opacity:0;transition:opacity .15s}
+.scrub .rail2:hover u{opacity:1}
+.vol{display:flex;justify-content:flex-end;align-items:center;gap:12px}
+.vol svg{width:15px;height:15px;stroke:var(--ink3);fill:none;stroke-width:1.6}
+.vol .rail2{width:76px;height:2px;background:rgba(255,255,255,.1);position:relative}
+.vol .rail2 i{position:absolute;inset:0 30% 0 0;background:var(--ink2)}
+
+/* 入场：staggered，一次只揭示一层 */
+@keyframes up{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.rise{animation:up .7s var(--e) both}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="rail">
+    <div class="mark">揽乐<i>·</i></div>
+    <nav>
+      <a class="on"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg></a>
+      <a><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg></a>
+      <a><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg></a>
+      <a><svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M6 9l6 6 6-6"/><path d="M4 21h16"/></svg></a>
+      <a><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></a>
+    </nav>
+    <a style="color:var(--ink3)"><svg viewBox="0 0 24 24" style="width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.6"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg></a>
+  </div>
+
+  <main>
+    <div class="pad">
+      <div class="eyebrow rise" style="animation-delay:.05s">SELECTION · NOV 04</div>
+      <div class="hero" style="margin-top:26px">
+        <div class="cover rise" style="animation-delay:.15s"><b>FLAC 24BIT / 96KHZ</b></div>
+        <div>
+          <h1 class="rise" style="animation-delay:.22s">深夜，留给<br>慢下来的爵士</h1>
+          <p class="sub rise" style="animation-delay:.3s">从你 328 次红心里聚合的 24 首——Bill Evans 占据三席。跨八个音源自动比价，取最高码率播放。</p>
+          <div class="meta rise" style="animation-delay:.38s">
+            <div><b>24</b>曲目</div>
+            <div><b>1:47:12</b>总时长</div>
+            <div><b>8/8</b>音源在线</div>
+          </div>
+          <div class="cta rise" style="animation-delay:.46s">
+            <button class="play"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>播放歌单</button>
+            <button class="ghost">随机试听</button>
+          </div>
+        </div>
+      </div>
+
+      <section class="tracks rise" style="animation-delay:.56s">
+        <div class="head"><h2>曲目</h2><span>24 首 · 跨源比价</span><em>QUALITY / SOURCE</em></div>
+        <div class="tr on"><span class="no">01</span><div><div class="t">Blue in Green</div><div class="a">Bill Evans</div></div><span class="al">Waltz for Debby</span><span class="src">网易 · FLAC</span><span class="du">5:37</span></div>
+        <div class="tr"><span class="no">02</span><div><div class="t">夜航船</div><div class="a">陈粒</div></div><span class="al">小梦大半</span><span class="src">QQ · 320K</span><span class="du">4:12</span></div>
+        <div class="tr"><span class="no">03</span><div><div class="t">Merry Christmas Mr. Lawrence</div><div class="a">坂本龍一</div></div><span class="al">Coda</span><span class="src">酷狗 · FLAC</span><span class="du">6:02</span></div>
+        <div class="tr"><span class="no">04</span><div><div class="t">山丘</div><div class="a">李宗盛</div></div><span class="al">山丘</span><span class="src">B站 · 320K</span><span class="du">4:35</span></div>
+        <div class="tr"><span class="no">05</span><div><div class="t">Feeling Good</div><div class="a">Nina Simone</div></div><span class="al">I Put a Spell on You</span><span class="src">网易 · FLAC</span><span class="du">3:38</span></div>
+        <div class="tr"><span class="no">06</span><div><div class="t">小镇姑娘</div><div class="a">陶喆</div></div><span class="al">I'm OK</span><span class="src">咪咕 · 320K</span><span class="du">4:16</span></div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<div class="bar">
+  <div class="np"><div class="th"></div><div style="min-width:0"><div class="t" id="npT">Blue in Green</div><div class="a" id="npA">Bill Evans</div></div></div>
+  <div class="ctr">
+    <div class="ctl">
+      <svg viewBox="0 0 24 24"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 014-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 01-4 4H3"/></svg>
+      <svg viewBox="0 0 24 24"><path d="M11 19L2 12l9-7v14zM22 19l-9-7 9-7v14z"/></svg>
+      <div class="pp" id="pp"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
+      <svg viewBox="0 0 24 24"><path d="M13 19l9-7-9-7v14zM2 19l9-7-9-7v14z"/></svg>
+      <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+    </div>
+    <div class="scrub"><span id="cur">1:52</span><div class="rail2"><i id="fill"></i><u></u></div><span>5:37</span></div>
+  </div>
+  <div class="vol"><svg viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 010 7"/></svg><div class="rail2"><i></i></div></div>
+</div>
+
+<script>
+document.querySelectorAll('.tr').forEach(r=>r.addEventListener('click',()=>{
+  document.querySelectorAll('.tr').forEach(x=>x.classList.remove('on'));
+  r.classList.add('on');
+  document.getElementById('npT').textContent=r.querySelector('.t').textContent;
+  document.getElementById('npA').textContent=r.querySelector('.a').textContent;
+}));
+const pp=document.getElementById('pp');let playing=true;
+pp.addEventListener('click',()=>{playing=!playing;pp.innerHTML=playing?'<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>':'<svg viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>'});
+let w=34;setInterval(()=>{if(playing){w=(w+0.12)%100;document.getElementById('fill').style.width=w+'%'}},200);
+</script>
+</body>
+</html>

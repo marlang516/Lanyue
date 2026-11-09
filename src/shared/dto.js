@@ -72,7 +72,7 @@ function isSongLike(song) {
  * 只补空值、不改已有值 —— 保证「归一化两次 === 归一化一次」。
  * 不丢弃未知字段（渲染层可能有自己的扩展），只在其缺席时补默认。
  *
- * @param {Song} song
+ * @param {Partial<Song>|null|undefined} song 任意来源的歌曲对象（内部做防御式归一化）
  * @returns {Song} 新对象（不修改入参）
  */
 function normalizeSong(song) {

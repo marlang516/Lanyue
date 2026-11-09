@@ -17,6 +17,7 @@ const UNBOUND = '';
 /**
  * 允许注册的 accelerator 白名单。
  * 不放 Ctrl+字母（与浏览器/系统的既有语义撞车）、不放单键、不放 F1-F12（系统保留多）。
+ * @type {string[]}
  */
 const ALLOWED_ACCELERATORS = [
   'MediaPlayPause',
@@ -34,10 +35,16 @@ const ALLOWED_ACCELERATORS = [
 ];
 
 /**
+ * 一条可绑定动作的声明；channel 为 null 表示由主进程自己处理，不走 IPC。
+ * @typedef {{ id: string, prefKey: string, channel: string|null, default: string }} ShortcutTarget
+ */
+
+/**
  * 可绑定的动作清单。**顺序即优先级**：两个动作撞上同一枚键时，排在前面的拿到键，
  * 后面的不注册 —— Electron 对同一 accelerator 重复注册会让后一个回调静默失效。
  *
  * channel=null 表示这是主进程自己的动作（窗口显隐），不借道 IPC ⇒ 不新增通道。
+ * @type {ShortcutTarget[]}
  */
 const SHORTCUT_TARGETS = [
   { id: 'playPause', prefKey: 'shortcutPlayPause', channel: 'tray-toggle-play', default: 'MediaPlayPause' },
@@ -49,6 +56,9 @@ const SHORTCUT_TARGETS = [
 /**
  * 归一一枚键：白名单内原样放行，主动解绑（空串）保留，其余（垃圾值/大小写不符/带空格）
  * 一律回落到该动作的默认键。宁可回到出厂绑定，也不替用户抢下别的应用的键。
+ * @param {*} raw 用户配置的原始值
+ * @param {*} fallback 该动作的默认键
+ * @returns {string} 归一后的 accelerator（UNBOUND 表示不注册）
  */
 function normalizeAccelerator(raw, fallback) {
   if (raw === UNBOUND) return UNBOUND;
@@ -56,8 +66,12 @@ function normalizeAccelerator(raw, fallback) {
   return ALLOWED_ACCELERATORS.includes(fallback) ? fallback : UNBOUND;
 }
 
-/** 出厂 prefs 表（prefKey → 默认 accelerator）。每次给新对象：调用方会就地改它。 */
+/**
+ * 出厂 prefs 表（prefKey → 默认 accelerator）。每次给新对象：调用方会就地改它。
+ * @returns {Record<string, string>} 全新的 prefs 片段
+ */
 function defaultShortcutPrefs() {
+  /** @type {Record<string, string>} */
   const out = {};
   for (const target of SHORTCUT_TARGETS) out[target.prefKey] = target.default;
   return out;

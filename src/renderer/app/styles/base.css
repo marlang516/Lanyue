@@ -1,0 +1,253 @@
+/* ══════════════════════════════════════════════════════════════
+   揽乐 · 新渲染层基础样式（P0）
+   职责：只放「全局原语」——重置补丁、文本、滚动、焦点、动效、
+         以及跨视图复用的最小类（卡片/按钮/输入/标签/骨架/空态）。
+   组件私有样式一律留在各自的 <style scoped> 里，不在这里堆。
+   ══════════════════════════════════════════════════════════════ */
+
+html { color-scheme: light; }
+[data-theme="dark"] { color-scheme: dark; }
+
+body {
+  font-family: var(--font-ui);
+  font-size: var(--fs-md);
+  letter-spacing: .01em;
+  text-rendering: optimizeLegibility;
+}
+
+#lanyue-app { isolation: isolate; }
+
+/* ── 重置补丁 ─────────────────────────────────────────────── */
+img, svg, video, canvas { display: block; max-width: 100%; }
+input, select, textarea, button { font: inherit; color: inherit; }
+input, select, textarea {
+  background: transparent;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  padding: 10px var(--sp-4);
+  outline: none;
+  transition: border-color var(--dur-1) var(--ease),
+              box-shadow var(--dur-1) var(--ease);
+}
+input::placeholder, textarea::placeholder { color: var(--ink-3); }
+input:focus, select:focus, textarea:focus {
+  border-color: var(--accent-line);
+  box-shadow: var(--focus-ring);
+}
+select { cursor: pointer; }
+a { color: var(--au-1); text-decoration: none; }
+a:hover { text-decoration: underline; }
+ul, ol { list-style: none; padding: 0; margin: 0; }
+h1, h2, h3, h4, h5, h6, p { margin: 0; }
+
+/* 窗口拖拽：只在明确的拖拽区生效，交互元素默认不拖 */
+.ly-drag { -webkit-app-region: drag; }
+.ly-no-drag, button, input, select, textarea, a { -webkit-app-region: no-drag; }
+
+/* ── 滚动条 ──────────────────────────────────────────────── */
+* { scrollbar-width: thin; scrollbar-color: var(--hairline) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--hairline);
+  border: 3px solid transparent;
+  border-radius: var(--r-full);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--ink-3); background-clip: padding-box; }
+
+/* ── 文本工具 ────────────────────────────────────────────── */
+.ly-ellipsis { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ly-clamp-2 {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.ly-num { font-variant-numeric: tabular-nums; }
+.ly-mono { font-family: var(--font-mono); }
+.ly-muted { color: var(--ink-2); }
+.ly-dim { color: var(--ink-3); }
+.ly-sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+/* ── 卡片 ────────────────────────────────────────────────── */
+.ly-card {
+  background: var(--glass);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-card);
+}
+.ly-card-flat {
+  background: var(--glass-3);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+}
+
+/* ── 按钮 ────────────────────────────────────────────────── */
+.ly-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2);
+  height: 34px; padding: 0 var(--sp-4);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--glass-3);
+  color: var(--ink-2);
+  font-size: var(--fs-sm); font-weight: var(--fw-med);
+  cursor: pointer; white-space: nowrap;
+  transition: color var(--dur-1) var(--ease),
+              background var(--dur-1) var(--ease),
+              border-color var(--dur-1) var(--ease),
+              transform var(--dur-0) var(--ease);
+}
+.ly-btn:hover { color: var(--ink); background: var(--glass-2); border-color: var(--stroke); }
+.ly-btn:active { transform: scale(.97); }
+.ly-btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+
+.ly-btn-primary {
+  color: var(--on-accent);
+  background: var(--au-grad);
+  border-color: transparent;
+  box-shadow: var(--glow-accent);
+}
+.ly-btn-primary:hover { color: #fff; background: var(--au-grad); filter: brightness(1.06); }
+
+.ly-btn-ghost { background: transparent; border-color: transparent; }
+.ly-btn-ghost:hover { background: var(--glass-3); border-color: var(--hairline); }
+
+.ly-btn-danger { color: var(--danger); }
+.ly-btn-danger:hover { color: #fff; background: var(--danger); border-color: var(--danger); }
+
+.ly-btn-sm { height: 28px; padding: 0 var(--sp-3); font-size: var(--fs-xs); border-radius: var(--r-sm); }
+
+/* 图标按钮：方形、无底色，hover 才浮出表面 */
+.ly-icon-btn {
+  width: 34px; height: 34px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid transparent; border-radius: var(--r-sm);
+  background: transparent; color: var(--ink-2);
+  cursor: pointer;
+  transition: color var(--dur-1) var(--ease),
+              background var(--dur-1) var(--ease),
+              border-color var(--dur-1) var(--ease),
+              transform var(--dur-0) var(--ease);
+}
+.ly-icon-btn:hover { color: var(--ink); background: var(--glass-3); border-color: var(--hairline); }
+.ly-icon-btn:active { transform: scale(.94); }
+.ly-icon-btn[aria-pressed="true"] { color: var(--au-1); background: var(--accent-soft); }
+.ly-icon-btn svg { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ── 输入 / 搜索 ─────────────────────────────────────────── */
+.ly-input {
+  width: 100%; height: 36px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--glass-3);
+  padding: 0 var(--sp-4);
+  font-size: var(--fs-sm);
+  color: var(--ink);
+}
+.ly-input:hover { border-color: var(--stroke); }
+.ly-input:focus { border-color: var(--accent-line); box-shadow: var(--focus-ring); }
+
+.ly-search {
+  display: flex; align-items: center; gap: var(--sp-3);
+  height: 40px; padding: 0 var(--sp-4);
+  border: 1px solid var(--stroke);
+  border-radius: var(--r-lg);
+  background: var(--glass);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  color: var(--ink-3);
+  transition: border-color var(--dur-1) var(--ease), box-shadow var(--dur-1) var(--ease);
+}
+.ly-search:focus-within { border-color: var(--accent-line); box-shadow: var(--focus-ring); }
+.ly-search input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: transparent; font-size: var(--fs-sm); color: var(--ink); }
+.ly-search input:focus { box-shadow: none; }
+.ly-search svg { width: 16px; height: 16px; flex-shrink: 0; stroke: currentColor; fill: none; stroke-width: 2; }
+
+/* ── 标签 / 徽标 ─────────────────────────────────────────── */
+.ly-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 20px; padding: 0 7px;
+  border-radius: var(--r-xs);
+  background: var(--glass-3);
+  border: 1px solid var(--hairline);
+  font-size: var(--fs-2xs); font-weight: var(--fw-bold);
+  letter-spacing: .05em; color: var(--ink-2);
+  white-space: nowrap;
+}
+.ly-tag-accent { color: var(--au-2); border-color: var(--accent-line); background: var(--accent-soft); }
+.ly-tag-ok { color: var(--ok); border-color: rgba(23, 178, 106, .3); background: rgba(23, 178, 106, .1); }
+.ly-tag-warn { color: var(--warn); border-color: rgba(255, 148, 51, .3); background: rgba(255, 148, 51, .1); }
+.ly-tag-danger { color: var(--danger); border-color: rgba(229, 72, 77, .3); background: rgba(229, 72, 77, .1); }
+
+/* 分段控件 */
+.ly-seg {
+  display: inline-flex; gap: 2px; padding: 3px;
+  border-radius: var(--r-md);
+  background: var(--glass-3);
+  border: 1px solid var(--hairline);
+}
+.ly-seg button {
+  height: 26px; padding: 0 var(--sp-3);
+  border: 0; border-radius: var(--r-sm);
+  background: transparent; color: var(--ink-3);
+  font-size: var(--fs-xs); font-weight: var(--fw-med);
+  cursor: pointer;
+  transition: color var(--dur-1) var(--ease), background var(--dur-1) var(--ease);
+}
+.ly-seg button:hover { color: var(--ink-2); }
+.ly-seg button.on { color: var(--ink); background: var(--glass); box-shadow: 0 1px 4px rgba(20, 24, 36, .1); }
+
+/* ── 骨架 / 空态 ─────────────────────────────────────────── */
+.ly-skeleton {
+  border-radius: var(--r-md);
+  background: linear-gradient(90deg, var(--glass-3) 25%, var(--glass-2) 50%, var(--glass-3) 75%);
+  background-size: 200% 100%;
+  animation: ly-shimmer 1.4s linear infinite;
+}
+@keyframes ly-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+.ly-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: var(--sp-3); padding: var(--sp-12) var(--sp-6);
+  color: var(--ink-3); text-align: center;
+}
+.ly-empty svg { width: 34px; height: 34px; stroke: var(--ink-3); fill: none; stroke-width: 1.4; opacity: .7; }
+.ly-empty b { font-size: var(--fs-md); color: var(--ink-2); font-weight: var(--fw-med); }
+.ly-empty p { font-size: var(--fs-sm); }
+
+/* ── 列表（歌曲表格的基础行） ─────────────────────────────── */
+.ly-row {
+  display: flex; align-items: center; gap: var(--sp-3);
+  min-height: 48px; padding: 8px var(--sp-4);
+  border-radius: var(--r-md);
+  cursor: default;
+  transition: background var(--dur-1) var(--ease), transform var(--dur-1) var(--ease);
+}
+.ly-row:hover { background: var(--glass-3); }
+.ly-row.is-active {
+  background: linear-gradient(95deg, rgba(124, 92, 255, .13), rgba(0, 198, 255, .1));
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+.ly-row-idx { width: 26px; flex-shrink: 0; text-align: right; font-size: var(--fs-xs); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.ly-row-main { flex: 1; min-width: 0; }
+.ly-row-title { font-size: var(--fs-sm); font-weight: var(--fw-med); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ly-row-sub { font-size: var(--fs-xs); color: var(--ink-3); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── 动效原语 ────────────────────────────────────────────── */
+.ly-fade-enter-active, .ly-fade-leave-active { transition: opacity var(--dur-2) var(--ease), transform var(--dur-2) var(--ease); }
+.ly-fade-enter-from, .ly-fade-leave-to { opacity: 0; transform: translateY(6px); }
+
+.ly-pop-enter-active, .ly-pop-leave-active { transition: opacity var(--dur-1) var(--ease), transform var(--dur-2) var(--ease-emph); }
+.ly-pop-enter-from, .ly-pop-leave-to { opacity: 0; transform: translateY(-6px) scale(.98); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

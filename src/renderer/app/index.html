@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: http: https:; media-src 'self' data: blob: http: https: lanyue-stream:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' http: https: ws:; font-src 'self' data:;">
+<!-- 新渲染层入口（Vue3 · T3 极光玻璃）。CSP 与旧 index.html 同口径，
+     media-src 必须含 lanyue-stream:（见 test/csp-stream-scheme.test.js 的教训）。
+     script-src 已去掉 'unsafe-inline'：本入口全部走构建产物 JS，无内联脚本。 -->
+<title>揽乐</title>
+</head>
+<body>
+<div id="lanyue-app"></div>
+<script type="module" src="./main.ts"></script>
+</body>
+</html>

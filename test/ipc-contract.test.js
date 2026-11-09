@@ -240,6 +240,203 @@ test('normalizeArgs: 单数组形态不误伤 arr 型首参', () => {
     { ok: true, args: [[{ id: 1 }]] });
 });
 
+// ── 4b. 字段级 shape（save-download-template.template 样板） ──
+// template 会被整体持久化并 merge 进既有记录，因此比 obj 多一道字段白名单。
+// 其余 obj 通道保持原语义（只判「是不是对象」），这条用例同时钉住两端。
+
+test('normalizeArgs: save-download-template 的 template 走字段级 shape', () => {
+  // 合法字段原样通过（不复制、不改写）
+  const good = { id: 'tpl_1', name: '按歌手', path: '{artist}/{album}' };
+  const ok = normalizeArgs('save-download-template', [good]);
+  assert.strictEqual(ok.ok, true);
+  assert.deepStrictEqual(ok.args[0], good);
+
+  // 白名单外字段：拒绝，且错误里带通道名与字段名（不然用户/日志无从定位）
+  const unknown = normalizeArgs('save-download-template', [{ name: 'x', path: 'y', evil: 1 }]);
+  assert.strictEqual(unknown.ok, false);
+  assert.match(unknown.error, /save-download-template/);
+  assert.match(unknown.error, /evil/);
+
+  // 字段类型不符：同样拒绝，不静默 String 化后落库
+  const badType = normalizeArgs('save-download-template', [{ name: 42, path: 'y' }]);
+  assert.strictEqual(badType.ok, false);
+  assert.match(badType.error, /name/);
+
+  // 对照组：其余 obj 通道仍是「只判对象」，多出来的键不拒绝
+  assert.deepStrictEqual(normalizeArgs('add-to-queue', [{ id: 1, extra: true }]),
+    { ok: true, args: [{ id: 1, extra: true }] });
+});
+
+// ── 4c. 字段级 shape（批次1新增：mcp-audit / get-download-url-smart / check-local-exists） ──
+// 合法字段原样通过；白名单外字段与类型不符均拒绝，错误带通道名与字段名。
+// 其余 obj 通道保持原语义（只判「是不是对象」），下方对照组同时钉住。
+
+test('normalizeArgs: mcp-audit 的 opts 走字段级 shape', () => {
+  // 合法字段原样通过（不复制、不改写）
+  const good = { limit: 200 };
+  const ok = normalizeArgs('mcp-audit', [good]);
+  assert.strictEqual(ok.ok, true);
+  assert.deepStrictEqual(ok.args[0], good);
+
+  // 白名单外字段：拒绝，且错误里带通道名与字段名
+  const unknown = normalizeArgs('mcp-audit', [{ limit: 100, evil: 1 }]);
+  assert.strictEqual(unknown.ok, false);
+  assert.match(unknown.error, /mcp-audit/);
+  assert.match(unknown.error, /evil/);
+
+  // 字段类型不符：拒绝
+  const badType = normalizeArgs('mcp-audit', [{ limit: 'abc' }]);
+  assert.strictEqual(badType.ok, false);
+  assert.match(badType.error, /limit/);
+});
+
+test('normalizeArgs: get-download-url-smart 的 options 走 t.obj()（只判对象）', () => {
+  // 合法对象原样通过（不复制、不改写）
+  const good = { allowToggleSource: true, isRefresh: false };
+  const ok = normalizeArgs('get-download-url-smart', [{ id: 1 }, 'lossless', good]);
+  assert.strictEqual(ok.ok, true);
+  assert.deepStrictEqual(ok.args[2], good);
+
+  // 白名单外字段不拒绝（t.obj() 只判是不是对象）
+  const unknown = normalizeArgs('get-download-url-smart', [{ id: 1 }, 'lossless', { allowToggleSource: true, evil: 1 }]);
+  assert.strictEqual(unknown.ok, true);
+  assert.deepStrictEqual(unknown.args[2], { allowToggleSource: true, evil: 1 });
+
+  // 字段类型不符不拒绝（t.obj() 不做字段级校验）
+  const badType = normalizeArgs('get-download-url-smart', [{ id: 1 }, 'lossless', { allowToggleSource: 'yes' }]);
+  assert.strictEqual(badType.ok, true);
+  assert.deepStrictEqual(badType.args[2], { allowToggleSource: 'yes' });
+
+  // 非对象应被拒绝
+  const notObj = normalizeArgs('get-download-url-smart', [{ id: 1 }, 'lossless', 'not-object']);
+  assert.strictEqual(notObj.ok, false);
+});
+
+test('normalizeArgs: check-local-exists 的 payload 走字段级 shape', () => {
+  // 合法字段原样通过（不复制、不改写）
+  const good = { saveDir: 'C:/music', items: [1, 2, 3] };
+  const ok = normalizeArgs('check-local-exists', [good]);
+  assert.strictEqual(ok.ok, true);
+  assert.deepStrictEqual(ok.args[0], good);
+
+  // 白名单外字段：拒绝，且错误里带通道名与字段名
+  const unknown = normalizeArgs('check-local-exists', [{ saveDir: 'C:/music', items: [], evil: 1 }]);
+  assert.strictEqual(unknown.ok, false);
+  assert.match(unknown.error, /check-local-exists/);
+  assert.match(unknown.error, /evil/);
+
+  // 字段类型不符：拒绝
+  const badType = normalizeArgs('check-local-exists', [{ saveDir: 123, items: [] }]);
+  assert.strictEqual(badType.ok, false);
+  assert.match(badType.error, /saveDir/);
+});
+
+// 对照组：其余 obj 通道仍是「只判对象」，多出来的键不拒绝
+// （convert-audio 已在批次 2 升为 shape，不再在此对照组）
+test('normalizeArgs: 其余 obj 通道仍只判对象（批次1对照）', () => {
+  assert.deepStrictEqual(normalizeArgs('add-playlist-to-queue', [{ payload: { a: 1 }, extra: true }]),
+    { ok: true, args: [{ payload: { a: 1 }, extra: true }] });
+  assert.deepStrictEqual(normalizeArgs('export-playlist', [{ params: { x: 1 }, extra: true }]),
+    { ok: true, args: [{ params: { x: 1 }, extra: true }] });
+});
+
+// ── 4d. 字段级 shape（批次2新增：convert-audio / save-user-playlist / aggregate-cross-source） ──
+// 合法字段原样通过；白名单外字段与类型不符均拒绝，错误带通道名与字段名。
+// required 缺失拒绝（save-user-playlist 的 name）。其余 obj 通道保持原语义（只判「是不是对象」）。
+
+test('normalizeArgs: convert-audio 的 params 走 t.obj()（只判对象）', () => {
+  // 合法对象原样通过（不复制、不改写）
+  const good = { inputPath: 'C:/music/a.wav', outputFormat: 'mp3', bitrate: '192k', outputDir: 'C:/out', revealFolder: true, timeoutMs: 300000, start: 0, end: 120 };
+  const ok = normalizeArgs('convert-audio', [good]);
+  assert.strictEqual(ok.ok, true);
+  assert.deepStrictEqual(ok.args[0], good);
+
+  // 白名单外字段不拒绝（t.obj() 只判是不是对象）
+  const unknown = normalizeArgs('convert-audio', [{ inputPath: 'C:/music/a.wav', evil: 1 }]);
+  assert.strictEqual(unknown.ok, true);
+  assert.deepStrictEqual(unknown.args[0], { inputPath: 'C:/music/a.wav', evil: 1 });
+
+  // 字段类型不符不拒绝（t.obj() 不做字段级校验）
+  const badType = normalizeArgs('convert-audio', [{ inputPath: 'C:/music/a.wav', bitrate: 123 }]);
+  assert.strictEqual(badType.ok, true);
+  assert.deepStrictEqual(badType.args[0], { inputPath: 'C:/music/a.wav', bitrate: 123 });
+
+  // required 缺失不拒绝（t.obj() 不做 required 校验）
+  const missing = normalizeArgs('convert-audio', [{ outputFormat: 'mp3' }]);
+  assert.strictEqual(missing.ok, true);
+  assert.deepStrictEqual(missing.args[0], { outputFormat: 'mp3' });
+
+  // 非对象应被拒绝
+  const notObj = normalizeArgs('convert-audio', ['not-object']);
+  assert.strictEqual(notObj.ok, false);
+});
+
+test('normalizeArgs: save-user-playlist 的 playlist 走 t.obj()（只判对象）', () => {
+  // 合法对象原样通过（不复制、不改写）
+  const good = { id: 'pl_1', name: '我的歌单', desc: '心情放松', cover: 'http://x/cover.png', songs: [{ id: 1 }] };
+  const ok = normalizeArgs('save-user-playlist', [good]);
+  assert.strictEqual(ok.ok, true);
+  assert.deepStrictEqual(ok.args[0], good);
+
+  // 白名单外字段不拒绝（t.obj() 只判是不是对象）
+  const unknown = normalizeArgs('save-user-playlist', [{ name: 'x', evil: 1 }]);
+  assert.strictEqual(unknown.ok, true);
+  assert.deepStrictEqual(unknown.args[0], { name: 'x', evil: 1 });
+
+  // 字段类型不符不拒绝（t.obj() 不做字段级校验）
+  const badType = normalizeArgs('save-user-playlist', [{ name: 'x', songs: 'not-array' }]);
+  assert.strictEqual(badType.ok, true);
+  assert.deepStrictEqual(badType.args[0], { name: 'x', songs: 'not-array' });
+
+  // required 缺失不拒绝（t.obj() 不做 required 校验）
+  const missing = normalizeArgs('save-user-playlist', [{ id: 'pl_1' }]);
+  assert.strictEqual(missing.ok, true);
+  assert.deepStrictEqual(missing.args[0], { id: 'pl_1' });
+
+  // 非对象应被拒绝
+  const notObj = normalizeArgs('save-user-playlist', ['not-object']);
+  assert.strictEqual(notObj.ok, false);
+});
+
+test('normalizeArgs: aggregate-cross-source 的 opts 走 t.obj()（只判对象）', () => {
+  // 合法对象原样通过（不复制、不改写）
+  const good = { sources: ['qq', 'wy'], playlists: ['p1', 'p2'], markDuplicates: true, includeLocal: false, orderMerged: true };
+  const ok = normalizeArgs('aggregate-cross-source', [good]);
+  assert.strictEqual(ok.ok, true);
+  assert.deepStrictEqual(ok.args[0], good);
+
+  // 白名单外字段不拒绝（t.obj() 只判是不是对象）
+  const unknown = normalizeArgs('aggregate-cross-source', [{ sources: ['qq'], evil: 1 }]);
+  assert.strictEqual(unknown.ok, true);
+  assert.deepStrictEqual(unknown.args[0], { sources: ['qq'], evil: 1 });
+
+  // 字段类型不符不拒绝（t.obj() 不做字段级校验）
+  const badType = normalizeArgs('aggregate-cross-source', [{ sources: 'qq', playlists: [] }]);
+  assert.strictEqual(badType.ok, true);
+  assert.deepStrictEqual(badType.args[0], { sources: 'qq', playlists: [] });
+
+  // required 缺失不拒绝（t.obj() 不做 required 校验）
+  const empty = normalizeArgs('aggregate-cross-source', [{}]);
+  assert.strictEqual(empty.ok, true);
+  assert.deepStrictEqual(empty.args[0], {});
+
+  // 非对象应被拒绝
+  const notObj = normalizeArgs('aggregate-cross-source', ['not-object']);
+  assert.strictEqual(notObj.ok, false);
+});
+
+// 对照组：其余 obj 通道仍只判对象，多出来的键不拒绝
+test('normalizeArgs: 其余 obj 通道仍只判对象（批次2对照）', () => {
+  assert.deepStrictEqual(normalizeArgs('add-playlist-to-queue', [{ payload: { a: 1 }, extra: true }]),
+    { ok: true, args: [{ payload: { a: 1 }, extra: true }] });
+  assert.deepStrictEqual(normalizeArgs('export-playlist', [{ params: { x: 1 }, extra: true }]),
+    { ok: true, args: [{ params: { x: 1 }, extra: true }] });
+  assert.deepStrictEqual(normalizeArgs('query-history', [{ opts: { a: 1 }, extra: true }]),
+    { ok: true, args: [{ opts: { a: 1 }, extra: true }] });
+  assert.deepStrictEqual(normalizeArgs('ai-provider-save', [{ patch: { a: 1 }, extra: true }]),
+    { ok: true, args: [{ patch: { a: 1 }, extra: true }] });
+});
+
 // ── 5. argv 注入链路（sandbox preload 不能 require 应用文件）──
 
 test('preload 源码禁止 require 应用相对路径（只允许 electron 内置）', () => {

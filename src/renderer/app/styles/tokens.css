@@ -1,0 +1,201 @@
+/* ══════════════════════════════════════════════════════════
+   揽乐 · T3 极光玻璃 设计令牌（tokens.css）
+   ──────────────────────────────────────────────────────────
+   唯一色彩事实来源。组件层禁止写死色值，只用 var(--*)。
+   浅色为默认主题；[data-theme="dark"] 派生深色极光版。
+   刻度：间距 4px 基准 / 圆角阶梯 / 时长两档 + 一条缓出曲线。
+   ══════════════════════════════════════════════════════════ */
+:root {
+  /* 极光渐变四色（品牌识别核心，禁改单值） */
+  --au-1: #7c5cff;   /* 紫罗兰 */
+  --au-2: #00c6ff;   /* 电光蓝 */
+  --au-3: #ff5fb0;   /* 品红 */
+  --au-4: #37e6a8;   /* 薄荷 */
+  --au-grad: linear-gradient(135deg, var(--au-1), var(--au-2));
+  --au-grad-3: conic-gradient(from 200deg, var(--au-1), var(--au-2), var(--au-4), var(--au-3), var(--au-1));
+
+  /* 表面（浅色默认） */
+  --bg: #f2f4f9;
+  --glass: rgba(255, 255, 255, .55);
+  --glass-2: rgba(255, 255, 255, .72);
+  --glass-3: rgba(255, 255, 255, .85);
+  --stroke: rgba(255, 255, 255, .8);
+  --hairline: rgba(20, 24, 36, .08);
+
+  /* 文字 */
+  --ink: #141824;
+  --ink-2: #5b6478;
+  --ink-3: #9aa3b5;
+
+  /* 语义色 */
+  --ok: #17b26a;
+  --warn: #ff9433;
+  --danger: #e5484d;
+  --on-accent: #ffffff;
+
+  /* 光斑（body 背景四角极光） */
+  --blob-1: rgba(124, 92, 255, .22);
+  --blob-2: rgba(0, 198, 255, .20);
+  --blob-3: rgba(255, 95, 176, .16);
+  --blob-4: rgba(55, 230, 168, .16);
+
+  /* 阴影与发光 */
+  --shadow-card: 0 8px 32px rgba(20, 24, 36, .08);
+  --shadow-pop: 0 16px 44px rgba(20, 24, 36, .14);
+  --glow-accent: 0 8px 20px rgba(94, 110, 255, .45);
+  --focus-ring: 0 0 0 3px rgba(124, 92, 255, .35);
+
+  /* 间距（4px 基准） */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-10: 40px;
+
+  /* 圆角 */
+  --r-sm: 10px; --r-md: 16px; --r-lg: 20px; --r-xl: 24px; --r-full: 999px;
+
+  /* 字号阶梯 */
+  --fs-xs: 10.5px; --fs-sm: 12px; --fs-md: 13.5px;
+  --fs-lg: 16px; --fs-xl: 20px; --fs-2xl: 26px; --fs-hero: 38px;
+
+  /* 字重 */
+  --fw-reg: 400; --fw-med: 600; --fw-bold: 700; --fw-black: 800;
+
+  /* 动效：两档时长 + 一条主曲线（全站统一，禁止各写各的） */
+  --dur-1: .18s; --dur-2: .32s;
+  --ease: cubic-bezier(.22, 1, .36, 1);
+
+  /* 布局骨架 */
+  --rail-w: 78px;
+  --player-h: 78px;
+  --gap-app: 18px;
+
+  /* z 层级 */
+  --z-player: 40; --z-popover: 90; --z-modal: 120; --z-toast: 200;
+}
+
+/* 深色派生：只改表面与光斑，渐变四色不动（品牌连续性） */
+[data-theme="dark"] {
+  --bg: #0d1020;
+  --glass: rgba(24, 28, 48, .55);
+  --glass-2: rgba(24, 28, 48, .72);
+  --glass-3: rgba(30, 35, 58, .88);
+  --stroke: rgba(255, 255, 255, .09);
+  --hairline: rgba(255, 255, 255, .07);
+  --ink: #eaf0fb;
+  --ink-2: #9aa7c4;
+  --ink-3: #5c6a89;
+  --blob-1: rgba(124, 92, 255, .30);
+  --blob-2: rgba(0, 198, 255, .22);
+  --blob-3: rgba(255, 95, 176, .18);
+  --blob-4: rgba(55, 230, 168, .14);
+  --shadow-card: 0 8px 32px rgba(0, 0, 0, .45);
+  --shadow-pop: 0 16px 44px rgba(0, 0, 0, .6);
+}
+
+/* ── 基础重置与极光背景 ── */
+* { margin: 0; box-sizing: border-box; }
+html, body, #lanyue-app { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+  font-size: var(--fs-md);
+  overflow: hidden;
+  position: relative;
+  -webkit-font-smoothing: antialiased;
+}
+body::before {
+  content: "";
+  position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background:
+    radial-gradient(38% 44% at 12% 8%,  var(--blob-1), transparent 70%),
+    radial-gradient(34% 40% at 88% 4%,  var(--blob-2), transparent 70%),
+    radial-gradient(40% 46% at 82% 92%, var(--blob-3), transparent 70%),
+    radial-gradient(30% 36% at 8% 90%,  var(--blob-4), transparent 70%);
+}
+button { font: inherit; color: inherit; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--hairline); border-radius: var(--r-full); }
+
+/* ── 玻璃面板基类：全站卡片唯一实现，禁复制粘贴第二份 ── */
+.ly-glass {
+  background: var(--glass);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--stroke);
+  box-shadow: var(--shadow-card);
+  border-radius: var(--r-xl);
+}
+.ly-accent-text {
+  background: linear-gradient(95deg, var(--ink) 25%, var(--au-1) 60%, var(--au-2));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+[data-theme="dark"] .ly-accent-text {
+  background: linear-gradient(95deg, var(--ink) 25%, #a68cff 60%, var(--au-2));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+/* 焦点可见性：键盘用户必须看得见落点 */
+:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: inherit; }
+
+/* ══════════════════════════════════════════════════════════════
+   扩展令牌（P0 重构新增）
+   —— 只增不改：上面既有值是全站视觉基线，组件层不得覆写。
+   ══════════════════════════════════════════════════════════════ */
+:root {
+  /* 字体族：中文优先，等宽用于数字 */
+  --font-ui: "Microsoft YaHei UI", "PingFang SC", "HarmonyOS Sans SC", system-ui, sans-serif;
+  --font-display: "Optima", "Songti SC", "STSong", var(--font-ui);
+  --font-mono: "Cascadia Mono", Consolas, "SF Mono", monospace;
+
+  /* 字号补一档极小字（徽标/角标） */
+  --fs-2xs: 9.5px;
+
+  /* 间距补两档（工具栏/密集列表） */
+  --sp-0-5: 2px; --sp-7: 28px; --sp-9: 36px; --sp-12: 48px;
+
+  /* 圆角补一档（小标签） */
+  --r-xs: 6px;
+
+  /* 表面层级（旧层 --surface-* 的语义映射，仅供新组件使用） */
+  --surface-1: var(--glass);
+  --surface-2: var(--glass-2);
+  --surface-3: var(--glass-3);
+
+  /* 文字层级别名，便于组件按 fg 语义书写 */
+  --fg-1: var(--ink);
+  --fg-2: var(--ink-2);
+  --fg-3: var(--ink-3);
+
+  /* 描边补一档更淡的发丝线 */
+  --hairline-2: rgba(20, 24, 36, .045);
+
+  /* 强调色语义（品牌四色之外的“可点击”语义） */
+  --accent-ui: var(--au-1);
+  --accent2: var(--au-2);
+  --accent-soft: rgba(124, 92, 255, .12);
+  --accent-line: rgba(124, 92, 255, .34);
+
+  /* 玻璃模糊强度统一入口 */
+  --glass-blur: 24px;
+
+  /* 布局骨架补全 */
+  --topbar-h: 64px;
+  --content-max: 1920px;
+  --gutter: 28px;
+
+  /* 动效补一档“立即反馈”和一条强调曲线 */
+  --dur-0: .08s;
+  --ease-emph: cubic-bezier(.22, 1, .36, 1);
+
+  /* z 层级补全（新外壳） */
+  --z-rail: 30; --z-topbar: 35;
+}
+
+[data-theme="dark"] {
+  --hairline-2: rgba(255, 255, 255, .04);
+  --accent-soft: rgba(124, 92, 255, .2);
+  --accent-line: rgba(124, 92, 255, .45);
+}
+
+/* 旧层 7 套主题别名：新层只认 light/dark，挂错值时不至于整站无样式 */
+[data-theme="cyber"], [data-theme="aurora"], [data-theme="sunset"],
+[data-theme="forest"], [data-theme="void"] { color-scheme: dark; }

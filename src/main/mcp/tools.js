@@ -215,6 +215,14 @@ function specToJsonSchema(spec) {
     case 'enum': return { type: 'string', enum: spec.values, default: spec.def };
     case 'obj':  return { type: 'object' };
     case 'arr':  return { type: 'array' };
+    // shape：字段级规格照实摊成 properties，让外部 Agent 看到与运行时同一份字段白名单
+    case 'shape': {
+      const properties = {};
+      for (const [k, fspec] of Object.entries(spec.fields || {})) properties[k] = specToJsonSchema(fspec);
+      const out = { type: 'object', properties };
+      if (spec.required && spec.required.length) out.required = spec.required.slice();
+      return out;
+    }
     default:     return {}; // any：id 等可能是数字或字符串
   }
 }

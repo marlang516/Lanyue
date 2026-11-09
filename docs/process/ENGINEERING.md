@@ -249,7 +249,7 @@ git status --porcelain | wc -l      # 未提交项数（基线铁律）
 
 > 为什么不用 PowerShell 重定向：`>`/`Out-File` 默认按 UTF-16 或 ANSI 码页落盘会写坏中文（与 `CONTRIBUTING.md` 铁律⑤ 同源）。用 Git Bash，或显式 `-Encoding utf8`。
 
-**留档位置**：按 `COLLABORATION.md` §4.1 的唯一指定——提交正文 `验证：` 行 + 台账「闸门证据」列；进 H4 时贴 `DELIVERY.md` §五「闸门输出摘要」表（命令/退出码/≤5 行尾部）。不在 `deliverables/` 下新开子目录（`DELIVERY.md` §四 限定既有目录）。
+**留档位置**：按 `COLLABORATION.md` §4.1 的唯一指定——提交正文 `验证：` 行 + 台账「闸门证据」列；进 H4 时贴 `DELIVERY.md` §五「闸门输出摘要」表（命令/退出码/≤5 行尾部）。不在 `DELIVERY.md` §四 指明的产品策略交付物目录（本地 deliverables，已被 `.gitignore` 排除）下新开子目录（`DELIVERY.md` §四 限定既有目录）。
 
 | 项 | 红了的常见含义 | 先看哪里 |
 |---|---|---|

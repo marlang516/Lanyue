@@ -163,7 +163,10 @@ Module._load = function interceptedLoad(request, parent, isMain) {
 
 const prefs = require('../src/utils/prefs');
 const ipcPlaylist = require('../src/main/ipc/playlist');
-ipcPlaylist.register();
+ipcPlaylist.register({
+  domain: require('../src/main/ipc/playlist/domain'),
+  infra: require('../src/main/ipc/playlist/infra').createInfra(),
+});
 
 const { ENVELOPE_KEY } = require('../src/shared/ipcContract');
 const invoke = (channel) => {
@@ -249,7 +252,10 @@ test('端到端：register() 启动清过期 —— 31 天前的条目没了，�
     { playlist: PL_A, deletedAt: now - 31 * DAY },
     { playlist: PL_B, deletedAt: now - DAY },
   ]);
-  ipcPlaylist.register();
+  ipcPlaylist.register({
+    domain: require('../src/main/ipc/playlist/domain'),
+    infra: require('../src/main/ipc/playlist/infra').createInfra(),
+  });
   const tr = prefs.get('playlistTrash');
   assert.equal(tr.length, 1);
   assert.equal(tr[0].playlist.id, 'pl_b');
@@ -308,13 +314,21 @@ const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
 
 test('主进程挂点：启动清过期 / 删除走 trashRemove / 保存分支走 trashRestore / 视图与彻底删除各就各位', () => {
   const src = read('src/main/ipc/playlist.js');
-  assert.match(src, /require\('\.\.\/\.\.\/utils\/playlistTrash'\)/, '纯函数模块没接上');
-  assert.match(src, /const \{ trashRemove, trashRestore, purgeExpired, trashView, trashPurge \}/);
-  assert.match(src, /purgeExpired\(trashNow, Date\.now\(\)\)/, 'register() 里没做启动清过期');
-  assert.match(src, /trashRemove\(playlists, _trash\(\), playlistId/, '删除 handler 又写回硬删 filter 了');
-  assert.match(src, /trashRestore\(playlists, _trash\(\), playlist\)/, '保存 handler 没接撤销分支');
-  assert.match(src, /if \(opts && opts\.trash\) return trashView\(_trash\(\), Date\.now\(\)\);/, 'get-user-playlists 没接回收站视图 opts');
-  assert.match(src, /trashPurge\(_trash\(\), playlistId\)/, 'delete handler 没接"再删一次=彻底删除"分支');
+  // 纯函数模块的 require 与解构已迁到 infra 层（src/main/ipc/playlist/infra/trash.js）。
+  // 锚点 1/2：infra 层接线 —— require 路径 + 五个函数一个不少，缺一即红。
+  const trashSrc = read('src/main/ipc/playlist/infra/trash.js');
+  assert.match(
+    trashSrc,
+    /const \{\s*trashRemove,\s*trashRestore,\s*purgeExpired,\s*trashView,\s*trashPurge,?\s*\} = require\('\.\.\/\.\.\/\.\.\/\.\.\/utils\/playlistTrash'\)/,
+    '纯函数模块没接上 / 解构漏了函数（infra/trash.js）'
+  );
+  // 锚点 3：IPC 层真实调用 —— 只 require 不用 = 回收站永不过期（TTL 形同虚设），
+  // 启动这次调用必须落实在注入的 trashMod 上。
+  assert.match(src, /trashMod\.purgeExpired\(_trashArr, Date\.now\(\)\)/, 'register() 里没做启动清过期（IPC 层没真调 purgeExpired）');
+  assert.match(src, /trashMod\.trashRemove\(playlists, _trash\(\), playlistId/, '删除 handler 又写回硬删 filter 了');
+  assert.match(src, /trashMod\.trashRestore\(playlists, _trash\(\), playlist\)/, '保存 handler 没接撤销分支');
+  assert.match(src, /if \(opts && opts\.trash\) return trashMod\.trashView\(_trash\(\), Date\.now\(\)\);/, 'get-user-playlists 没接回收站视图 opts');
+  assert.match(src, /trashMod\.trashPurge\(_trash\(\), playlistId\)/, 'delete handler 没接"再删一次=彻底删除"分支');
   assert.ok(!/playlists\.filter\(p => p\.id !== playlistId\)/.test(src), '硬删 filter 复活');
 });
 

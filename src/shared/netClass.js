@@ -37,7 +37,11 @@ const TIMEOUT_HINT = /TIMED_OUT|ETIMEDOUT|\btimed out\b|\btimeout\b|下载超时
  */
 const NETWORK_CODES = [ERROR_CODES.NETWORK_TIMEOUT, ERROR_CODES.NETWORK_ERROR];
 
-/** 从任意形状（字符串 / Error / 队列条目 / 裸码）里取出给用户看的那句话 */
+/**
+ * 从任意形状（字符串 / Error / 队列条目 / 裸码）里取出给用户看的那句话。
+ * @param {*} subject 任意失败描述
+ * @returns {string} 拼接后的可判定文本（无可用文本时为空串）
+ */
 function messageOf(subject) {
   if (subject == null) return '';
   if (typeof subject === 'string') return subject;
@@ -52,13 +56,21 @@ function messageOf(subject) {
   return String(subject);
 }
 
-/** 这条文本是不是 TLS/证书类 */
+/**
+ * 这条文本是不是 TLS/证书类。
+ * @param {*} subject 任意失败描述
+ * @returns {boolean}
+ */
 function isTlsFailure(subject) {
   const msg = messageOf(subject);
   return !!msg && TLS_ERROR.test(msg);
 }
 
-/** 这条文本是不是传输层失败（TLS 不算：它不在 TRANSPORT 那一族里） */
+/**
+ * 这条文本是不是传输层失败（TLS 不算：它不在 TRANSPORT 那一族里）。
+ * @param {*} subject 任意失败描述
+ * @returns {boolean}
+ */
 function isTransportFailure(subject) {
   const msg = messageOf(subject);
   if (!msg) return false;
@@ -69,7 +81,8 @@ function isTransportFailure(subject) {
 /**
  * 传输失败对应哪个自归类错误码：超时一档、其余断连一档；不是传输失败就不认领（返回 null）。
  * 「不认领」是有意的：把 403/磁盘满/版权限制说成网络问题，用户就会去检查根本没坏的网络。
- * @returns {?string}
+ * @param {*} subject 任意失败描述
+ * @returns {?string} 错误码；非传输失败为 null
  */
 function transportCode(subject) {
   if (!isTransportFailure(subject)) return null;
@@ -80,6 +93,8 @@ function transportCode(subject) {
  * 这条失败是不是「重试有意义」的连通性问题：自动退避、复网自动重排队都问这一枚。
  * 入参可以是字符串 / Error / 队列条目 {errorCode, error}；有码时以码为准（取流层已经归好类），
  * 没码时才回落到文本 —— 文本推断只用来兜住下载传输层那一族（那里没有码可写）。
+ * @param {*} subject 任意失败描述
+ * @returns {boolean}
  */
 function isConnectivityFailure(subject) {
   if (subject == null) return false;

@@ -7,17 +7,52 @@
  *
  * 队列管理 + processQueue/processOneSong 留在 main/index.js（共享状态多）。
  * 拆分说明（等价迁移）：自 ipc/download.js 的 register 提出。
+ *
+ * M1.1-C：所有队列能力改为构造注入（见 docs/adr/0002-download-ports.md §5.2），
+ * 本模块不再读取主进程共享上下文，也不持有任何模块级可变单例。
  */
 
 const { handle } = require('../register');
-const { getDownloadQueue, safeSend } = require('../../context');
 const { queueMove } = require('../../queueOrder');
 const history = require('../../../utils/history');
 const logger = require('../../../utils/logger');
 
-function register() {
-  // 关键：downloadQueue / persistQueue / processQueue 都通过 getter 拿，
-  // 避免 register 时（createWindow 之前）解构到 undefined
+/**
+ * 队列域显式依赖（M1.1-C）。
+ *
+ * 由装配层（src/main/index.js 的 registerAllIpcHandlers）一次性传入引擎能力；
+ * 缺失必填项时在注册期即抛，避免拖到首个 IPC 调用才以 undefined 的形式暴露。
+ *
+ * @typedef {Object} QueueDeps
+ * @property {() => Array<Object>} getQueue 取引擎内部队列数组（活引用）
+ * @property {() => void} persistQueue 落盘（引擎内部已做 500ms 防抖）
+ * @property {() => void} processQueue 触发调度
+ * @property {(taskId: string) => boolean} [requestCancel] 取消在途任务
+ * @property {(paused: boolean) => void} [setPaused] 切换暂停态
+ * @property {() => boolean} [isPaused] 回读暂停态
+ * @property {{ emitQueueUpdated: (rows?: ReadonlyArray<Object>) => void }} progress
+ *   队列快照统一出口（与引擎共用同一个 ProgressPort 实现）
+ */
+
+/**
+ * @param {QueueDeps} [queueDeps]
+ */
+function register(queueDeps = {}) {
+  const { getQueue, persistQueue, processQueue, requestCancel, setPaused, isPaused, progress } = queueDeps;
+
+  // 装配期 fail-fast：这几个是每个 handler 都要用的必填依赖
+  if (typeof getQueue !== 'function') {
+    throw new Error('[ipc/download/queue] 必须注入 getQueue');
+  }
+  if (typeof persistQueue !== 'function') {
+    throw new Error('[ipc/download/queue] 必须注入 persistQueue');
+  }
+  if (typeof processQueue !== 'function') {
+    throw new Error('[ipc/download/queue] 必须注入 processQueue');
+  }
+  if (!progress || typeof progress.emitQueueUpdated !== 'function') {
+    throw new Error('[ipc/download/queue] 必须注入 progress.emitQueueUpdated');
+  }
 
   /**
    * 修 R1-3：移除/清空队列前，对在途任务先走一遍与 cancel-download 一致的取消流程。
@@ -28,19 +63,19 @@ function register() {
    * 终态仍由队列引擎落盘（.tmp 由传输层失败路径清理），这里只管"别让它偷偷下完"。
    *
    * @param {Object} song 队列条目
-   * @param {function} requestCancelDownload ctx 注入的引擎取消入口
+   * @param {(taskId: string) => boolean} [requestCancel] 引擎取消入口（注入）
    */
-  const cancelInFlight = (song, requestCancelDownload) => {
+  const cancelInFlight = (song, requestCancel) => {
     if (!song) return false;
     const inFlight = song.status === 'downloading' || (song.status === 'pending' && song._processing);
     if (!inFlight) return false;
-    if (typeof requestCancelDownload !== 'function') {
+    if (typeof requestCancel !== 'function') {
       // 引擎未就绪：至少置标记，协程在下一轮 attempt 顶部会退出
       song._cancelRequested = true;
       return true;
     }
     try {
-      requestCancelDownload(song.taskId);
+      requestCancel(song.taskId);
     } catch (e) {
       logger.warn('[ipc] 取消在途任务失败:', e.message);
       song._cancelRequested = true;
@@ -50,8 +85,7 @@ function register() {
 
   // 添加到下载队列
   handle('add-to-queue', async (_, song) => {
-    const downloadQueue = getDownloadQueue();
-    const { persistQueue, processQueue } = require('../../context').getCtx();
+    const downloadQueue = getQueue();
     // 查重 1：同 id+source 且未完成的任务已在队列 → 拒绝，避免重复下载同一首
     const dup = downloadQueue.find(s =>
       s && s.id === song.id && s.source === song.source && s.status !== 'done');
@@ -75,7 +109,7 @@ function register() {
     }
     const taskId = makeTaskId();
     downloadQueue.push({ ...song, taskId, status: 'pending', progress: 0, addedAt: Date.now() });
-    safeSend('queue-updated', downloadQueue);
+    progress.emitQueueUpdated(downloadQueue);
     persistQueue();
     processQueue();
     return { queued: true, taskId };
@@ -85,12 +119,11 @@ function register() {
   // splice 会留下孤儿协程照常落盘写历史；真正的 pending 直接移出队列；
   // downloading 置标记 + 打断在途请求（.tmp 由失败路径清理，任务转入 error=已取消）
   handle('cancel-download', (_, taskId) => {
-    const downloadQueue = getDownloadQueue();
-    const { persistQueue, requestCancelDownload } = require('../../context').getCtx();
+    const downloadQueue = getQueue();
     const inFlight = downloadQueue.find(s => s.taskId === taskId &&
       (s.status === 'downloading' || (s.status === 'pending' && s._processing)));
     if (inFlight) {
-      const ok = typeof requestCancelDownload === 'function' ? requestCancelDownload(taskId) : false;
+      const ok = typeof requestCancel === 'function' ? requestCancel(taskId) : false;
       return ok ? { canceled: true, cancelling: true } : { canceled: false };
     }
     const idx = downloadQueue.findIndex(s => s.taskId === taskId && s.status === 'pending');
@@ -98,15 +131,14 @@ function register() {
       return { canceled: false };
     }
     downloadQueue.splice(idx, 1);
-    safeSend('queue-updated', downloadQueue);
+    progress.emitQueueUpdated(downloadQueue);
     persistQueue();
     return { canceled: true };
   });
 
   // 重试失败的下载任务
   handle('retry-download', (_, taskId) => {
-    const downloadQueue = getDownloadQueue();
-    const { persistQueue, processQueue } = require('../../context').getCtx();
+    const downloadQueue = getQueue();
     const idx = downloadQueue.findIndex(s => s.taskId === taskId);
     if (idx === -1) return { ok: false, error: '任务不存在' };
     const song = downloadQueue[idx];
@@ -119,7 +151,7 @@ function register() {
     const insertAt = downloadQueue.findIndex(s => s.status === 'downloading');
     if (insertAt === -1) downloadQueue.unshift(song);
     else downloadQueue.splice(insertAt + 1, 0, song);
-    safeSend('queue-updated', downloadQueue);
+    progress.emitQueueUpdated(downloadQueue);
     persistQueue();
     processQueue();
     return { ok: true };
@@ -132,24 +164,22 @@ function register() {
   // 与 cancel-download 同一套取消流程：先协作式取消（置标记 + 打断在途请求），
   // 再从数组摘除，让协程落到 cancelled 终态。
   handle('remove-queue-item', (_, taskId) => {
-    const downloadQueue = getDownloadQueue();
-    const { persistQueue, requestCancelDownload } = require('../../context').getCtx();
+    const downloadQueue = getQueue();
     const idx = downloadQueue.findIndex(s => s.taskId === taskId);
     if (idx === -1) return { removed: false };
-    cancelInFlight(downloadQueue[idx], requestCancelDownload);
+    cancelInFlight(downloadQueue[idx], requestCancel);
     downloadQueue.splice(idx, 1);
-    safeSend('queue-updated', downloadQueue);
+    progress.emitQueueUpdated(downloadQueue);
     persistQueue();
     return { removed: true };
   });
 
   // 调整队列顺序（置顶/上移/下移，仅 pending 可动）
   handle('reorder-queue-item', (_, taskId, action) => {
-    const downloadQueue = getDownloadQueue();
-    const { persistQueue } = require('../../context').getCtx();
+    const downloadQueue = getQueue();
     const changed = queueMove(downloadQueue, taskId, action);
     if (changed) {
-      safeSend('queue-updated', downloadQueue);
+      progress.emitQueueUpdated(downloadQueue);
       persistQueue();
     }
     return { ok: changed, error: changed ? null : '无法移动该任务' };
@@ -157,35 +187,32 @@ function register() {
 
   // 暂停/继续下载调度（在途任务不打断）
   handle('set-queue-paused', (_, paused) => {
-    const { setQueuePaused, queueIsPaused } = require('../../context').getCtx();
-    if (typeof setQueuePaused !== 'function') return { ok: false, error: '引擎未就绪' };
-    setQueuePaused(!!paused);
-    return { ok: true, paused: !!queueIsPaused() };
+    if (typeof setPaused !== 'function') return { ok: false, error: '引擎未就绪' };
+    setPaused(!!paused);
+    return { ok: true, paused: !!isPaused() };
   });
 
   // 清空已完成
   handle('clear-finished-queue', () => {
-    const downloadQueue = getDownloadQueue();
-    const { persistQueue } = require('../../context').getCtx();
+    const downloadQueue = getQueue();
     const before = downloadQueue.length;
     for (let i = downloadQueue.length - 1; i >= 0; i--) {
       if (downloadQueue[i].status === 'done') downloadQueue.splice(i, 1);
     }
-    safeSend('queue-updated', downloadQueue);
+    progress.emitQueueUpdated(downloadQueue);
     persistQueue();
     return { removed: before - downloadQueue.length };
   });
 
   // 清空全部
   handle('clear-all-queue', () => {
-    const downloadQueue = getDownloadQueue();
-    const { persistQueue, requestCancelDownload } = require('../../context').getCtx();
+    const downloadQueue = getQueue();
     const before = downloadQueue.length;
     // 修 R1-3：清空前逐个走取消流程（见 remove-queue-item 的同一说明）——
     // 直接 length = 0 会留下孤儿协程把在途歌曲下完、写历史、通知前端"下载完成"。
-    for (const s of downloadQueue) cancelInFlight(s, requestCancelDownload);
+    for (const s of downloadQueue) cancelInFlight(s, requestCancel);
     downloadQueue.length = 0;
-    safeSend('queue-updated', downloadQueue);
+    progress.emitQueueUpdated(downloadQueue);
     persistQueue();
     return { removed: before };
   });
@@ -197,8 +224,7 @@ function register() {
       if (!Array.isArray(songs) || songs.length === 0) {
         return { queued: 0, skipped: 0 };
       }
-      const downloadQueue = getDownloadQueue();
-      const { persistQueue, processQueue } = require('../../context').getCtx();
+      const downloadQueue = getQueue();
 
       // 1. 收集"真正在跑"的任务 key
       //    downloading: 算重复
@@ -251,7 +277,7 @@ function register() {
       }
 
       if (queued > 0) {
-        safeSend('queue-updated', downloadQueue);
+        progress.emitQueueUpdated(downloadQueue);
         persistQueue();
         processQueue();
       }

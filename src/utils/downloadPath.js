@@ -18,13 +18,15 @@
 const path = require('path');
 const { renderPathSegments } = require('./naming');
 /**
- * 真实路径闸口复用目录沙箱（src/main/approvedDirs.js）—— 不在 utils 里另抄一份
- * realpath 判据，两份必然漂。
+ * 真实路径闸口复用同一条 realpath 判据（src/utils/realpathContain.js），
+ * 不在本模块另抄一份 —— 两份判据必然漂。
  *
- * 关于 require 方向看着「反层」（utils 引用 main）：approvedDirs 只 require
- * path / fs 两个 node 内置模块，不回头引用任何项目文件，依赖图是单向叶子，
- * 所以不存在循环依赖；它也不会把 electron / prefs 拖进来，utils 侧的纯函数
- * 测试仍能直接 require 本模块。
+ * 该判据原先住在主进程的目录沙箱模块（approvedDirs），本模块 require 它形成
+ * utils → main 的反向依赖。2026-11 已把 normalize / isInside / realpathDeep /
+ * isInsideReal / isInsideRealAny 整体下沉到 utils/realpathContain.js（只 require
+ * path / fs 两个 node 内置模块，不拖 electron / prefs），沙箱模块改为从那里
+ * re-export。于是依赖方向恢复单向：main → utils，utils 侧仍是叶子，纯函数测试
+ * 可直接 require 本模块；沙箱模块本身不再持有任何判据实现。
  *
  * ⚠️ 已闭合（2026-10-13 复审 P1-3）：src/main/ipc/ai-music.js 曾另带一份纯词法
  * isInside（ai-generate-music 的 saveDir 校验），只做 path.relative、没过 realpath
@@ -32,7 +34,7 @@ const { renderPathSegments } = require('./naming');
  * 现已改为调用 approvedDirs.isApprovedDir，全仓的路径判据到此只有一份。
  * 由 test/ai-music-savepath.test.js 钉住，别让它退回自写判据。
  */
-const { isInsideReal } = require('../main/approvedDirs');
+const { isInsideReal } = require('./realpathContain');
 
 /** 子目录层级上限：8 层已经超出「按歌手/专辑整理」的量级，再多是写错了 */
 const MAX_SEGMENTS = 8;
@@ -108,8 +110,9 @@ function planDownloadDir(template, saveDir, song, opts) {
   // 词法判定挡得住前缀碰撞，挡不住符号链接：D:\Music\link → C:\Windows\System32
   // 时 D:\Music\link\evil 词法上「在根目录内」，真实落盘却在沙箱外 —— 而这一路
   // 此前完全没有复核（downloadQueue 只判根目录，随后直接 mkdir recursive）。
-  // approvedDirs 早已把这条列为 P1 并用 realpath + realpathDeep 关掉（见该文件
-  // 的 P1 加固段），这里补的是同一道防线，不是另立一套口径。
+  // realpathContain 早已把这条列为 P1 并用 realpath + realpathDeep 关掉（见该
+  // 文件头注释里保留的 approvedDirs 原审计说明），这里补的是同一道防线，不是
+  // 另立一套口径。
   // realpathDeep 对尚不存在的子目录逐级回退到最近已存在祖先，所以「这次下载
   // 才新建的目录」照样能判，不会因为路径还没出现就误杀正常模板。
   if (!isInsideReal(root, dir)) {

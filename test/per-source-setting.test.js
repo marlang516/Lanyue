@@ -12,6 +12,10 @@
  *     全量校验，这里只对本增量做定向锚点）；
  *  4. 等值钉：UI 默认值 == 引擎 getPerSourceCap 的 fallback（2），
  *     UI max == 引擎上界（10）。漂移 = 用户看到的默认值≠实际生效值。
+ *
+ * 注：ADR 0003 §5 步骤 4 把调度（含 getPerSourceCap）外移到
+ * src/main/downloadQueue/scheduler.js，唯一实现随之搬家 —— 本文件的读取路径
+ * 同步指向新 owner（断言口径不变，仍钉 fallback=2 / 上界=10 与 UI 等值）。
  */
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -27,7 +31,8 @@ const SETTINGS_SRC = read('src/renderer/js/views/settings.js');
 const HTML_SRC = read('src/renderer/index.html');
 const ZH = JSON.parse(read('src/renderer/js/lang/zh.json'));
 const EN = JSON.parse(read('src/renderer/js/lang/en.json'));
-const QUEUE_SRC = read('src/main/downloadQueue.js');
+// getPerSourceCap 的唯一实现在调度模块（步骤 4 迁移后的 owner）
+const SCHEDULER_SRC = read('src/main/downloadQueue/scheduler.js');
 
 test('settings.js: GENERAL_PREFS 含 perSourceConcurrency 表行（default 2 + el 指向 HTML id）', () => {
   assert.match(
@@ -58,9 +63,9 @@ test('zh/en 词典对称含本增量两个 key，且均非空', () => {
   }
 });
 
-test('等值钉：UI 默认值/上界 == downloadQueue.js getPerSourceCap 的 fallback/上界', () => {
-  const capFn = QUEUE_SRC.slice(QUEUE_SRC.indexOf('function getPerSourceCap'));
-  assert.ok(capFn.length > 0 && capFn.indexOf('function getPerSourceCap') >= 0, '引擎 getPerSourceCap 消失');
+test('等值钉：UI 默认值/上界 == downloadQueue/scheduler.js getPerSourceCap 的 fallback/上界', () => {
+  const capFn = SCHEDULER_SRC.slice(SCHEDULER_SRC.indexOf('function getPerSourceCap'));
+  assert.ok(capFn.length > 0 && capFn.indexOf('function getPerSourceCap') >= 0, 'getPerSourceCap 在调度模块中消失');
   const range = capFn.match(/v\s*>=\s*(\d+)\s*&&\s*v\s*<=\s*(\d+)\s*\)\s*\?\s*v\s*:\s*(\d+)/);
   assert.ok(range, 'getPerSourceCap 的 (v>=min && v<=max) ? v : fallback 形态变了，本测试需同步');
   const [, min, max, fallback] = range.map(Number);

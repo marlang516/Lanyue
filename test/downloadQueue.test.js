@@ -51,11 +51,17 @@ function buildEngine(overrides = {}) {
 
   const engine = createDownloadQueueEngine({
     userDataDir: () => dir,
-    safeSend: (ch, payload) => sent.push({ ch, payload }),
+    // 记录型 ProgressPort：保持既有断言口径（事件以 { ch, payload } 落进 sent）
+    // overrides.progress 允许单个用例换入「会抛错的端口」验证守卫（M1.1 验收）。
+    progress: overrides.progress || {
+      emitQueueUpdated: (rows) => sent.push({ ch: 'queue-updated', payload: rows }),
+      emitProgress: (taskId, payload) => sent.push({ ch: 'download-progress', payload }),
+      emitError: (taskId, payload) => sent.push({ ch: 'download-error', payload }),
+    },
     getDownloadUrlSmart: overrides.getDownloadUrlSmart
       || (async () => ({ url: 'https://cdn/x.mp3', ext: 'mp3' })),
     getLyrics: overrides.getLyrics || (async () => ({ lrc: '' })),
-    notifier: overrides.notifier || { notifyDownloadDone: () => {} },
+    notify: overrides.notify || { downloadDone: () => {}, showInFolder: () => {} },
     getDefaultDownloadDir: overrides.getDefaultDownloadDir,
     // 注入替身（避免真实网络/落盘）
     history: { add: (rec) => { historyAdds.push(rec); } },
@@ -89,12 +95,14 @@ async function waitFor(fn, { timeout = 2000, interval = 10 } = {}) {
 test('createDownloadQueueEngine: 缺必需依赖立即抛错', () => {
   assert.throws(() => createDownloadQueueEngine({}), /必须注入 userDataDir/);
   assert.throws(
-    () => createDownloadQueueEngine({ userDataDir: () => '/x', safeSend: () => {} }),
+    () => createDownloadQueueEngine({ userDataDir: () => '/x', progress: { emitQueueUpdated() {}, emitProgress() {}, emitError() {} } }),
     /必须注入 getDownloadUrlSmart/,
   );
   assert.throws(
     () => createDownloadQueueEngine({
-      userDataDir: () => '/x', safeSend: () => {}, getDownloadUrlSmart: async () => ({}),
+      userDataDir: () => '/x',
+      progress: { emitQueueUpdated() {}, emitProgress() {}, emitError() {} },
+      getDownloadUrlSmart: async () => ({}),
     }),
     /必须注入 getLyrics/,
   );
@@ -547,7 +555,7 @@ test('通知：notifications=false 时不调用通知器', async () => {
   let notified = 0;
   const { engine, restore } = buildEngine({
     prefs: { notifications: false },
-    notifier: { notifyDownloadDone: () => { notified++; } },
+    notify: { downloadDone: () => { notified++; } },
   });
   try {
     engine.getQueue().push({ id: '1', source: 'netease', title: 't', artist: 'a', taskId: 'x', status: 'pending' });
@@ -560,7 +568,7 @@ test('通知：notifications=false 时不调用通知器', async () => {
 test('通知：默认开启时调用通知器', async () => {
   let notified = 0;
   const { engine, restore } = buildEngine({
-    notifier: { notifyDownloadDone: () => { notified++; } },
+    notify: { downloadDone: () => { notified++; } },
   });
   try {
     engine.getQueue().push({ id: '1', source: 'netease', title: 't', artist: 'a', taskId: 'x', status: 'pending' });
@@ -783,6 +791,55 @@ test('取消下载：迟到的 onProgress 不再写进度、不再推送事件�
     finish();
     await waitFor(() => engine.getQueue().every(s => s.status !== 'downloading'));
   } finally {
+    restore();
+  }
+});
+
+// ══════════════════════════════════════════════════════════
+// 端口容错：注入实现抖动不得污染队列状态（M1.1 验收回归）
+// ══════════════════════════════════════════════════════════
+
+test('端口 emitProgress 抛错不中断下载（M1.1 验收回归）', async () => {
+  const progressCalls = [];
+  const { engine, restore } = buildEngine({
+    // 模拟 webContents 已销毁的 Port：每次 emitProgress 都抛
+    progress: {
+      emitQueueUpdated() {},
+      emitError() {},
+      emitProgress(taskId, payload) {
+        progressCalls.push({ taskId, progress: payload.progress });
+        throw new Error('boom-progress');
+      },
+    },
+    downloadFileWithRetry: async (url, savePath, onProgress) => {
+      onProgress(50, { receivedBytes: 512, totalBytes: 1024 });
+      onProgress(100, { receivedBytes: 1024, totalBytes: 1024 });
+    },
+  });
+
+  // 端口抛错若未被守卫吞掉，会表现为协程内的 unhandledRejection/uncaughtException
+  const leaked = [];
+  const onLeak = (e) => leaked.push(e);
+  process.on('unhandledRejection', onLeak);
+  process.on('uncaughtException', onLeak);
+
+  try {
+    const song = { id: '1', source: 'netease', title: 't', artist: 'a', taskId: 'x', status: 'pending' };
+    engine.getQueue().push(song);
+    await engine.processQueue();
+    await waitFor(() => song.status === 'done');
+    // 让下载协程尾部（含历史/通知/持久化）兑现完，异常才有机会冒到进程级
+    await new Promise((r) => setTimeout(r, 30));
+
+    assert.strictEqual(song.status, 'done', '端口抛错不得让任务落到 error');
+    assert.strictEqual(song.progress, 100);
+    assert.ok(song.savePath, '应记录落盘路径');
+    assert.deepStrictEqual(progressCalls, [{ taskId: 'x', progress: 50 }, { taskId: 'x', progress: 100 }],
+      '两次进度事件仍应到达端口（守卫只吞异常，不改投递节奏）');
+    assert.deepStrictEqual(leaked, [], '端口抛错不得升级为 unhandledRejection/uncaughtException');
+  } finally {
+    process.removeListener('unhandledRejection', onLeak);
+    process.removeListener('uncaughtException', onLeak);
     restore();
   }
 });
@@ -1016,6 +1073,77 @@ test('路径模板: 逐曲 saveDir 是根，模板子路径长在它下面', asy
     await waitFor(() => ['done', 'error'].includes(engine.getQueue()[0].status));
     assert.strictEqual(downloaded[0].savePath, path.join(perSong, '周杰伦', '周杰伦 - 晴天.mp3'));
     assert.ok(fs.existsSync(path.join(perSong, '周杰伦')));
+  } finally { restore(); }
+});
+
+// ══════════════════════════════════════════════════════════
+// M1.1-A 状态机收敛：迁移规则只有 downloadQueue/statemachine.js 一份
+// ══════════════════════════════════════════════════════════
+
+test('状态机收敛：重试的那一轮必须先回到 downloading（否则 pending→done 是非法边）', async () => {
+  let calls = 0;
+  const statusAtRetry = [];
+  const { engine, restore } = buildEngine({
+    prefs: { concurrency: 1 },
+    getDownloadUrlSmart: async (song) => {
+      calls += 1;
+      // 首次取流 403 ⇒ downloading→pending 退避；第二次（重试）取流时观察状态：
+      // 若没回到 downloading，这一轮成功后就是 pending→done，状态机里没有这条边。
+      if (calls === 1) throw new Error('HTTP 403: 签名过期');
+      statusAtRetry.push(song.status);
+      return { url: 'https://cdn/x.mp3', ext: 'mp3' };
+    },
+  });
+  try {
+    const song = { id: '1', source: 'netease', title: 't', artist: 'a', taskId: 'x', status: 'pending' };
+    engine.getQueue().push(song);
+    await engine.processQueue();
+    await waitFor(() => song.status === 'done', { timeout: 3000 });
+    assert.deepStrictEqual(statusAtRetry, ['downloading'],
+      '重试开始时应已从退避期的 pending 迁回 downloading');
+  } finally { restore(); }
+});
+
+test('状态机收敛：迁移审计字段不外溢到队列条目与 queue.json', async () => {
+  const { engine, dir, restore } = buildEngine();
+  try {
+    const song = { id: '1', source: 'netease', title: 't', artist: 'a', taskId: 'x', status: 'pending' };
+    engine.getQueue().push(song);
+    await engine.processQueue();
+    await waitFor(() => song.status === 'done');
+    // 审计字段（_lastTransition/_transitionHistory）只有状态机自测用，
+    // 队列条目会整条落盘并推给渲染层 —— 外溢等于悄悄改持久化/ IPC 负载形态。
+    assert.ok(!('_lastTransition' in song), '队列条目不应携带 _lastTransition');
+    assert.ok(!('_transitionHistory' in song), '队列条目不应携带 _transitionHistory');
+    const raw = JSON.parse(fs.readFileSync(path.join(dir, 'queue.json'), 'utf8'));
+    assert.ok(!('_lastTransition' in raw[0]), 'queue.json 不应出现 _lastTransition');
+  } finally { restore(); }
+});
+
+// ══════════════════════════════════════════════════════════
+// ADR 0003 §5 步骤 3：队列数组唯一 owner（downloadQueue/store.js）
+// ══════════════════════════════════════════════════════════
+
+test('getQueue 返回同一活数组引用（步骤 3 拆分回归）', async () => {
+  const { engine, dir, restore } = buildEngine();
+  try {
+    const first = engine.getQueue();
+    assert.strictEqual(engine.getQueue(), first, '两次调用必须返回同一个数组对象');
+
+    // 两次调用之间 push：第二次调用必须看得见长度变化（证明没有返回复制快照）
+    const lenBefore = first.length;
+    engine.getQueue().push({ id: 'ext-1', source: 'netease', title: 't', artist: 'a', taskId: 'ext-1', status: 'done' });
+    assert.strictEqual(engine.getQueue().length, lenBefore + 1, '第二次调用应看到长度变化');
+    assert.strictEqual(first.length, lenBefore + 1, '外部持有的引用必须与引擎同步');
+
+    // 引擎**内部** push（loadPersistedQueue 从磁盘恢复）后，外部引用长度同步变化
+    const external = engine.getQueue();
+    fs.writeFileSync(path.join(dir, 'queue.json'), JSON.stringify([
+      { id: 'r1', source: 'netease', title: 't', artist: 'a', taskId: 'r1', status: 'pending' },
+    ]), 'utf8');
+    await engine.loadPersistedQueue();
+    assert.strictEqual(engine.getQueue(), external, '恢复后数组引用不得被重建');
+    assert.strictEqual(external.length, lenBefore + 2, '引擎内部 push 后外部引用必须同步');
   } finally { restore(); }
 });
 

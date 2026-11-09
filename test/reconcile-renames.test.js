@@ -142,13 +142,20 @@ test('reconcileScannedRefs：真 sqlite + 真 prefs 走一遍，徽标/歌单/�
 });
 
 test('接线：扫描成功后对账并如实上报，前端不另开通道', () => {
-  // 扫描域拆到 library/scan.js（library.js 只剩组装根）
-  const lib = read('src/main/ipc/library/scan.js');
-  assert.match(lib, /require\('\.\.\/\.\.\/\.\.\/utils\/fileRelink'\)/, '没引对账函数');
-  assert.equal((lib.match(/reconcileScannedRefs\(/g) || []).length, 2, '增量与全量两条扫描出口都得对账，漏一条就是半残功能');
-  assert.equal((lib.match(/relinked/g) || []).length >= 2, true, '对账结果要随 scan-local-library 的返回值上去');
+  // 扫描业务在 library/domain/scan.js；fileRelink 由组装根 library.js 显式注入
+  const scan = read('src/main/ipc/library/domain/scan.js');
+  assert.equal((scan.match(/fileRelink\.reconcileScannedRefs\(/g) || []).length, 2,
+    '增量与全量两条扫描出口都得对账，漏一条就是半残功能');
+  assert.equal((scan.match(/relinked/g) || []).length >= 2, true, '对账结果要随 scan-local-library 的返回值上去');
 
-  const scanBlock = lib.slice(lib.indexOf("handle('scan-local-library'"), lib.indexOf("handle('load-library-index'"));
+  // 只断言 domain 会调用还不够：依赖必须真的接上，否则运行时 fileRelink 为 undefined
+  const asm = read('src/main/ipc/library.js');
+  assert.match(asm, /fileRelink:\s*infraRelink/, 'library.js 未向扫描域注入 fileRelink');
+  assert.match(asm, /require\('\.\/library\/infra\/relink'\)/, '组装根未装配 relink 适配器');
+  assert.match(read('src/main/ipc/library/infra/relink.js'), /reconcileScannedRefs/, 'relink 适配器未透出对账函数');
+
+  const scanBlock = scan.slice(scan.indexOf('async function scanLocalLibrary'), scan.indexOf('async function loadLibraryIndex'));
+  assert.ok(scanBlock.length > 0, '没找到 scanLocalLibrary 实现');
   assert.ok(!scanBlock.includes('history.add'), '对账只修路径引用，不许改历史内容');
 
   const local = read('src/renderer/js/views/local.js');

@@ -109,8 +109,11 @@
 | S6 | 版本条目、tag、Release | `CHANGELOG.md`、git tag、GitHub Releases（草稿 → 人工 publish） |
 | 全程 | 复盘 | `docs/process/POSTMORTEM-<YYYY-MM-DD>-<slug>.md` |
 
-仅使用仓库既有目录：`docs/`、`docs/process/`、`docs/design/`、`docs/architecture/`、`deliverables/product-strategy/`、
+仅使用仓库既有目录：`docs/`、`docs/process/`、`docs/design/`、`docs/architecture/`、
 `src/`、`test/`、`scripts/`。`DEMAND-LEDGER.md` 与 `POSTMORTEM-*.md` 是既有目录下的**新建文件**，不是新目录。
+
+产品策略交付物（S1）落在本地目录 deliverables/product-strategy/：该目录被 `.gitignore` 排除、不入库，按需创建，
+因此**不算**上面这句里的「仓库既有目录」；具体文件名见 §四 表中 S1 一行。
 
 > 为什么交付物要绑定到目录而不是绑定到人：人一换，落在桌面上、聊天里、脑子里的产物就消失了。
 > 目录不变，交接就永远有一个可读的地址。

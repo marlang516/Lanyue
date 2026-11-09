@@ -37,7 +37,12 @@ Module._load = function interceptedLoad(request, parent, isMain) {
 
 const prefs = require('../src/utils/prefs');
 const ipcPlaylist = require('../src/main/ipc/playlist');
-ipcPlaylist.register();
+// 注入式注册：domain 为纯业务层，infra 用默认适配器（prefs 在读时惰性取值，
+// 因此 prefs.init(tmpdir) 换目录后仍能拿到本用例的隔离数据）
+ipcPlaylist.register({
+  domain: require('../src/main/ipc/playlist/domain'),
+  infra: require('../src/main/ipc/playlist/infra').createInfra(),
+});
 
 const { FAVORITES_ID, songKey } = ipcPlaylist;
 

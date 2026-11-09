@@ -106,17 +106,26 @@ test('history: 统计', () => {
 });
 
 test('history: 上限淘汰', () => {
-  const dir = makeTempDir();
   const history = require('../src/utils/history');
-  history.init(dir);
+  // 本用例只验证 _trim 的 SQL 语义（超限即淘汰最旧），与「是否落盘」无关，
+  // 因此刻意不 init ⇒ 走模块自带的内存库（:memory:）。
+  //
+  // 为什么不能落盘跑：add() 是逐条自动提交，WAL 模式每条都要 fsync。
+  // 本机 F: 盘实测 ~36ms/条（synchronous=FULL），6000 条 = 3.5 分钟以上；
+  // 而整段插入是同步阻塞的，--test-timeout 根本没法中断它 ⇒ 全量跑批表现为
+  // 「停在某个用例后再无输出」，其实是空转而非死锁（详见 docs/process/TEST-STABILITY.md）。
+  // 换成内存库后同一段插入约 0.2s，SQL 路径（本文件里那 5000 首淘汰）完全一致。
+  history.destroy(); // 断开上一个用例可能留下的磁盘句柄 / 清掉计数缓存
   history.clear();
   for (let i = 0; i < 6000; i++) {
     history.add({ id: String(i), source: 'qq', title: 'T' + i, status: 'done', finishedAt: i });
   }
   const r = history.query();
   assert.ok(r.total <= history.MAX_ENTRIES, '应不超过 MAX_ENTRIES');
+  assert.strictEqual(r.total, history.MAX_ENTRIES, '每加一条就裁一次，稳态应恰好等于上限');
+  assert.strictEqual(history.query({ keyword: 'T0' }).total, 0, '最早写入的 T0 应已被淘汰');
+  assert.strictEqual(history.query({ keyword: 'T5999' }).total, 1, '最新写入的必须留下');
   history.destroy();
-  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test('history: findDownloaded 跨会话去重判定', () => {
@@ -230,7 +239,10 @@ test('history: add 即时落盘 —— 不 flush 直接 destroy（模拟进程�
 test('history: 双表去重 —— 展示历史被上限淘汰后，文件仍在磁盘 ⇒ findDownloaded 依然命中', () => {
   const dir = makeTempDir();
   const h = require('../src/utils/history');
-  h.init(dir);
+  // 本用例要灌 MAX_ENTRIES+5 条（5005 条）。落盘逐条提交 = 5005 × ~36ms ≈ 3 分钟
+  // 同步阻塞（--test-timeout 无法中断），故与「上限淘汰」同理走内存库；
+  // 需要「文件在磁盘」的那一半仍用真实临时文件，语义不变。
+  h.destroy();
   h.clear();
 
   const realPath = path.join(dir, '老歌.mp3');

@@ -51,10 +51,10 @@ function buildEngine(overrides = {}) {
 
   const engine = createDownloadQueueEngine({
     userDataDir: () => dir,
-    safeSend: () => {},
+    progress: { emitQueueUpdated() {}, emitProgress() {}, emitError() {} },
     getDownloadUrlSmart: overrides.getDownloadUrlSmart || (async () => ({ url: 'https://cdn/x.mp3', ext: 'mp3' })),
     getLyrics: async () => ({ lrc: '' }),
-    notifier: { notifyDownloadDone: () => {} },
+    notify: { downloadDone: () => {}, showInFolder: () => {} },
     history: { add: (rec) => { historyAdds.push(rec); } },
     fsa: { statOrNull: async () => ({ size: 10 }) },
     downloader: {

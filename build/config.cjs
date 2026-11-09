@@ -22,6 +22,9 @@ module.exports = {
     'dist/main/**/*',
     'dist/preload/**/*',
     'dist/renderer/**/*',
+    // 旧渲染层回退产物。主进程支持 LY_RENDERER_DIR 显式指回 dist/renderer-legacy，
+    // 但开关指向的目录若没打进包，回退就是空头承诺 —— 新层渲染故障时用户无路可退。
+    'dist/renderer-legacy/**/*',
     'dist/api/**/*',
     'dist/utils/**/*',
     'dist/shared/**/*',

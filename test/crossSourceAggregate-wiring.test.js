@@ -96,11 +96,19 @@ test('主进程：handler 已注册（契约声明却没人注册 ⇒ assertCont
 });
 
 test('主进程：playlist 模块确实被装载（否则 handler 白写）', () => {
-  // ipc/playlist 由 main/index.js require 并调 register()；
-  // src/main/ipc/register.js 只做契约对账与 envelope 包装，不装载业务模块。
+  // ipc/playlist 由 main/index.js require 并以 domain/infra 注入式 register；
+  // 只匹配 register() 会把「注入了什么」这层信息整个漏掉。
   const MAIN = read('src/main/index.js');
   assert.match(MAIN, /require\('\.\/ipc\/playlist'\)/, 'main/index.js 应 require ipc/playlist');
-  assert.match(MAIN, /ipcPlaylist\.register\(\)/, 'main/index.js 应调用 ipcPlaylist.register()');
+  const reg = MAIN.match(/ipcPlaylist\.register\(\s*\{([\s\S]*?)\}\s*\)/);
+  assert.ok(reg, 'main/index.js 应以注入式调用 ipcPlaylist.register({ domain, infra })');
+  assert.match(reg[1], /domain:\s*playlistDomain/, 'register 未注入 playlist domain');
+  assert.match(reg[1], /infra:\s*createPlaylistInfra\(\)/, 'register 未注入 playlist infra');
+  // 注入的两个标识符必须真的定义出来（拼错名字 ⇒ 启动即 ReferenceError）
+  assert.match(MAIN, /const playlistDomain = require\('\.\/ipc\/playlist\/domain'\)/,
+    'main/index.js 缺 playlistDomain 定义');
+  assert.match(MAIN, /const \{ createInfra: createPlaylistInfra \} = require\('\.\/ipc\/playlist\/infra'\)/,
+    'main/index.js 缺 createPlaylistInfra 定义');
 });
 
 // ── 4. 只读纪律 ───────────────────────────────────────

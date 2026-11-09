@@ -31,6 +31,8 @@ function init(opts) {
   _getDownloadQueue = opts.getDownloadQueue || (() => []);
   _ctx = {
     app:           opts.app,
+    // M1.1-C：下载 IPC 域已改为构造注入（ipc/download/queue.js 不再读 context），
+    // 下列 5 项暂留给跨域调用方 subscriptions.js（ADR C8 的清理延后）。
     persistQueue:  opts.persistQueue,
     processQueue:  opts.processQueue,
     requestCancelDownload: opts.requestCancelDownload,

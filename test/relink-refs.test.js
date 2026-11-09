@@ -209,12 +209,24 @@ test('relinkFileRefs：一次改名的全部落库回写 + .lrc sidecar 跟着�
 });
 
 test('接线：rename-file 成功后必走 relink，且没有为它开新通道', () => {
-  // 文件操作域拆到 library/files.js；.lrc sidecar 约定在 library/lyrics.js
-  const lib = read('src/main/ipc/library/files.js');
-  const renameBlock = lib.slice(lib.indexOf("handle('rename-file'"), lib.indexOf('module.exports'));
-  assert.ok(renameBlock.includes('relinkFileRefs('), 'rename-file 没接回写');
-  assert.ok(renameBlock.indexOf('fsp.rename') < renameBlock.indexOf('relinkFileRefs('), '回写必须在文件真的改成功之后');
-  assert.match(lib, /success:\s*true,\s*relink/, '回写结果要随返回值上去，前端才能如实说');
+  // 文件操作业务在 library/domain/files.js 的 renameFile；IPC 薄壳只做校验 + 委托
+  const domain = read('src/main/ipc/library/domain/files.js');
+  const renameBlock = domain.slice(
+    domain.indexOf('async function renameFile'),
+    domain.indexOf('return { deleteFile, renameFile }'),
+  );
+  assert.ok(renameBlock.length > 0, '没找到 domain 的 renameFile 实现');
+  assert.match(renameBlock, /relink\.relinkFileRefs\(oldPath, newPath\)/, 'rename-file 没接回写');
+  assert.ok(renameBlock.indexOf('fs.fsp.rename') < renameBlock.indexOf('relink.relinkFileRefs('),
+    '回写必须在文件真的改成功之后');
+  assert.match(renameBlock, /success:\s*true,\s*relink:\s*relinkResult/, '回写结果要随返回值上去，前端才能如实说');
+
+  // 双段锚点：domain 有实现还不够，IPC 薄壳必须真的把 rename-file 委托过去
+  const shell = read('src/main/ipc/library/files.js');
+  const shellBlock = shell.slice(shell.indexOf("handle('rename-file'"), shell.indexOf('module.exports'));
+  assert.ok(shellBlock.length > 0, 'IPC 层没注册 rename-file');
+  assert.match(shellBlock, /return await files\.renameFile\(oldPath, newPath\)/,
+    'IPC 薄壳没把 rename-file 委托给 domain（handler 白写）');
 
   const contract = read('src/shared/ipcContract.js');
   assert.ok(!/'[a-z-]*(relink|rename-refs|rename-sync|sync-refs|relink-path)'/.test(contract), '不该为此功能新增通道名');
@@ -224,10 +236,14 @@ test('接线：rename-file 成功后必走 relink，且没有为它开新通道'
     '回写不需要新参数、更不需要新通道（契约形状变了就是走偏了）',
   );
 
-  const lyrics = read('src/main/ipc/library/lyrics.js');
-  assert.ok(!lyrics.includes("replace(/\\.[^.]+$/, '.lrc')"), 'library 还在内联拼 .lrc 路径（第 4 份约定必然漂移）');
-  assert.ok(/const \{ sidecarPathFor \} = require\('\.\.\/\.\.\/\.\.\/utils\/relinkRefs'\)/.test(lyrics), '没引 sidecarPathFor');
-  assert.equal((lyrics.match(/sidecarPathFor\(/g) || []).length, 2, '读写两侧都走同一个约定函数');
+  // .lrc sidecar 约定只有一份：domain 通过注入的 relink 适配器调用 sidecarPathFor
+  const lyrics = read('src/main/ipc/library/domain/lyrics.js');
+  assert.ok(!lyrics.includes("replace(/\\.[^.]+$/, '.lrc')"), 'domain 还在内联拼 .lrc 路径（第 4 份约定必然漂移）');
+  assert.equal((lyrics.match(/relink\.sidecarPathFor\(/g) || []).length, 2, '读写两侧都走同一个约定函数');
+  // 适配器必须真的接上，否则运行时 relink.sidecarPathFor 为 undefined
+  const lyricsAsm = read('src/main/ipc/library.js');
+  assert.match(lyricsAsm, /relink:\s*infraRelink/, 'library.js 未向歌词域注入 relink');
+  assert.match(read('src/main/ipc/library/infra/relink.js'), /sidecarPathFor/, 'relink 适配器未透出 sidecarPathFor');
 });
 
 test('接线：批量重命名后刷新内存歌单，并把回写失败如实说出口', () => {

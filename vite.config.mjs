@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import electron from 'vite-plugin-electron';
 import renderer from 'vite-plugin-electron-renderer';
+import vue from '@vitejs/plugin-vue';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 
@@ -66,12 +67,16 @@ export default defineConfig({
         },
       },
     ]),
+    // Vue3 渲染层重写（T3 极光玻璃）：.vue SFC 编译；
+    // renderer() 必须排在 vue() 之后 —— 它按 CJS 外部化 Node 内置模块，
+    // 与旧渲染层行为保持一致（新渲染层同样只用 window.musicAPI，不碰 Node）。
+    vue(),
     renderer(),
   ],
   root: 'src/renderer',
   base: './',
   build: {
-    outDir: '../../dist/renderer',
+    outDir: '../../dist/renderer-legacy',
     emptyOutDir: true,
     sourcemap: isDev,
   },

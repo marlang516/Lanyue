@@ -19,17 +19,54 @@ const TEMPLATE_KEY = 'downloadTemplates';
 const ACTIVE_KEY = 'activeDownloadTemplate';
 
 /**
+ * 默认下载基目录的取法 —— 由组装根（main/index.js）注入 `app.getPath('music')`。
+ *
+ * 本模块不再依赖 electron：electron 只留在组装根。注入缺失时回退成
+ * 「没有基目录」，回退链与改造前一致（prefs.saveDir → 注入的 music 目录 → 空）。
+ * @type {null | (() => string)}
+ */
+let getMusicDir = null;
+
+/** 解析注入的 music 基目录；注入方抛错/返回值非字符串一律当「没有」，绝不让它炸掉 handler */
+function musicBaseDir() {
+  if (typeof getMusicDir !== 'function') return '';
+  try {
+    const dir = getMusicDir();
+    return typeof dir === 'string' ? dir : '';
+  } catch (_e) {
+    return '';
+  }
+}
+
+/**
  * 当前下载根目录 —— 校验模板路径与推导 subpath 必须用同一个根，
  * 否则「校验说你在目录内、推导说你在目录外」，模板会被静默当成不可用。
  */
 function currentSaveDir() {
   // 兜底必须与真实落盘/展示默认目录同源，否则未设 saveDir 时
   // 默认目录下的模板路径会被误判越界（曾经的 home/Music 是第三套默认）
-  return prefs.get('saveDir')
-    || defaultDownloadDir(require('electron').app.getPath('music'));
+  const configured = prefs.get('saveDir');
+  if (configured) return configured;
+  const base = musicBaseDir();
+  if (!base) return '';
+  try { return defaultDownloadDir(base); } catch (_e) { return ''; }
 }
 
-function register() {
+/**
+ * @param {{ getMusicDir?: () => string, defaultMusicDir?: string }} [options]
+ *   getMusicDir：懒取 music 基目录（推荐，app ready 之后才调用）
+ *   defaultMusicDir：直接给一个固定基目录（测试/旧调用方用）
+ */
+function register(options) {
+  const opts = options || {};
+  if (typeof opts.getMusicDir === 'function') {
+    getMusicDir = opts.getMusicDir;
+  } else if (typeof opts.defaultMusicDir === 'string' && opts.defaultMusicDir) {
+    const fixed = opts.defaultMusicDir;
+    getMusicDir = () => fixed;
+  } else {
+    getMusicDir = null;
+  }
   handle('get-download-templates', () => {
     const templates = prefs.get(TEMPLATE_KEY) || [];
     const active = prefs.get(ACTIVE_KEY) || null;
@@ -131,6 +168,9 @@ function register() {
  */
 function sanitizeDownloadPath(templatePath, root) {
   if (!templatePath || typeof templatePath !== 'string') return null;
+  // 取不到根目录（既没设 saveDir、组装根也没注入 music 目录）时一律拒绝：
+  // path.resolve('') 会退化成进程 CWD，相对模板会被误判为「在允许目录内」。
+  if (!root || typeof root !== 'string' || !root.trim()) return null;
   const raw = templatePath.trim();
   // 拒绝含协议处理器 / 明显 traversal 的输入（兜底，path.resolve 后还会再校验）
   if (/^(file|https?|data|javascript|ftp|smb|ms-|mailto):/i.test(raw)) return null;

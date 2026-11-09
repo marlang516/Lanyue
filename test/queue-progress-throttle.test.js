@@ -34,10 +34,14 @@ function buildEngine(overrides = {}) {
 
   const engine = createDownloadQueueEngine({
     userDataDir: () => dir,
-    safeSend: (ch, payload) => { events.push({ ch, payload }); },
+    progress: {
+      emitQueueUpdated: (rows) => { events.push({ ch: 'queue-updated', payload: rows }); },
+      emitProgress: (taskId, payload) => { events.push({ ch: 'download-progress', payload }); },
+      emitError: (taskId, payload) => { events.push({ ch: 'download-error', payload }); },
+    },
     getDownloadUrlSmart: async () => ({ url: 'https://cdn/x.mp3', ext: 'mp3' }),
     getLyrics: async () => ({ lrc: '' }),
-    notifier: { notifyDownloadDone: () => {} },
+    notify: { downloadDone: () => {}, showInFolder: () => {} },
     history: { add: () => {} },
     fsa: { statOrNull: async () => ({ size: 1000 }) },
     downloader: overrides.downloader,

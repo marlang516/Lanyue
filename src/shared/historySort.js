@@ -6,6 +6,7 @@
  * 查不到一律回落默认序 —— 注入面由构造消除，不存在拼接用户输入的代码路径。
  */
 
+/** 排序键 → ORDER BY 片段（白名单，值永远是本模块内的字面量）。 @type {Record<string, string>} */
 const HISTORY_SORTS = {
   recent: 'seq DESC',
   oldest: 'seq ASC',
@@ -16,14 +17,22 @@ const HISTORY_SORTS = {
 
 const DEFAULT_SORT = 'recent';
 
-/** 归一：只认白名单键，其余（含垃圾值/非字符串）回落默认。 */
+/**
+ * 归一：只认白名单键，其余（含垃圾值/非字符串）回落默认。
+ * @param {*} raw 调用方传入的排序参数
+ * @returns {string} 白名单内的排序键（必定命中 HISTORY_SORTS）
+ */
 function normalizeHistorySort(raw) {
   return (typeof raw === 'string' && Object.prototype.hasOwnProperty.call(HISTORY_SORTS, raw))
     ? raw
     : DEFAULT_SORT;
 }
 
-/** 供 SQL 拼接使用：返回值永远是本模块内的字面量。 */
+/**
+ * 供 SQL 拼接使用：返回值永远是本模块内的字面量。
+ * @param {*} raw 调用方传入的排序参数
+ * @returns {string} 对应的 ORDER BY 片段
+ */
 function resolveSortOrder(raw) {
   return HISTORY_SORTS[normalizeHistorySort(raw)];
 }

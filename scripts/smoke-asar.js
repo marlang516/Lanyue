@@ -79,15 +79,16 @@ function locateAsar() {
   const release = path.join(ROOT, 'release', 'win-unpacked', 'resources', 'app.asar');
   if (fs.existsSync(release)) return release;
 
-  // 退回 .preview/ 下形如 package-1.0.19/win-unpacked/... 的产物，取版本号最大的
+  // 退回 .preview/ 下的打包产物。`package-<版本>/`（手工打包）与
+  // `release-smoke/`（npm run package:smoke）是同一形态，一律按 app.asar
+  // 的 mtime 取最新一份 —— 目录名排序会把 release-smoke 排在版本号前面，不可用。
   const preview = path.join(ROOT, '.preview');
   if (fs.existsSync(preview)) {
-    const cands = fs.readdirSync(preview)
-      .filter((d) => /^package-/.test(d))
-      .sort()
-      .reverse()
-      .map((d) => path.join(preview, d, 'win-unpacked', 'resources', 'app.asar'))
-      .filter((p) => fs.existsSync(p));
+    const cands = fs.readdirSync(preview, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((d) => path.join(preview, d.name, 'win-unpacked', 'resources', 'app.asar'))
+      .filter((p) => fs.existsSync(p))
+      .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
     if (cands.length) return cands[0];
   }
   return release;
@@ -168,13 +169,67 @@ const mainJs = read('dist/main/index.js') || '';
 check('dist/main/index.js 含 installRejectionGuard 调用',
   /installRejectionGuard/.test(mainJs), `${mainJs.length} B`);
 
-// 4) 渲染层产物形态：源下拉只剩「全部」一个 option，其余由 IPC 清单动态生成。
-//    v3 的关键契约 —— 若这里 >1，说明平台清单又被写回 HTML 了。
-const html = read('dist/renderer/index.html') || '';
-const sel = html.match(/<select[^>]*id="sourceSelect"[\s\S]*?<\/select>/);
-const optCount = sel ? (sel[0].match(/<option/g) || []).length : -1;
-check('dist/renderer/index.html 的 #sourceSelect 仅 1 个 option（平台清单改由 IPC 驱动）',
-  optCount === 1, `options=${optCount}`);
+// 4) 渲染层双产物形态：迁移期两套入口并存，各有各的契约。
+//      新层（Vue3）dist/renderer        —— 主进程默认加载的入口
+//      旧层（回退）dist/renderer-legacy —— 发布包必须带着，LY_RENDERER_DIR 才退得回去
+//
+//    内容形态判**工作树 dist/**，包成员判 asar —— 与第 7 项同一把尺：
+//    `npm run verify` 里 npm run build 刚产出 dist/，必然新鲜；而 release/ 里的包
+//    可能停在旧版本，用它的 HTML 去判新层形态，报的是「包旧」而不是「层错」。
+const NEW_DIR = 'dist/renderer';
+const LEGACY_DIR = 'dist/renderer-legacy';
+
+/** 读工作树 dist/ 下的文本文件（缺失 → null，失败信息交给调用方） */
+function readDist(rel) {
+  const p = path.join(ROOT, ...rel.split('/'));
+  return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null;
+}
+
+/** dist/<relDir>/assets 下匹配 re 的文件名（排序后返回） */
+function listAssets(relDir, re) {
+  const dir = path.join(ROOT, ...relDir.split('/'), 'assets');
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir).filter((f) => re.test(f)).sort();
+}
+
+// 4a) 新层：入口挂载点 + 构建出的 JS/CSS 都得在（SFC 编译漏产物时这几条最先红）
+const newHtml = readDist(`${NEW_DIR}/index.html`);
+check(`${NEW_DIR}/index.html 含挂载点 id="lanyue-app"（新 Vue 层入口）`,
+  /id="lanyue-app"/.test(newHtml || ''),
+  newHtml === null ? '文件不存在，请先 npm run build（新层构建入口）' : `${newHtml.length} B`);
+
+const newJs = listAssets(NEW_DIR, /^index-.*\.js$/);
+const newCss = listAssets(NEW_DIR, /^index-.*\.css$/);
+check(`${NEW_DIR}/assets/index-*.js 存在（新层 bundle）`,
+  newJs.length > 0, newJs.join(', ') || '未找到，请先 npm run build');
+check(`${NEW_DIR}/assets/index-*.css 存在（新层样式）`,
+  newCss.length > 0, newCss.join(', ') || '未找到，请先 npm run build');
+
+// 4b) 旧层回退产物：目录缺失是**硬失败**。
+//     打包配置配了 dist/renderer-legacy/** 却没有产物 ⇒ 发布版「有回退开关、无回退内容」，
+//     比没有开关更糟：故障时按文档设置 LY_RENDERER_DIR 只会得到空白页。
+const legacyHtml = readDist(`${LEGACY_DIR}/index.html`);
+if (legacyHtml === null) {
+  check(`${LEGACY_DIR}/index.html 存在（LY_RENDERER_DIR 回退产物）`, false,
+    `${LEGACY_DIR}/ 不存在 —— 请 npm run build 产出旧层（vite.config.mjs 的 outDir），或修回打包配置`);
+} else {
+  // 源下拉只剩「全部」一个 option，其余由 IPC 平台清单动态生成（v3 的关键契约；
+  // 若这里 >1，说明平台清单又被写回 HTML 了）。
+  const sel = legacyHtml.match(/<select[^>]*id="sourceSelect"[\s\S]*?<\/select>/);
+  const optCount = sel ? (sel[0].match(/<option/g) || []).length : -1;
+  check(`${LEGACY_DIR}/index.html 的 #sourceSelect 仅 1 个 option（平台清单改由 IPC 驱动）`,
+    optCount === 1, `options=${optCount}`);
+}
+
+// 4c) 两条入口都必须打进 asar：新层缺入口 = 默认加载 404；
+//     旧层缺入口 = LY_RENDERER_DIR 回退失效（这正是本项要守住的承诺）。
+//     ⚠ 这里判**包成员**，不因包陈旧而退判 dist —— 它问的是「用户拿到的那份包里有没有」。
+for (const dir of [NEW_DIR, LEGACY_DIR]) {
+  const entry = `${dir}/index.html`;
+  check(`asar 含${dir === NEW_DIR ? '新层' : '旧层回退'}入口 ${entry}`,
+    set.has(entry),
+    set.has(entry) ? '' : `包内缺 ${dir}/** —— 该包早于本次构建/打包配置，请 npm run package 后复跑`);
+}
 
 // 5) 独立窗口样式：不在 Vite 入口内，靠 postbuild 单拷，最容易漏
 check('asar 含 dist/renderer/styles/base.css（独立窗口样式依赖）',
@@ -212,14 +267,19 @@ if (lockRaw) {
 //    这一支没有变松；只有"包比源码旧"的开发机才退判 dist/。
 //    陈旧度输入集取 src/ **全部**文件：内容锚里有来自 lang/*.json 与 *.html/*.css 的串，
 //    只扫 .js 会把"改了词条没重打包"判成"包是新鲜的"。
-//    包**成员**断言（第 1/2/9/10 项）不受此影响 —— 那些是"用户拿到的 exe"专属的事实。
+//    包**成员**断言（第 1/2/4c/9/10 项）不受此影响 —— 那些是"用户拿到的 exe"专属的事实。
 const RENDERER_JS = path.join(ROOT, 'src', 'renderer', 'js');
-const assets = [...set].filter((p) => /^dist\/renderer\/assets\/index-.*\.js$/.test(p));
-const asarBundleText = assets.length ? (read(assets[0]) || '') : '';
+// ⚠ 以下内容锚全部是**旧层**专属（refreshPlayerState / EQ 桥接 / player-sync 频道），
+//    所以只认 dist/renderer-legacy 的 bundle。新层形态由第 4a 项按结构判
+//    （挂载点 + index-*.js/css），两层的锚串不混用 —— 混用就是把旧层的判据
+//    硬套到 Vue 产物上，必然假红。
+const LEGACY_BUNDLE_RE = /^dist\/renderer-legacy\/assets\/index-.*\.js$/;
+const legacyAssets = [...set].filter((p) => LEGACY_BUNDLE_RE.test(p));
+const asarBundleText = legacyAssets.length ? (read(legacyAssets[0]) || '') : '';
 
-/** 工作树 dist/ 里最新的渲染 bundle（verify 里就是刚刚 build 出来的那一份） */
+/** 工作树 dist/ 里最新的旧层 bundle（verify 里就是刚刚 build 出来的那一份） */
 function newestDistBundle() {
-  const dir = path.join(ROOT, 'dist', 'renderer', 'assets');
+  const dir = path.join(ROOT, 'dist', 'renderer-legacy', 'assets');
   if (!fs.existsSync(dir)) return '';
   const cands = fs.readdirSync(dir).filter((f) => /^index-.*\.js$/.test(f)).map((f) => path.join(dir, f));
   if (!cands.length) return '';
@@ -238,7 +298,7 @@ const resolvedBundle = pickBundleSource({
 const bundle = resolvedBundle.text;
 check(`渲染层 bundle 断言源 = ${resolvedBundle.from}（app.asar ${packageStale ? '早于' : '不早于'} src/ 最新改动）`,
   resolvedBundle.from !== 'none',
-  resolvedBundle.note || `包内 ${assets[0] || '无'} (${bundle.length} B)`);
+  resolvedBundle.note || `包内 ${legacyAssets[0] || '无'} (${bundle.length} B)`);
 
 check('渲染层 bundle 含 refreshPlayerState（顶栏状态单一判据）',
   /refreshPlayerState/.test(bundle), `${bundle.length} B @ ${resolvedBundle.from}`);

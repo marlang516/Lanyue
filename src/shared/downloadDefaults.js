@@ -11,7 +11,11 @@ const path = require('path');
 const MUSIC_DIR_NAME = 'MusicDownloader';
 const AI_SUBDIR_NAME = 'AI生成';
 
-/** 在给定基目录（如 app.getPath('music')）下拼默认下载目录 */
+/**
+ * 在给定基目录（如 app.getPath('music')）下拼默认下载目录。
+ * @param {string} baseDir 基目录（绝对路径）
+ * @returns {string} 拼接后的默认下载目录
+ */
 function defaultDownloadDir(baseDir) {
   return path.join(baseDir, MUSIC_DIR_NAME);
 }

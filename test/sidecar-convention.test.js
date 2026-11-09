@@ -53,7 +53,8 @@ test('全库只剩一处 .lrc 拼法（内联正则一律清零）', () => {
 
 test('三处消费方真的接上了（不是只删了旧写法）', () => {
   for (const [file, needCall] of [
-    ['src/main/downloadQueue.js', true],
+    // ADR 0003 §5 步骤 6：歌词 sidecar 的写入点在 downloadQueue/songTask.js（P9）。
+    ['src/main/downloadQueue/songTask.js', true],
     ['src/utils/onlineLrc.js', true],
     ['src/main/ipc/ai-music.js', true],
   ]) {
@@ -62,6 +63,6 @@ test('三处消费方真的接上了（不是只删了旧写法）', () => {
     if (needCall) assert.ok(src.includes('sidecarPathFor('), `${file} 引了不用`);
   }
   // downloadQueue 是主进程热路径：歌词写入仍必须在 embedId3Tags 之后、且不阻塞状态推进
-  const dq = read('src/main/downloadQueue.js');
-  assert.ok(dq.indexOf('embedId3Tags(savePath') < dq.indexOf('sidecarPathFor(savePath'), '顺序变了要重新评估失败隔离');
+  const dq = read('src/main/downloadQueue/songTask.js');
+  assert.ok(dq.indexOf('embedId3Tags(paths.savePath') < dq.indexOf('sidecarPathFor(paths.savePath'), '顺序变了要重新评估失败隔离');
 });

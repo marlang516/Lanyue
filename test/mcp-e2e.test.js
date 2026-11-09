@@ -61,7 +61,10 @@ prefs.init(userDataDir);
 cookieStore.init(userDataDir);
 require('../src/main/ipc/subscriptions').register();
 require('../src/main/ipc/downloadTemplates').register();
-require('../src/main/ipc/playlist').register();
+require('../src/main/ipc/playlist').register({
+  domain: require('../src/main/ipc/playlist/domain'),
+  infra: require('../src/main/ipc/playlist/infra').createInfra(),
+});
 // 'load-play-queue' 的真实 handler 长在 src/main/index.js:789（Electron 主入口的 boot 里，
 // 纯 node 测试装不进整个 index.js）。这里按 test/ai-assistant-e2e.test.js 的既有做法用
 // register.handle 注入同一条，返回值形状对齐 index.js:790 的 `loadPersistedPlayQueue() || { queue: [] }`。

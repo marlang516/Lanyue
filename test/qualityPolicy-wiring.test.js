@@ -47,13 +47,13 @@ function build(o = {}) {
 
   const engine = createDownloadQueueEngine({
     userDataDir: () => dir,
-    safeSend: () => {},
+    progress: { emitQueueUpdated() {}, emitProgress() {}, emitError() {} },
     getDownloadUrlSmart: o.getDownloadUrlSmart || (async (song, quality) => {
       getUrlCalls.push({ id: song.id, quality });
       return { url: 'https://cdn/x.mp3', ext: 'mp3' };
     }),
     getLyrics: async () => ({ lrc: '' }),
-    notifier: { notifyDownloadDone: () => {} },
+    notify: { downloadDone: () => {}, showInFolder: () => {} },
     getPolicyFacts: o.getPolicyFacts,
     history: { add: () => {} },
     fsa: { statOrNull: async () => ({ size: 1234 }) },
@@ -86,9 +86,13 @@ async function waitFor(fn, { timeout = 2000, interval = 10 } = {}) {
 // ── 生产接线守卫（源码级：锁住最容易回归的"闸门位置"）──
 
 const QJS = path.join(__dirname, '../src/main/downloadQueue.js');
+// ADR 0003 §5 步骤 6：策略闸门 / skip 落点 / 取流顺序迁到 downloadQueue/songTask.js。
+// 源码守卫取 facade + songTask 的并集（evaluatePolicy 本体仍在 facade）。
+const QSRC = [QJS, path.join(__dirname, '../src/main/downloadQueue/songTask.js')]
+  .map((p) => fs.readFileSync(p, 'utf8')).join('\n');
 
 test('生产接线：闸门必须在 getDownloadUrlSmart 之前（跳过的任务不碰网络）', () => {
-  const src = fs.readFileSync(QJS, 'utf8');
+  const src = QSRC;
   const i = src.indexOf('const policy = await evaluatePolicy(song);');
   const j = src.indexOf('await getDownloadUrlSmart(song');
   assert.ok(i > -1, '找不到策略闸门（接线被删？）');
@@ -97,16 +101,18 @@ test('生产接线：闸门必须在 getDownloadUrlSmart 之前（跳过的任�
 });
 
 test('生产接线：复用 done 状态而非新增状态（QUEUE_STATUSES 是闭合集）', () => {
-  const src = fs.readFileSync(QJS, 'utf8');
+  const src = QSRC;
   const { QUEUE_STATUSES } = require('../src/main/downloadQueue');
   assert.deepEqual([...QUEUE_STATUSES].sort(), ['done', 'downloading', 'error', 'pending'],
     '四态闭合集被改动：sanitizeRestoredTask 恢复校验与渲染层分支都依赖它');
-  assert.match(src, /song\.status = 'done';/, '跳过任务应落 done');
+  // 跳过落 done 的写法已收敛到状态机出口（transition 即 facade 的 applyStatus）；
+  // 断言意图不变：跳过的任务复用 done，而不是新增一个状态。
+  assert.match(src, /transition\(song, 'done', '策略跳过'\)/, '跳过任务应落 done');
   assert.match(src, /song\.skipReason = policy\.reason;/, '应保留可回显的跳过原因');
 });
 
 test('生产接线：规则来源是 prefs.qualityPolicyRules，读盘异常降级不抛', () => {
-  const src = fs.readFileSync(QJS, 'utf8');
+  const src = QSRC;
   assert.match(src, /prefs\.get\('qualityPolicyRules'\)/, '规则应从 prefs 读取');
   assert.match(src, /read rules failed, treat as none/, '读盘失败必须降级为 keep 而非抛出');
 });

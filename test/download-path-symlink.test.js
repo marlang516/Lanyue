@@ -200,7 +200,7 @@ function buildEngine(prefsStore, deps = {}) {
   const downloaded = [];
   const engine = createDownloadQueueEngine({
     userDataDir: () => tmpDir('dp-mq-'),
-    safeSend: () => {},
+    progress: { emitQueueUpdated() {}, emitProgress() {}, emitError() {} },
     getDownloadUrlSmart: async () => ({ url: 'https://cdn/x.mp3', ext: 'mp3' }),
     getLyrics: async () => ({ lrc: '' }),
     history: { add: () => {} },
@@ -277,9 +277,9 @@ test('downloadQueue: 未注入 isSaveDirAllowed 时不做复核（单测/旧调�
 // 4) 接线钉：接线位置与依赖方向
 // ══════════════════════════════════════════════════════════
 
-test('downloadPath: 真实路径那闸接的是 approvedDirs 的同源判据（不另抄一份）', () => {
+test('downloadPath: 真实路径那闸接的是 utils 侧同源的 realpath 判据（不另抄一份）', () => {
   const src = fs.readFileSync(path.join(ROOT, 'src/utils/downloadPath.js'), 'utf8');
-  assert.match(src, /require\('\.\.\/main\/approvedDirs'\)/, '要复用沙箱的 realpath 判据');
+  assert.match(src, /require\('\.\/realpathContain'\)/, '要复用下沉到 utils 的同源 realpath 判据');
   assert.match(src, /isInsideReal\(/, '要真的调它');
   // 词法那道不许被顺手删掉 —— 两道闸是纵深防御，少一道就退回旧形态
   assert.match(src, /if \(!isInsideDir\(root, dir\)\)/, '词法闸仍须在 realpath 闸之前');
@@ -289,15 +289,29 @@ test('downloadPath: 真实路径那闸接的是 approvedDirs 的同源判据（�
   );
 });
 
-test('依赖方向不会形成环：approvedDirs 只 require node 内置模块', () => {
+test('依赖方向不会形成环：实现在 utils，approvedDirs 只做 re-export', () => {
   const src = fs.readFileSync(path.join(ROOT, 'src/main/approvedDirs.js'), 'utf8');
   const requires = [...src.matchAll(/require\('([^']+)'\)/g)].map((m) => m[1]);
+  // 下沉后 approvedDirs 自己不再碰 path / fs，判据全部来自 utils 侧；
+  // 它是 main → utils 这条单向边，utils 不回头引用 main，因此不成环。
+  assert.deepStrictEqual(requires, ['../utils/realpathContain'],
+    'approvedDirs 只应 re-export utils 的同源判据；一旦再 require 项目内其他模块，就要复核是否成环');
+  assert.match(src, /module\.exports = \{[\s\S]*isInsideReal[\s\S]*realpathDeep[\s\S]*normalize/,
+    '对外导出名不变（8 个导出里包含这五个判据）');
+});
+
+test('依赖方向不会形成环：realpathContain 只 require node 内置模块', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'src/utils/realpathContain.js'), 'utf8');
+  const requires = [...src.matchAll(/require\('([^']+)'\)/g)].map((m) => m[1]);
   assert.deepStrictEqual(requires, ['path', 'fs'],
-    'approvedDirs 一旦 require 了项目内模块，utils/downloadPath 反向引用它就可能成环 —— 复核一下');
+    '判据实现必须停在 node 内置模块这道叶子上 —— 一旦 require 项目内模块，utils 侧就可能成环');
 });
 
 test('downloadQueue: 沙箱复核必须排在 mkdir 与 statfs 之前（顺序错了等于没复核）', () => {
-  const src = fs.readFileSync(path.join(ROOT, 'src/main/downloadQueue.js'), 'utf8');
+  // ADR 0003 §5 步骤 6：命名/目录/容量三个 phase 迁到 downloadQueue/songTask.js；
+  // 取 facade + songTask 的并集，顺序断言仍按同一份源码文本判定。
+  const src = ['src/main/downloadQueue.js', 'src/main/downloadQueue/songTask.js']
+    .map((p) => fs.readFileSync(path.join(ROOT, p), 'utf8')).join('\n');
   const recheck = src.indexOf('isSaveDirAllowed(dirPlan.dir)');
   assert.ok(recheck > 0, '落盘前必须对 dirPlan.dir 再过一次沙箱判定');
   assert.ok(recheck < src.indexOf('mkdir(dirPlan.dir'),

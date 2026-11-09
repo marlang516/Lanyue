@@ -21,6 +21,30 @@
  */
 
 // ── 参数规格原语（纯数据，可被打包器安全内联） ─────────────────
+
+/**
+ * 单个参数的形状规格（判别联合，按 `k` 分派）。
+ * @typedef {{ k: 'str', max: number }
+ *   | { k: 'int', def: number, max: number }
+ *   | { k: 'bool' }
+ *   | { k: 'enum', values: string[], def?: string }
+ *   | { k: 'obj' }
+ *   | { k: 'arr', max: number }
+ *   | { k: 'shape', fields: Record<string, ParamSpec>, required?: string[] }
+ *   | { k: 'any' }} ParamSpec
+ */
+
+/** @typedef {[name: string, spec: ParamSpec]} ArgSpec */
+
+/** @typedef {{ invoke?: string[], send?: string[], receive?: string[], args?: ArgSpec[] }} ChannelEntry */
+
+/** @typedef {{ ok: true, args: any[] } | { ok: false, error: string }} NormalizeResult */
+
+/** @typedef {{ v: number, win: string, invoke: string[], send: string[], receive: string[], envKey: string, methods: Record<string, string>, events: Record<string, string> }} ContractPayload */
+
+/** @typedef {{ str: (max: number) => ParamSpec, int: (def: number, max: number) => ParamSpec, bool: () => ParamSpec, enum: (values: string[], def?: string) => ParamSpec, obj: () => ParamSpec, arr: (max: number) => ParamSpec, shape: (def: { fields: Record<string, ParamSpec>, required?: string[] }) => ParamSpec, any: () => ParamSpec }} ParamFactory */
+
+/** @type {ParamFactory} */
 const t = {
   str:   (max) => ({ k: 'str', max }),
   int:   (def, max) => ({ k: 'int', def, max }),
@@ -28,6 +52,16 @@ const t = {
   enum:  (values, def) => ({ k: 'enum', values, def }),
   obj:   () => ({ k: 'obj' }),
   arr:   (max) => ({ k: 'arr', max }),
+  /**
+   * 字段级对象规格（白名单 + 逐字段类型）。与 obj() 的区别：obj() 只判「是不是对象」，
+   * shape 还拒绝未声明字段与类型不符的字段 —— 用于参数会被整体持久化/合并的写通道。
+   * 规格是纯数据（不含函数），可被 buildContractArg / MCP 的 JSON Schema 派生安全消费。
+   */
+  shape: (def) => ({
+    k: 'shape',
+    fields: (def && def.fields) || {},
+    required: (def && def.required) || [],
+  }),
   any:   () => ({ k: 'any' }),
 };
 
@@ -41,6 +75,7 @@ const BOTH = ['main', 'secondary'];
 // 故实际键值经 buildContractArg 的 envKey 字段注入，这里是唯一声明处。
 const ENVELOPE_KEY = '__ipcEnv';
 
+/** 全部通道契约：通道名 → { 方向窗口清单, 可选参数规格 }。 @type {Record<string, ChannelEntry>} */
 const CHANNELS = {
   // ── 搜索 / 歌词 / 推荐（invoke） ──────────────────
   'search-music':   { invoke: MAIN, args: [['keyword', t.str(200)], ['source', t.str(32)], ['page', t.int(1, 1000)]] },
@@ -79,7 +114,18 @@ const CHANNELS = {
   // 这里的 source 必须是**实际出流的源**，不由渲染层决定重取走哪个源。
   'proxy-play':             { invoke: MAIN, args: [['url', t.str(4000)], ['referer', t.str(4000)], ['refresh', t.obj()]] },
   'get-download-templates': { invoke: MAIN },
-  'save-download-template': { invoke: MAIN, args: [['template', t.obj()]] },
+  // template 会被整体持久化、并 merge 进既有记录，故用字段级 shape 收口：
+  // 出现白名单外字段 / 字段类型不符 → 进 handler 前就拒绝（其余 obj 通道语义不变）。
+  // required 留空：缺 name/path 仍由 handler 回产品文案（{success:false,error}），
+  // 避免把「名称和路径不能为空」这句用户可见提示换成参数校验错误。
+  'save-download-template': { invoke: MAIN, args: [['template', t.shape({
+    fields: {
+      id: t.str(64),
+      name: t.str(200),
+      path: t.str(2000),
+      subpath: t.str(2000),
+    },
+  })]] },
   'delete-download-template': { invoke: MAIN, args: [['templateId', t.str(64)]] },
   'set-active-template':    { invoke: MAIN, args: [['templateId', t.str(64)]] },
   'preview-naming-template':{ invoke: MAIN, args: [['template', t.any()]] },
@@ -111,7 +157,7 @@ const CHANNELS = {
   'update-id3-cover':     { invoke: MAIN, args: [['filePath', t.str(1024)], ['imageBase64', t.str(25000000)]] },
   'fetch-online-cover':   { invoke: MAIN, args: [['title', t.str(200)], ['artist', t.str(200)]] },
   'batch-fetch-lyrics':   { invoke: MAIN, args: [['songs', t.arr(5000)]] },
-  'check-local-exists':   { invoke: MAIN, args: [['payload', t.obj()]] },
+  'check-local-exists':   { invoke: MAIN, args: [['payload', t.shape({ fields: { saveDir: t.str(1024), items: t.arr(10000) }, required: [] })]] },
   'convert-audio':        { invoke: MAIN, args: [['params', t.obj()]] },
   'cancel-convert-audio': { invoke: MAIN },
   'delete-file':          { invoke: MAIN, args: [['filePath', t.str(1024)]] },
@@ -178,7 +224,7 @@ const CHANNELS = {
   // ── MCP 本地服务（invoke）─────────────────────────
   'mcp-status':     { invoke: MAIN },
   'mcp-set-config': { invoke: MAIN, args: [['cfg', t.any()]] },
-  'mcp-audit':      { invoke: MAIN, args: [['opts', t.obj()]] },
+  'mcp-audit':      { invoke: MAIN, args: [['opts', t.shape({ fields: { limit: t.int(50, 1000) }, required: [] })]] },
   'mcp-audit-clear': { invoke: MAIN },
   'mcp-connect-snippet': { invoke: MAIN },
 
@@ -262,6 +308,7 @@ const CHANNELS = {
 };
 
 // ── 渲染层方法名（camelCase）→ 通道：主窗口 musicAPI 的生成清单 ──
+/** @type {Record<string, string>} */
 const METHODS = {
   // 窗口（send-only：主进程只有 ipcMain.on，走 invoke 会无人应答）
   windowClose: 'window-close',
@@ -399,6 +446,7 @@ const METHODS = {
 };
 
 // ── 主窗口订阅事件：方法名 → receive 通道 ────────────────────
+/** @type {Record<string, string>} */
 const EVENTS = {
   onQueueUpdated: 'queue-updated',
   onQueuePausedChanged: 'queue-paused-changed',
@@ -421,6 +469,63 @@ const EVENTS = {
 };
 
 // ── 校验 ─────────────────────────────────────────────────────
+
+/**
+ * shape 字段的类型判定：**只判不转**。
+ *
+ * 与 coerceVal 的 str 不同（那边把数字 String 化是历史口径），shape 的字段会被
+ * 原样落库，静默改成 "42" 比明确拒绝更难解释；因此类型不符就是拒绝。
+ * @param {ParamSpec} spec 字段规格
+ * @param {*} v 字段值（已排除 undefined）
+ * @returns {boolean}
+ */
+function shapeFieldMatches(spec, v) {
+  switch (spec.k) {
+    case 'any': return true;
+    case 'str': return typeof v === 'string';
+    case 'int': return typeof v === 'number' && Number.isFinite(v);
+    case 'bool': return typeof v === 'boolean';
+    case 'enum': return typeof v === 'string' && spec.values.includes(v);
+    case 'obj': return v !== null && typeof v === 'object' && !Array.isArray(v);
+    case 'arr': return Array.isArray(v);
+    default: return false;
+  }
+}
+
+/**
+ * 按 shape 规格校验对象：白名单外字段、字段类型不符、必填缺失都算形状非法。
+ * @param {{ fields?: Record<string, ParamSpec>, required?: string[] }} spec
+ * @param {*} v 原始值
+ * @returns {*} 合法时原样返回（不复制、不改写）；非法时返回 { __err }
+ */
+function coerceShape(spec, v) {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== 'object' || Array.isArray(v)) return { __err: '应为对象' };
+  const fields = spec.fields || {};
+  for (const key of Object.keys(v)) {
+    if (!Object.prototype.hasOwnProperty.call(fields, key)) {
+      return { __err: `未知字段 ${key}` };
+    }
+    const val = v[key];
+    if (val === undefined) continue;   // 视为未提供，交给 handler 的既有判空
+    if (!shapeFieldMatches(fields[key], val)) {
+      return { __err: `字段 ${key} 类型不符` };
+    }
+  }
+  for (const key of spec.required || []) {
+    if (v[key] === undefined || v[key] === null) {
+      return { __err: `缺少必填字段 ${key}` };
+    }
+  }
+  return v;
+}
+
+/**
+ * 按参数规格钳制单个值（只做形状校验，不改变合法值语义）。
+ * @param {ParamSpec} spec 参数规格
+ * @param {*} v 原始值
+ * @returns {*} 钳制后的值；形状非法时返回 { __err: string } 标记对象
+ */
 function coerceVal(spec, v) {
   switch (spec.k) {
     case 'any':  return v;
@@ -449,6 +554,7 @@ function coerceVal(spec, v) {
       if (!Array.isArray(v)) return { __err: '应为数组' };
       return v.length > spec.max ? v.slice(0, spec.max) : v;
     }
+    case 'shape': return coerceShape(spec, v);
     default: return { __err: '未知参数规格' };
   }
 }
@@ -457,6 +563,9 @@ function coerceVal(spec, v) {
  * 把 ipcMain 收到的 rest 参数规整为契约声明的位置参数数组。
  * 兼容三种调用形态：位置参数（现状主流）、单数组、单对象（按声明的参数名取键）。
  * 返回 { ok, args } 或 { ok:false, error }。
+ * @param {string} channel 通道名
+ * @param {any[]} raw ipcMain 收到的 rest 参数
+ * @returns {NormalizeResult}
  */
 function normalizeArgs(channel, raw) {
   const entry = CHANNELS[channel];
@@ -484,6 +593,13 @@ function normalizeArgs(channel, raw) {
 }
 
 // ── 供 preload 派生白名单 ────────────────────────────────────
+
+/**
+ * 取某个窗口在某方向（invoke/send/receive）上的通道白名单。
+ * @param {string} win 窗口名（'main' / 'secondary'）
+ * @param {'invoke'|'send'|'receive'} dir 方向
+ * @returns {Set<string>} 该方向的通道名集合
+ */
 function channelsFor(win, dir) {
   const set = new Set();
   for (const [name, e] of Object.entries(CHANNELS)) {
@@ -496,11 +612,14 @@ function channelsFor(win, dir) {
  * 序列化某个窗口的契约清单，经 webPreferences.additionalArguments 注入，
  * preload 从 process.argv 解析 —— sandbox preload 运行时不能 require 应用
  * 相对路径（Vite 也不内联 CJS require），这是保持单一事实源的传递方式。
+ * @param {string} win 窗口名（'main' / 'secondary'）
+ * @returns {string} 形如 `--ipc-contract=<json>` 的启动参数
  */
 function buildContractArg(win) {
   const invoke = [...channelsFor(win, 'invoke')];
   const send = [...channelsFor(win, 'send')];
   const receive = [...channelsFor(win, 'receive')];
+  /** @type {ContractPayload} */
   const payload = { v: 1, win, invoke, send, receive, envKey: ENVELOPE_KEY, methods: {}, events: {} };
   if (win === 'main') {
     payload.methods = METHODS;

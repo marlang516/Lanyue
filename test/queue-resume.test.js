@@ -44,10 +44,10 @@ function buildEngine(overrides = {}) {
 
   const engine = createDownloadQueueEngine({
     userDataDir: () => dir,
-    safeSend: () => {},
+    progress: { emitQueueUpdated() {}, emitProgress() {}, emitError() {} },
     getDownloadUrlSmart: async (song) => { fetched.push(String(song && song.id)); return { url: 'https://cdn/x.mp3', ext: 'mp3' }; },
     getLyrics: async () => ({ lrc: '' }),
-    notifier: { notifyDownloadDone: () => {} },
+    notify: { downloadDone: () => {}, showInFolder: () => {} },
     getDefaultDownloadDir: () => path.join(dir, 'dl'),
     history: { add: () => {} },
     fsa: { statOrNull: async () => ({ size: 1 }) },

@@ -43,6 +43,10 @@ const ERROR_CODES = {
 
 // ── 用户友好消息映射 ──────────────────────────────────────
 
+/**
+ * 错误码 → 用户友好文案生成器（参数为平台名，可缺省）。
+ * @type {Record<string, (platform?: string) => string>}
+ */
 const ERROR_MESSAGES = {
   [ERROR_CODES.VIP_REQUIRED]:         (p) => `该歌曲需要 ${p || ''}VIP 会员，请在设置中填入已登录的 Cookie`,
   [ERROR_CODES.AUTH_EXPIRED]:         (p) => `${p || ''}鉴权已过期，请重新登录获取 Cookie`,
@@ -69,11 +73,16 @@ const ERROR_MESSAGES = {
 // ── 错误对象工厂 ──────────────────────────────────────────
 
 /**
+ * 统一错误对象形状。`extra` 中的键会被展开合并到该对象上。
+ * @typedef {{ error: string, code: string, fatal: boolean, platform?: string }} AppErrorResult
+ */
+
+/**
  * 创建标准化错误对象
  * @param {string} code - 错误码
- * @param {string} platform - 平台名称（可选）
- * @param {object} extra - 额外信息（可选）
- * @returns {{ error: string, code: string, fatal: boolean, platform?: string }}
+ * @param {string} [platform] - 平台名称（可选）
+ * @param {object} [extra] - 额外信息（可选）
+ * @returns {AppErrorResult}
  */
 function createError(code, platform, extra = {}) {
   const msgFn = ERROR_MESSAGES[code];
@@ -88,7 +97,11 @@ function createError(code, platform, extra = {}) {
 }
 
 /**
- * 创建可重试的错误（非 fatal）
+ * 创建可重试的错误（非 fatal）。形状与 createError 一致，仅 fatal 置为 false。
+ * @param {string} code - 错误码
+ * @param {string} [platform] - 平台名称（可选）
+ * @param {object} [extra] - 额外信息（可选）
+ * @returns {AppErrorResult}
  */
 function createRetryableError(code, platform, extra = {}) {
   return { ...createError(code, platform, extra), fatal: false };

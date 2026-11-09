@@ -62,13 +62,16 @@ const SIGNATURE_WORDS = [
 ].join('|');
 const SIGNATURE = new RegExp(`[${SIGNATURE_CHARS.join('')}]|${SIGNATURE_WORDS}`);
 
-/** 合法命中：讲到 U+FFFD 本身的注释行。精确到行，过期即红。 */
+/** 合法命中：讲到替换符本身的注释行。精确到行，过期即红。 */
 const ALLOWED = new Set([
   // 2026-10-13：library.js 删掉了 2 行 require，行号从 481 移到 488。
   // 2026-10-17：library.js 按域拆分（转码/歌词等抽进 library/ 子目录），
-  // LRC 解码落在 lyrics.js，行号从 488 移到 97。守卫按行号登记，改动该
-  // 文件必须同步这里 —— 这正是「过期即红」要的效果：白名单不允许变成万能豁免。
-  'src/main/ipc/library/lyrics.js:97',
+  // LRC 解码落在 lyrics.js，行号从 488 移到 97。
+  // 2026-11-08：歌词域再拆 domain/infra 后，LRC 解码主体移入
+  // library/domain/lyrics.js（_decodeLrcBuffer / _hasReplacementChar），其中
+  // 用 \uFFFD 转义而非字面量表示替换符；library/lyrics.js 只剩 handler 壳层，
+  // 已没有「合法提到替换符」的注释行。因此清空白名单 —— 没有合法命中就不该
+  // 留豁免，留着过期条目只会变成万能豁免的温床。
 ]);
 
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'release', '.backup', '.preview', 'spark-output']);

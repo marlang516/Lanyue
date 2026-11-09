@@ -161,7 +161,9 @@ test('模块形态与渲染层一致：ESM 导出，不是 CJS（vite build 会�
 });
 
 test('接线：主进程确实把 skipRule / skipReason 写在任务上', () => {
-  const src = fs.readFileSync(path.join(ROOT, 'src/main/downloadQueue.js'), 'utf8');
+  // ADR 0003 §5 步骤 6：策略 skip 分支迁到 downloadQueue/songTask.js（取并集）。
+  const src = ['src/main/downloadQueue.js', 'src/main/downloadQueue/songTask.js']
+    .map((p) => fs.readFileSync(path.join(ROOT, p), 'utf8')).join('\n');
   assert.match(src, /song\.skipReason\s*=/, '主进程未写 skipReason');
   assert.match(src, /song\.skipRule\s*=/, '主进程未写 skipRule');
 });

@@ -51,7 +51,12 @@ Module._load = function interceptedLoad(request, parent, isMain) {
 const prefs = require('../src/utils/prefs');
 const cookieStore = require('../src/utils/cookieStore');
 const ipcPlaylist = require('../src/main/ipc/playlist');
-ipcPlaylist.register();
+// 注入式注册：infra 用默认适配器（prefs/cookieStore 均在调用时读取，
+// 所以 fresh() 里 init 到新目录的隔离数据照样生效）
+ipcPlaylist.register({
+  domain: require('../src/main/ipc/playlist/domain'),
+  infra: require('../src/main/ipc/playlist/infra').createInfra(),
+});
 
 const { ENVELOPE_KEY } = require('../src/shared/ipcContract');
 const invoke = (channel) => {

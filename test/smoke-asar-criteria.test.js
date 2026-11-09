@@ -214,7 +214,7 @@ test('smoke-asar.js 里三项 bundle 内容断言共用同一个断言源', () =
     'bundle 必须来自 pickBundleSource 选出的源，而不是硬读 asar');
   assert.equal(countOf(script, 'pickBundleSource('), 1, '断言源只解析一次');
   assert.match(script, /渲染层 bundle 断言源/, '退化情况要单独成一项检查，不许只写在注释里');
-  assert.equal(countOf(script, 'read(assets[0])'), 1,
+  assert.equal(countOf(script, 'read(legacyAssets[0])'), 1,
     '包内 bundle 只读一次（喂给断言源解析）；第二处就是又分了一个家');
   assert.ok(!/const bundle = assets\.length/.test(script),
     '旧写法「bundle 硬读 asar」不许回来：那正是 9/18 旧包天天假红的成因');
@@ -233,4 +233,45 @@ test('门禁工具不许拖进第三方依赖（scripts/ 不在 check:dead-deps 
   const reqs = [...mod.matchAll(/require\(['"]([^'"]+)['"]\)/g)].map((m) => m[1]);
   assert.deepEqual(reqs.filter((r) => !['fs', 'path'].includes(r)), [],
     'smoke-checks.cjs 只准用 node 内建模块');
+});
+
+// ── 双产物门禁：新层 / 旧层回退各有各的判据 ──────────────────
+test('冒烟门禁判双产物：新层 dist/renderer 判 id=lanyue-app，旧层 dist/renderer-legacy 判 sourceSelect', () => {
+  const script = read('scripts/smoke-asar.js');
+
+  // 新层：Vue 产物没有 refreshPlayerState / EQ 这些东西，唯一可靠的锚是挂载点与构建产物
+  assert.match(script, /id="lanyue-app"/,
+    '新层入口的挂载点必须被断言（旧判据读 sourceSelect，在 Vue 层永远假红）');
+  assert.ok(script.includes('listAssets(NEW_DIR, /^index-.*\\.js$/)'),
+    '新层 bundle 产物（assets/index-*.js）必须被断言');
+  assert.ok(script.includes('listAssets(NEW_DIR, /^index-.*\\.css$/)'),
+    '新层样式产物（assets/index-*.css）也要判：Vue SFC 的样式同样可能漏产出');
+
+  // 旧层：回退入口必须单独断言，缺目录要显式失败而不是静默跳过
+  assert.ok(script.includes("const LEGACY_DIR = 'dist/renderer-legacy'"),
+    '旧层产物目录必须可被定位（renderer-legacy）');
+  assert.ok(script.includes('readDist(`${LEGACY_DIR}/index.html`)'),
+    '旧层回退入口必须单独断言（缺目录走显式失败分支）');
+  assert.match(script, /sourceSelect/, '旧层的 v3 契约（源下拉仅 1 个 option）不能丢');
+  assert.ok(script.includes('LY_RENDERER_DIR'),
+    '缺少旧层时，失败信息要说明它破坏的是哪条承诺（回退开关）');
+
+  // 内容锚（refreshPlayerState / EQ / player-sync）只属于旧层 bundle：
+  // 必须认 renderer-legacy 的 assets，不许再指向新层 dist/renderer/assets。
+  assert.ok(script.includes('const LEGACY_BUNDLE_RE = /^dist\\/renderer-legacy\\/assets\\/index-'),
+    '旧层 bundle 的判定路径必须是 renderer-legacy/assets');
+  assert.ok(!script.includes('const assets = [...set].filter((p) => /^dist\\/renderer\\/assets'),
+    '旧写法「内容锚读 dist/renderer 的 bundle」在双产物下必然假红，不许回来');
+});
+
+test('打包配置必须带上旧层回退产物（否则 LY_RENDERER_DIR 只是空头承诺）', () => {
+  const cfg = read('build/config.cjs');
+  assert.match(cfg, /'dist\/renderer-legacy\/\*\*\/\*'/,
+    'files 缺 dist/renderer-legacy/** ⇒ 发布包内没有回退目录，LY_RENDERER_DIR 指过去只会空白');
+});
+
+test('vite.app.config.mjs 的构建目标注释与 outDir 一致，不许再提 renderer-v2', () => {
+  const cfg = read('vite.app.config.mjs');
+  assert.ok(!/renderer-v2/.test(cfg), 'dist/renderer-v2 是过期路径，注释必须与 outDir 同步');
+  assert.match(cfg, /dist\/renderer-legacy/, '注释里要说明旧层构建到 renderer-legacy（回退产物）');
 });

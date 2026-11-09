@@ -203,11 +203,15 @@ test('接线：菜单项 / 面板入口 / 主进程透传 / 零新通道 全齐'
   assert.match(palette, /id: 'pl-abclip'/, '命令面板缺入口');
   assert.match(palette, /_call\('exportAbClip'\)/, '命令面板未指向同一个全局函数');
 
-  // 转码域拆到 library/convert.js（library.js 只剩组装根）
-  const lib = read('src/main/ipc/library/convert.js');
-  assert.match(lib, /start: clip \? clip\.start : null/, '主进程未透传起点');
-  assert.match(lib, /const clip = \(start != null \|\| end != null\)/, '主进程未做区间合法性判定');
-  assert.match(lib, /片段区间无效/, '非法区间必须明确失败，不能静默出全曲');
+  // 转码业务在 library/domain/convert.js；library/convert.js 只剩校验 + 委托
+  const domain = read('src/main/ipc/library/domain/convert.js');
+  assert.match(domain, /start: clip \? clip\.start : null/, '主进程未透传起点');
+  assert.match(domain, /end: clip \? clip\.end : null/, '主进程未透传终点');
+  assert.match(domain, /const clip = \(start != null \|\| end != null\)/, '主进程未做区间合法性判定');
+  assert.match(domain, /片段区间无效/, '非法区间必须明确失败，不能静默出全曲');
+  // 双段锚点：domain 里写了不算接上，IPC 薄壳必须真的把 params 交给它
+  const shell = read('src/main/ipc/library/convert.js');
+  assert.match(shell, /convert\.convertAudio\(params\)/, 'IPC 层没把含 start/end 的 params 交给转码域');
 
   // 复用既有通道：契约里 convert-audio 仍是自由对象参数，且没冒出新通道名
   const contract = read('src/shared/ipcContract.js');

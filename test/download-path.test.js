@@ -203,8 +203,10 @@ test('activePathTemplate: 只按 id 取活动模板，缺 id/查不到都算没�
 // ── 接线钉：链路每一环都得真的接上（死开关就是这么死的） ──
 
 test('downloadQueue: 落盘目录取自 planDownloadDir，mkdir/statfs/下载路径三者同源', () => {
-  const src = read('src/main/downloadQueue.js');
-  assert.match(src, /require\('\.\.\/utils\/downloadPath'\)/, '要接上目录规划模块');
+  // ADR 0003 §5 步骤 6：12 个 phase（含命名/目录）迁到 downloadQueue/songTask.js。
+  // 取 facade 与 songTask 的并集：任一侧被改回「平铺在根目录」都必须红。
+  const src = _readFile('src/main/downloadQueue.js') + _readFile('src/main/downloadQueue/songTask.js');
+  assert.match(src, /require\('(?:\.\.\/)+utils\/downloadPath'\)/, '要接上目录规划模块');
   assert.match(src, /activePathTemplate\(/, '要读活动模板');
   assert.match(src, /planDownloadDir\(/, '要按模板规划目录');
   // mkdir 的必须是规划出来的目录，不是根目录 —— 否则子目录永远不会被创建（ENOENT）

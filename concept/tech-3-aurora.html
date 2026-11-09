@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>科技风 · 三 · 极光玻璃 Aurora Glass</title>
+<style>
+/* 浅色科技：白底 + 极光渐变光斑 + 磨砂玻璃卡片 + 细彩描边；
+   Apple Vision Pro 气质——科技但不黑暗 */
+:root{
+  --bg:#f2f4f9; --ink:#141824; --ink2:#5b6478; --ink3:#9aa3b5;
+  --glass:rgba(255,255,255,.55); --glass2:rgba(255,255,255,.72);
+  --line:rgba(20,24,36,.08);
+  --a1:#7c5cff; --a2:#00c6ff; --a3:#ff5fb0; --a4:#37e6a8;
+  --e:cubic-bezier(.22,1,.36,1);
+  font-size:14px;
+}
+*{margin:0;box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font-family:"Microsoft YaHei UI","PingFang SC",system-ui,sans-serif;overflow:hidden;display:flex;flex-direction:column;position:relative}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;background:
+  radial-gradient(38% 44% at 12% 8%,rgba(124,92,255,.22),transparent 70%),
+  radial-gradient(34% 40% at 88% 4%,rgba(0,198,255,.2),transparent 70%),
+  radial-gradient(40% 46% at 82% 92%,rgba(255,95,176,.16),transparent 70%),
+  radial-gradient(30% 36% at 8% 90%,rgba(55,230,168,.16),transparent 70%)}
+.app{flex:1;display:flex;min-height:0;position:relative;padding:18px;gap:18px}
+.rail{width:78px;flex-shrink:0;border-radius:24px;background:var(--glass);backdrop-filter:blur(24px);border:1px solid rgba(255,255,255,.8);box-shadow:0 8px 32px rgba(20,24,36,.08);display:flex;flex-direction:column;align-items:center;padding:18px 0}
+.mark{width:42px;height:42px;border-radius:14px;background:conic-gradient(from 200deg,var(--a1),var(--a2),var(--a4),var(--a3),var(--a1));display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:17px;box-shadow:0 6px 18px rgba(124,92,255,.4)}
+.rail nav{margin-top:26px;display:flex;flex-direction:column;gap:10px;flex:1}
+.rail a{width:46px;height:46px;border-radius:15px;display:flex;align-items:center;justify-content:center;color:var(--ink3);cursor:pointer;transition:.22s var(--e)}
+.rail a svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.8}
+.rail a:hover{color:var(--ink2);background:rgba(255,255,255,.7)}
+.rail a.on{color:#fff;background:linear-gradient(135deg,var(--a1),var(--a2));box-shadow:0 8px 20px rgba(94,110,255,.45)}
+.card{border-radius:24px;background:var(--glass);backdrop-filter:blur(24px);border:1px solid rgba(255,255,255,.8);box-shadow:0 8px 32px rgba(20,24,36,.08)}
+main{flex:1;min-width:0;display:flex;flex-direction:column;gap:18px}
+.top{display:flex;gap:14px;align-items:center}
+.search{flex:1;display:flex;align-items:center;gap:10px;padding:13px 22px;border-radius:18px;font-size:13px;color:var(--ink3)}
+.search svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2}
+.pills{display:flex;gap:8px}
+.pill{padding:11px 18px;border-radius:16px;font-size:12px;color:var(--ink2);cursor:pointer}
+.pill.on{background:linear-gradient(135deg,var(--a1),var(--a2));color:#fff;box-shadow:0 6px 18px rgba(94,110,255,.4)}
+.hero{display:grid;grid-template-columns:1fr 360px;gap:18px;flex:1;min-height:0}
+.left{padding:34px 38px;display:flex;flex-direction:column;overflow-y:auto;scrollbar-width:none}
+.aur-tag{font-size:10px;letter-spacing:.3em;color:var(--a1);font-weight:700}
+.hero h1{font-size:38px;font-weight:800;margin-top:12px;letter-spacing:.01em;background:linear-gradient(95deg,var(--ink) 25%,var(--a1) 60%,var(--a2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero .sub{margin-top:10px;color:var(--ink2);font-size:13.5px;line-height:1.8;max-width:48ch}
+.act{margin-top:22px;display:flex;gap:12px}
+.btn{padding:14px 30px;border-radius:16px;font-size:13.5px;font-weight:700;cursor:pointer;border:0;transition:.22s var(--e);display:flex;gap:9px;align-items:center}
+.btn-p{background:linear-gradient(135deg,var(--a1),var(--a2));color:#fff;box-shadow:0 10px 26px rgba(94,110,255,.45)}
+.btn-p:hover{transform:translateY(-2px);box-shadow:0 16px 34px rgba(94,110,255,.55)}
+.btn-p svg{width:13px;height:13px;fill:#fff}
+.btn-g{background:rgba(255,255,255,.7);color:var(--ink2);border:1px solid var(--line)}
+.btn-g:hover{color:var(--ink)}
+.list{margin-top:26px;display:flex;flex-direction:column;gap:8px}
+.it{display:grid;grid-template-columns:34px 1fr 110px 90px 52px;gap:12px;align-items:center;padding:11px 14px;border-radius:16px;background:rgba(255,255,255,.5);cursor:pointer;transition:.18s}
+.it:hover{background:rgba(255,255,255,.85);transform:translateX(4px)}
+.it.on{background:linear-gradient(95deg,rgba(124,92,255,.14),rgba(0,198,255,.12));box-shadow:inset 0 0 0 1px rgba(124,92,255,.3)}
+.it .n{font-size:11px;color:var(--ink3);font-variant-numeric:tabular-nums}
+.it.on .n{color:var(--a1);font-weight:700}
+.it .t{font-size:13.5px;font-weight:650}
+.it .a{font-size:11px;color:var(--ink3);margin-top:1px}
+.it .q{font-size:10px;font-weight:700;letter-spacing:.06em;color:var(--a2)}
+.it .s{font-size:11px;color:var(--ink2)}
+.it .d{font-size:11.5px;color:var(--ink3);text-align:right;font-variant-numeric:tabular-nums}
+.right{padding:30px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;position:relative;overflow:hidden}
+.disc{width:230px;height:230px;border-radius:50%;background:conic-gradient(from 0deg,var(--a1),var(--a2) 30%,var(--a4) 55%,var(--a3) 80%,var(--a1));box-shadow:0 20px 50px rgba(94,110,255,.35);display:flex;align-items:center;justify-content:center;animation:rot 16s linear infinite}
+@keyframes rot{to{transform:rotate(360deg)}}
+.disc .in{width:78%;height:78%;border-radius:50%;background:rgba(255,255,255,.85);backdrop-filter:blur(8px);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px}
+.disc .in b{font-size:13px;font-weight:750}
+.disc .in span{font-size:10.5px;color:var(--ink3)}
+.disc .in .hole{width:16px;height:16px;border-radius:50%;background:var(--bg);margin-top:6px}
+.rmeta{text-align:center}
+.rmeta h3{font-size:19px;font-weight:800}
+.rmeta p{font-size:12px;color:var(--ink2);margin-top:4px}
+.bars{display:flex;gap:3px;align-items:flex-end;height:30px}
+.bars i{width:5px;border-radius:3px;background:linear-gradient(180deg,var(--a1),var(--a2));animation:q 1.2s infinite}
+.bars i:nth-child(1){height:40%}.bars i:nth-child(2){height:75%;animation-delay:.15s}.bars i:nth-child(3){height:55%;animation-delay:.3s}.bars i:nth-child(4){height:90%;animation-delay:.45s}.bars i:nth-child(5){height:65%;animation-delay:.6s}.bars i:nth-child(6){height:80%;animation-delay:.75s}.bars i:nth-child(7){height:45%;animation-delay:.9s}
+@keyframes q{0%,100%{transform:scaleY(.45)}50%{transform:scaleY(1)}}
+.krow{display:flex;gap:10px;width:100%}
+.kc{flex:1;border-radius:14px;background:rgba(255,255,255,.6);padding:10px;text-align:center}
+.kc b{display:block;font-size:15px;font-weight:800;background:linear-gradient(120deg,var(--a1),var(--a2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.kc span{font-size:9.5px;color:var(--ink3);letter-spacing:.08em}
+footer{flex-shrink:0;margin:0 18px 18px;border-radius:20px;background:var(--glass2);backdrop-filter:blur(24px);border:1px solid rgba(255,255,255,.9);box-shadow:0 8px 32px rgba(20,24,36,.1);height:78px;display:grid;grid-template-columns:1fr 2fr 1fr;align-items:center;padding:0 26px;gap:22px;position:relative;z-index:2}
+.np{display:flex;gap:13px;align-items:center;min-width:0}
+.np .th{width:44px;height:44px;border-radius:13px;background:conic-gradient(from 210deg,var(--a1),var(--a2),var(--a3),var(--a1));flex-shrink:0;box-shadow:0 4px 14px rgba(94,110,255,.4)}
+.np .t{font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.np .a{font-size:11px;color:var(--ink3)}
+.ctr{display:flex;flex-direction:column;gap:9px;align-items:center}
+.ctl{display:flex;gap:22px;align-items:center}
+.ctl svg{width:16px;height:16px;stroke:var(--ink2);fill:none;stroke-width:1.8;cursor:pointer;transition:.15s}
+.ctl svg:hover{stroke:var(--a1)}
+.ctl .pp{width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,var(--a1),var(--a2));display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 6px 18px rgba(94,110,255,.5)}
+.ctl .pp svg{stroke:none;fill:#fff;width:13px;height:13px}
+.scrub{display:flex;align-items:center;gap:11px;width:100%;max-width:520px;font-size:10px;color:var(--ink3);font-variant-numeric:tabular-nums}
+.scrub .rl{flex:1;height:4px;background:rgba(20,24,36,.08);border-radius:99px;position:relative}
+.scrub .rl i{position:absolute;left:0;top:0;bottom:0;width:34%;background:linear-gradient(90deg,var(--a1),var(--a2));border-radius:99px}
+.scrub .rl u{position:absolute;left:34%;top:50%;width:11px;height:11px;margin:-5.5px 0 0 -5.5px;border-radius:50%;background:#fff;box-shadow:0 2px 8px rgba(94,110,255,.6)}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="rail">
+    <div class="mark">揽</div>
+    <nav>
+      <a class="on"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg></a>
+      <a><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg></a>
+      <a><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg></a>
+      <a><svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M6 9l6 6 6-6"/><path d="M4 21h16"/></svg></a>
+      <a><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></a>
+    </nav>
+    <a style="color:var(--ink3)"><svg viewBox="0 0 24 24" style="width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></a>
+  </div>
+
+  <main>
+    <div class="top">
+      <div class="search card"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>聚合搜索 8 个平台 · 粘贴链接识别…</div>
+      <div class="pills"><div class="pill card on">无损优先</div><div class="pill card">跨源比价</div><div class="pill card">AI 助手</div></div>
+    </div>
+
+    <div class="hero">
+      <div class="left card">
+        <div class="aur-tag">AURORA MIX · 11.04</div>
+        <h1>深夜爵士 · 聚合引擎</h1>
+        <p class="sub">8 音源并行比价，从 328 次红心实时聚合 24 首，自动锁定每曲最高码率源，无损直出。</p>
+        <div class="act"><button class="btn btn-p"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>播放歌单</button><button class="btn btn-g">随机试听</button></div>
+        <div class="list">
+          <div class="it on"><span class="n">01</span><div><div class="t">Blue in Green</div><div class="a">Bill Evans · Waltz for Debby</div></div><span class="q">FLAC 24/96</span><span class="s">网易云</span><span class="d">5:37</span></div>
+          <div class="it"><span class="n">02</span><div><div class="t">夜航船</div><div class="a">陈粒 · 小梦大半</div></div><span class="q">320K</span><span class="s">QQ 音乐</span><span class="d">4:12</span></div>
+          <div class="it"><span class="n">03</span><div><div class="t">Merry Christmas Mr. Lawrence</div><div class="a">坂本龍一 · Coda</div></div><span class="q">FLAC</span><span class="s">酷狗</span><span class="d">6:02</span></div>
+          <div class="it"><span class="n">04</span><div><div class="t">山丘</div><div class="a">李宗盛 · 山丘</div></div><span class="q">320K</span><span class="s">B站</span><span class="d">4:35</span></div>
+          <div class="it"><span class="n">05</span><div><div class="t">Feeling Good</div><div class="a">Nina Simone · I Put a Spell on You</div></div><span class="q">FLAC</span><span class="s">网易云</span><span class="d">3:38</span></div>
+        </div>
+      </div>
+
+      <div class="right card">
+        <div class="disc"><div class="in"><b>FLAC</b><span>24bit / 96kHz</span><div class="hole"></div></div></div>
+        <div class="rmeta"><h3>Blue in Green</h3><p>Bill Evans — Waltz for Debby</p></div>
+        <div class="bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="krow"><div class="kc"><b>8/8</b><span>音源在线</span></div><div class="kc"><b>24</b><span>队列曲目</span></div><div class="kc"><b>1.2G</b><span>缓存</span></div></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<footer>
+  <div class="np"><div class="th"></div><div style="min-width:0"><div class="t" id="npT">Blue in Green</div><div class="a" id="npA">Bill Evans · 网易云</div></div></div>
+  <div class="ctr">
+    <div class="ctl">
+      <svg viewBox="0 0 24 24"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 014-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 01-4 4H3"/></svg>
+      <svg viewBox="0 0 24 24"><path d="M11 19L2 12l9-7v14zM22 19l-9-7 9-7v14z"/></svg>
+      <div class="pp" id="pp"><svg viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg></div>
+      <svg viewBox="0 0 24 24"><path d="M13 19l9-7-9-7v14zM2 19l9-7-9-7v14z"/></svg>
+      <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+    </div>
+    <div class="scrub"><span>1:52</span><div class="rl"><i id="fill"></i><u></u></div><span>5:37</span></div>
+  </div>
+  <div style="display:flex;justify-content:flex-end;gap:14px"><svg style="width:15px;height:15px;stroke:var(--ink3);fill:none;stroke-width:1.8" viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 010 7"/></svg></div>
+</footer>
+
+<script>
+document.querySelectorAll('.it').forEach(r=>r.addEventListener('click',()=>{
+  document.querySelectorAll('.it').forEach(x=>x.classList.remove('on'));r.classList.add('on');
+  document.getElementById('npT').textContent=r.querySelector('.t').textContent;
+}));
+const pp=document.getElementById('pp');let playing=true;
+pp.addEventListener('click',()=>{playing=!playing;pp.innerHTML=playing?'<svg viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>':'<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>'});
+let w=34;setInterval(()=>{if(playing){w=(w+0.12)%100;document.getElementById('fill').style.width=w+'%'}},200);
+</script>
+</body>
+</html>

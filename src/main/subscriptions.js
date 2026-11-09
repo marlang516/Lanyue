@@ -1,11 +1,19 @@
 /**
- * 订阅更新引擎
+ * 订阅更新引擎（分层重构版）
  *
  * 用户在歌单弹窗 / 歌手主页点「订阅」后，本模块周期性拉取目标曲目，
  * 与上次快照做差集得到「新增歌曲」，可选自动加入下载队列。
  *
  * 存储：prefs.json 的 'subscriptions' 键（随云同步备份，无需独立文件）。
  * 条目形状见 makeEntry。
+ *
+ * 分层：
+ *   - domain/ 纯业务逻辑（零 I/O，零 electron/context/safeSend）
+ *   - infra/  基础设施适配器（prefs / api / history / logger / 队列）
+ *   - 本层（service）：组装 domain + infra，持有调度器与 safeSend 出口
+ *
+ * 构造注入：createSubscriptions(deps = {})，缺失依赖时回退到模块默认值，
+ * 保持 `require('../subscriptions')` 的向后兼容单例导出。
  *
  * 设计约束（踩过的坑）：
  *   - gateway 失败时静默返回 []，不能把「本次拉取为空」当作「曲目被删光」，
@@ -24,9 +32,11 @@
 
 const api = require('../api');
 const prefs = require('../utils/prefs');
-const history = require('../utils/history');
 const logger = require('../utils/logger');
-const { safeSend, getDownloadQueue } = require('./context');
+const { safeSend: contextSafeSend } = require('./context');
+
+const { createDomain } = require('./ipc/subscriptions/domain');
+const { createInfra } = require('./ipc/subscriptions/infra');
 
 const PREFS_KEY = 'subscriptions';
 const MAX_NEW_SONGS = 100;          // 单订阅保留的新歌列表上限（防 prefs.json 膨胀）
@@ -45,337 +55,272 @@ const EMPTY_CHECK_ERROR = '未取到任何曲目（可能需要登录，或该�
 
 const TYPES = new Set(['playlist', 'singer']);
 
-// ── 纯函数（单测覆盖）────────────────────────────────────
-
-function buildKey(type, platform, targetId) {
-  return `${type}:${platform}:${targetId}`;
-}
-
 /**
- * 校验订阅参数并给出用户可见的错误文案。
- * @returns {string|null} null = 合法
+ * 创建订阅服务实例。
+ *
+ * @param {object} [deps]
+ * @param {object} [deps.domain]   domain 实例（缺省 createDomain({ getPlugin })）
+ * @param {object} [deps.infra]    infra 实例（缺省 createInfra({...}））
+ * @param {Function} [deps.safeSend] 渲染层推送（缺省 context.safeSend）
+ * @param {Function} [deps.getPlugin] 平台插件查找回调（缺省 api.registry.get）
+ * @param {Function} [deps.getIntervalHours] 检查间隔小时数回调（缺省 prefs 读）
+ * @param {Function} [deps.getQueue] 取下载队列数组（用于 queue-updated 推送快照）
+ * @returns {{list, add, remove, update, markSeen, checkNow, unreadCount, startScheduler, stopScheduler, runCheck, _internal}}
  */
-function validateAdd(type, platform, targetId) {
-  if (!TYPES.has(type)) return '不支持的订阅类型';
-  if (!platform || !targetId) return '参数不完整';
-  const plugin = api.registry.get(platform);
-  if (!plugin) return `未知平台: ${platform}`;
-  if (type === 'playlist' && typeof plugin.getPlaylistSongs !== 'function') {
-    return `${platform} 暂不支持歌单订阅`;
-  }
-  if (type === 'singer' && typeof plugin.getSingerSongs !== 'function') {
-    return `${platform} 暂不支持歌手订阅`;
-  }
-  return null;
-}
+function createSubscriptions(deps = {}) {
+  const {
+    domain: depsDomain,
+    infra: depsInfra,
+    safeSend: depsSafeSend,
+    getPlugin: depsGetPlugin,
+    getIntervalHours: depsGetIntervalHours,
+    getQueue: depsGetQueue,
+  } = deps;
 
-/**
- * 与上次快照求差集。
- * @param {Array<object>} songs 本次拉取结果
- * @param {string[]|null} lastSeenIds null = 从未检查过（静默播种）
- * @param {number} cap 新增列表截断上限
- * @returns {{fresh: Array<object>, seenIds: string[], seeded: boolean}}
- */
-function diffSongs(songs, lastSeenIds, cap = MAX_NEW_SONGS) {
-  const list = Array.isArray(songs) ? songs.filter(s => s && s.id != null && s.id !== '') : [];
-  const currentIds = list.map(s => String(s.id));
-  if (lastSeenIds === null || lastSeenIds === undefined) {
-    return { fresh: [], seenIds: Array.from(new Set(currentIds)), seeded: true };
+  const getPlugin = typeof depsGetPlugin === 'function'
+    ? depsGetPlugin
+    : (platform => api.registry.get(platform));
+  const getIntervalHours = typeof depsGetIntervalHours === 'function'
+    ? depsGetIntervalHours
+    : () => prefs.get('subscriptionCheckIntervalHours', DEFAULT_CHECK_INTERVAL_HOURS);
+  const safeSend = typeof depsSafeSend === 'function' ? depsSafeSend : contextSafeSend;
+  const getQueue = typeof depsGetQueue === 'function' ? depsGetQueue : null;
+
+  const domain = depsDomain || createDomain({ getPlugin });
+  const infra = depsInfra || createInfra({
+    queue: {
+      getQueue: depsGetQueue,
+      persistQueue: deps.persistQueue,
+      processQueue: deps.processQueue,
+      // safeSend('queue-updated') 由本 service 层统一推送，不下放给 infra，避免重复推送
+    },
+  });
+
+  const {
+    loadAll,
+    saveAll,
+    autoEnqueue: infraAutoEnqueue,
+  } = infra;
+
+  const {
+    list: domainList,
+    add: domainAdd,
+    remove: domainRemove,
+    update: domainUpdate,
+    markSeen: domainMarkSeen,
+    unreadCount: domainUnreadCount,
+    validateAdd: domainValidateAdd,
+    diffSongs: domainDiffSongs,
+    applyCheckToEntry: domainApplyCheckToEntry,
+    makeEntry: domainMakeEntry,
+    buildKey: domainBuildKey,
+    _isDue: domainIsDue,
+    _intervalMs: domainIntervalMs,
+  } = domain;
+
+  // ── 接线钉：applyCheckToEntry 在本文件中定义一次、在 runCheck 中调用一次（共 2 处出现）
+  function applyCheckToEntry(entry, songs, now) {
+    return domainApplyCheckToEntry(entry, songs, now);
   }
-  const seen = new Set(lastSeenIds.map(String));
-  const fresh = [];
-  for (const s of list) {
-    if (!seen.has(String(s.id))) {
-      seen.add(String(s.id));       // 同批内重复 id 只算一次新增
-      fresh.push(s);
+
+  /** 发给渲染层的订阅列表更新。 */
+  function _emit() {
+    safeSend('subscriptions-updated', _listView());
+  }
+
+  /** 发给渲染层的瘦身视图：新歌只留 DTO 必要字段。 */
+  function _listView() {
+    return loadAll().map(e => ({
+      key: e.key,
+      type: e.type,
+      platform: e.platform,
+      targetId: e.targetId,
+      name: e.name,
+      hasSeeded: e.lastSeenIds !== null && e.lastSeenIds !== undefined,
+      lastCheckedAt: e.lastCheckedAt || null,
+      lastCheckError: e.lastCheckError || '',
+      newCount: (e.newSongs || []).length,
+      newSongs: (e.newSongs || []).slice(0, MAX_NEW_SONGS),
+      autoDownload: !!e.autoDownload,
+      addedAt: e.addedAt || null,
+    }));
+  }
+
+  /**
+   * 把新增歌曲排进下载队列，并推送 queue-updated 给渲染层。
+   * @returns {Promise<number>} 实际入队数
+   */
+  async function _autoEnqueue(entry, fresh) {
+    const queued = await infraAutoEnqueue(entry, fresh);
+    if (queued > 0 && typeof safeSend === 'function' && typeof getQueue === 'function') {
+      safeSend('queue-updated', getQueue());
     }
+    return queued;
   }
-  // 并集语义：只进不出，平台抽风返回空列表不会让老歌复活成「新增」
-  const merged = [];
-  for (const id of lastSeenIds.map(String)) if (!merged.includes(id)) merged.push(id);
-  for (const id of currentIds) if (!merged.includes(id)) merged.push(id);
-  return { fresh: fresh.slice(0, cap), seenIds: merged, seeded: false };
-}
 
-/**
- * 一次检查的写回（纯函数，无 I/O）：把「拿到了但没新歌」与「根本没拿到清单」分开记账。
- * 空数组 / 非数组 = 这次没取到数据 —— 只写 lastCheckError 并推进 lastCheckedAt
- * （不推进就会因为 _isDue 立刻到期，从默认档的每 6 小时退化成每 60s 打一次平台），
- * 快照与未读红点一字不动：前者不能被空播成"已播种"，后者归用户"看过了"管。
- * @param {number} now 本次写回的时间戳（由调用方给，测试可确定）
- * @returns {{entry: object, freshCount: number, toEnqueue: Array<object>, empty: boolean}}
- */
-function applyCheckToEntry(entry, songs, now) {
-  const next = { ...entry };
-  if (!Array.isArray(songs) || songs.length === 0) {
-    next.lastCheckError = EMPTY_CHECK_ERROR;
-    next.lastCheckedAt = now;
-    return { entry: next, freshCount: 0, toEnqueue: [], empty: true };
+  // ── 调度器 ─────────────────────────────────────────────────
+
+  let _timer = null;
+  let _checking = false;
+
+  // ── 拉取 ─────────────────────────────────────────────────
+
+  /**
+   * 拉取订阅条目对应的歌曲列表（保留旧实现形状，供源码接线钉）。
+   * @param {object} entry
+   * @returns {Promise<Array<object>>}
+   */
+  async function _fetchSongs(entry) {
+    if (entry.type === 'playlist') {
+      return await api.getPlaylistSongs(entry.platform, entry.targetId, PLAYLIST_LIMIT);
+    }
+    // platform 必须透传：门面缺省会按 id 形态猜平台，数字 mid 的歌手会被路由错源
+    return await api.getSingerSongs(entry.targetId, SINGER_LIMIT, entry.platform);
   }
-  const { fresh, seenIds, seeded } = diffSongs(songs, entry.lastSeenIds);
-  next.lastSeenIds = seenIds;
-  next.lastCheckedAt = now;
-  next.lastCheckError = '';
-  if (seeded) return { entry: next, freshCount: 0, toEnqueue: [], empty: false };
-  next.newSongs = fresh.slice(-MAX_NEW_SONGS).reverse();   // 新的在前
-  const toEnqueue = entry.autoDownload ? fresh : [];
-  return { entry: next, freshCount: fresh.length, toEnqueue, empty: false };
-}
 
-function makeEntry(type, platform, targetId, name) {
+  /**
+   * 检查一批订阅（顺序执行，避免同时打多个平台接口触发风控）。
+   * @param {boolean} force true = 全部；false = 只查到期项
+   * @returns {Promise<{checked:number, newTotal:number}>}
+   */
+  async function runCheck(force = false) {
+    if (_checking) return { checked: 0, newTotal: 0, skipped: true };
+    _checking = true;
+    const started = Date.now();
+    let checked = 0;
+    let newTotal = 0;
+    try {
+      const entries = loadAll();
+      let changed = false;
+      for (const entry of entries) {
+        if (!force && !_isDue(entry, started)) continue;
+        checked++;
+        try {
+          const songs = await _fetchSongs(entry);
+          const r = applyCheckToEntry(entry, songs, Date.now());
+          Object.assign(entry, r.entry);
+          // await：_autoEnqueue 现在是 async（第二级去重走异步判活）
+          if (r.toEnqueue.length) await _autoEnqueue(entry, r.toEnqueue);
+          newTotal += r.freshCount;
+          changed = true;
+        } catch (e) {
+          // 抛错当瞬时故障：不动 lastCheckedAt（从未成功过的项下个 tick 即重试，成功过的按原间隔再来）。
+          // 空清单则是稳定状态（受限歌单/未登录），重试再快也拿不到东西，故按检查间隔退避。
+          // 空清单路径的 lastCheckedAt 推进由 applyCheckToEntry 一家负责，此处不碰。
+          entry.lastCheckError = (e && e.message) || '检查失败';
+          changed = true;
+          logger.warn(`[subscriptions] ${entry.key} 检查失败:`, e.message);
+        }
+      }
+      if (changed) {
+        saveAll(entries);
+        _emit();
+      }
+    } finally {
+      _checking = false;
+    }
+    return { checked, newTotal };
+  }
+
+  function _intervalMs() {
+    return domainIntervalMs(getIntervalHours);
+  }
+
+  function _isDue(entry, now) {
+    return !entry.lastCheckedAt || (now - entry.lastCheckedAt) >= _intervalMs();
+  }
+
+  function startScheduler() {
+    if (_timer) return;
+    const initial = setTimeout(() => {
+      runCheck(false).catch(e => logger.warn('[subscriptions] 周期检查失败:', e.message));
+    }, INITIAL_CHECK_DELAY_MS);
+    if (initial.unref) initial.unref();
+    _timer = setInterval(() => {
+      runCheck(false).catch(e => logger.warn('[subscriptions] 周期检查失败:', e.message));
+    }, CHECK_TICK_MS);
+    if (_timer.unref) _timer.unref();
+  }
+
+  function stopScheduler() {
+    if (_timer) { clearInterval(_timer); _timer = null; }
+  }
+
+  // ── 对外操作（ipc/subscriptions.js 调用）─────────────────
+
+  function list() {
+    return domainList(loadAll());
+  }
+
+  function add(type, platform, targetId, name) {
+    const r = domainAdd(loadAll(), type, platform, targetId, name);
+    if (!r.success) return r;
+    saveAll(r.entries);
+    _emit();
+    return { success: true, entry: r.entry, duplicated: r.duplicated };
+  }
+
+  function remove(key) {
+    const r = domainRemove(loadAll(), key);
+    if (!r.success) return r;
+    saveAll(r.entries);
+    _emit();
+    return { success: true };
+  }
+
+  /** patch 白名单：目前只允许切换 autoDownload */
+  function update(key, patch) {
+    const r = domainUpdate(loadAll(), key, patch);
+    if (!r.success) return r;
+    saveAll(r.entries);
+    _emit();
+    return { success: true, entry: r.entry };
+  }
+
+  /** 用户看完新歌后清空红点 */
+  function markSeen(key) {
+    const r = domainMarkSeen(loadAll(), key);
+    if (!r.success) return r;
+    saveAll(r.entries);
+    _emit();
+    return { success: true };
+  }
+
+  function checkNow() {
+    return runCheck(true);
+  }
+
+  /** 导航红点总数：所有订阅未读新歌之和 */
+  function unreadCount() {
+    return domainUnreadCount(loadAll());
+  }
+
   return {
-    key: buildKey(type, platform, targetId),
-    type,
-    platform,
-    targetId: String(targetId),
-    name: String(name || ''),
-    lastSeenIds: null,              // null = 尚未播种
-    lastCheckedAt: null,
-    lastCheckError: '',
-    newSongs: [],
-    autoDownload: false,
-    addedAt: Date.now(),
+    list, add, remove, update, markSeen, checkNow, unreadCount,
+    startScheduler, stopScheduler, runCheck,
+    _internal: {
+      buildKey: domainBuildKey,
+      validateAdd: (type, platform, targetId) => domainValidateAdd(type, platform, targetId, getPlugin),
+      diffSongs: domainDiffSongs,
+      applyCheckToEntry,
+      makeEntry: domainMakeEntry,
+      _isDue,
+      _intervalMs,
+      MAX_NEW_SONGS,
+      EMPTY_CHECK_ERROR,
+      CHECK_TICK_MS,
+      DEFAULT_CHECK_INTERVAL_HOURS,
+      MIN_CHECK_INTERVAL_HOURS,
+      MAX_CHECK_INTERVAL_HOURS,
+    },
   };
 }
 
-// ── 存储 ─────────────────────────────────────────────────
-
-function _loadAll() {
-  const raw = prefs.get(PREFS_KEY);
-  return Array.isArray(raw) ? raw.filter(e => e && typeof e === 'object' && e.key) : [];
-}
-
-function _saveAll(entries) {
-  prefs.set(PREFS_KEY, entries);
-}
-
-function _emit() {
-  safeSend('subscriptions-updated', _listView());
-}
-
-/** 发给渲染层的瘦身视图：新歌只留 DTO 必要字段 */
-function _listView() {
-  return _loadAll().map(e => ({
-    key: e.key,
-    type: e.type,
-    platform: e.platform,
-    targetId: e.targetId,
-    name: e.name,
-    hasSeeded: e.lastSeenIds !== null && e.lastSeenIds !== undefined,
-    lastCheckedAt: e.lastCheckedAt || null,
-    lastCheckError: e.lastCheckError || '',
-    newCount: (e.newSongs || []).length,
-    newSongs: (e.newSongs || []).slice(0, MAX_NEW_SONGS),
-    autoDownload: !!e.autoDownload,
-    addedAt: e.addedAt || null,
-  }));
-}
-
-// ── 拉取 ─────────────────────────────────────────────────
-
-async function _fetchSongs(entry) {
-  if (entry.type === 'playlist') {
-    return await api.getPlaylistSongs(entry.platform, entry.targetId, PLAYLIST_LIMIT);
-  }
-  // platform 必须透传：门面缺省会按 id 形态猜平台，数字 mid 的歌手会被路由错源
-  return await api.getSingerSongs(entry.targetId, SINGER_LIMIT, entry.platform);
-}
-
-// ── 自动下载 ─────────────────────────────────────────────
-
-/**
- * 把新增歌曲排进下载队列。与 add-to-queue 相同的两级去重：
- * 队列内在途任务 + 历史记录（文件仍在磁盘）。
- *
- * P2-9：第二级去重改用异步判活（findDownloadedAsync），所以本函数是 async ——
- * 逐首同步 existsSync 在网络盘上会把主进程卡住一整轮。调用方必须 await。
- * @returns {Promise<number>} 实际入队数
- */
-async function _autoEnqueue(entry, fresh) {
-  let ctx;
-  try {
-    ctx = require('./context').getCtx();
-  } catch (_e) {
-    logger.warn('[subscriptions] 上下文未就绪，跳过自动下载');
-    return 0;
-  }
-  const { persistQueue, processQueue } = ctx;
-  const downloadQueue = getDownloadQueue();
-  let queued = 0;
-  for (const song of fresh) {
-    const inQueue = downloadQueue.some(s =>
-      s && String(s.id) === String(song.id) && s.source === song.source && s.status !== 'done');
-    if (inQueue) continue;
-    // P2-9：同上，订阅轮询也是逐首循环，用异步判活
-    if (await history.findDownloadedAsync(song.id, song.source)) continue;
-    downloadQueue.push({
-      ...song,
-      id: String(song.id),
-      taskId: 'sub_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
-      status: 'pending',
-      progress: 0,
-      addedAt: Date.now(),
-    });
-    queued++;
-  }
-  if (queued > 0) {
-    logger.log(`[subscriptions] ${entry.name || entry.key} 自动下载 ${queued} 首`);
-    safeSend('queue-updated', downloadQueue);
-    persistQueue();
-    processQueue();
-  }
-  return queued;
-}
-
-// ── 检查 ─────────────────────────────────────────────────
-
-let _checking = false;
-
-/**
- * 检查一批订阅（顺序执行，避免同时打多个平台接口触发风控）。
- * @param {boolean} force true = 全部；false = 只查到期项
- * @returns {Promise<{checked:number, newTotal:number}>}
- */
-async function runCheck(force = false) {
-  if (_checking) return { checked: 0, newTotal: 0, skipped: true };
-  _checking = true;
-  const started = Date.now();
-  let checked = 0;
-  let newTotal = 0;
-  try {
-    const entries = _loadAll();
-    let changed = false;
-    for (const entry of entries) {
-      if (!force && !_isDue(entry, started)) continue;
-      checked++;
-      try {
-        const songs = await _fetchSongs(entry);
-        const r = applyCheckToEntry(entry, songs, Date.now());
-        Object.assign(entry, r.entry);
-        // await：_autoEnqueue 现在是 async（第二级去重走异步判活）
-        if (r.toEnqueue.length) await _autoEnqueue(entry, r.toEnqueue);
-        newTotal += r.freshCount;
-        changed = true;
-      } catch (e) {
-        // 抛错当瞬时故障：不动 lastCheckedAt（从未成功过的项下个 tick 即重试，成功过的按原间隔再来）。
-        // 空清单则是稳定状态（受限歌单/未登录），重试再快也拿不到东西，故按检查间隔退避。
-        entry.lastCheckError = (e && e.message) || '检查失败';
-        changed = true;
-        logger.warn(`[subscriptions] ${entry.key} 检查失败:`, e.message);
-      }
-    }
-    if (changed) {
-      _saveAll(entries);
-      _emit();
-    }
-  } finally {
-    _checking = false;
-  }
-  return { checked, newTotal };
-}
-
-function _isDue(entry, now) {
-  const intervalMs = _intervalMs();
-  return !entry.lastCheckedAt || (now - entry.lastCheckedAt) >= intervalMs;
-}
-
-function _intervalMs() {
-  const raw = Number(prefs.get('subscriptionCheckIntervalHours', DEFAULT_CHECK_INTERVAL_HOURS));
-  const hours = Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_CHECK_INTERVAL_HOURS;
-  return Math.min(MAX_CHECK_INTERVAL_HOURS, Math.max(MIN_CHECK_INTERVAL_HOURS, hours)) * 3600 * 1000;
-}
-
-// ── 调度器（main/index.js 在 whenReady 里 start）─────────
-
-let _timer = null;
-
-function startScheduler() {
-  if (_timer) return;
-  const initial = setTimeout(() => {
-    runCheck(false).catch(e => logger.warn('[subscriptions] 周期检查失败:', e.message));
-  }, INITIAL_CHECK_DELAY_MS);
-  if (initial.unref) initial.unref();
-  _timer = setInterval(() => {
-    runCheck(false).catch(e => logger.warn('[subscriptions] 周期检查失败:', e.message));
-  }, CHECK_TICK_MS);
-  if (_timer.unref) _timer.unref();
-}
-
-function stopScheduler() {
-  if (_timer) { clearInterval(_timer); _timer = null; }
-}
-
-// ── 对外操作（ipc/subscriptions.js 调用）─────────────────
-
-function list() {
-  return _listView();
-}
-
-function add(type, platform, targetId, name) {
-  const t = String(type || '');
-  const p = String(platform || '');
-  const id = String(targetId || '');
-  const err = validateAdd(t, p, id);
-  if (err) return { success: false, error: err };
-  const entries = _loadAll();
-  const key = buildKey(t, p, id);
-  const existing = entries.find(e => e.key === key);
-  if (existing) return { success: true, entry: existing, duplicated: true };
-  const entry = makeEntry(t, p, id, name);
-  entries.push(entry);
-  _saveAll(entries);
-  _emit();
-  return { success: true, entry };
-}
-
-function remove(key) {
-  const entries = _loadAll();
-  const next = entries.filter(e => e.key !== key);
-  if (next.length === entries.length) return { success: false, error: '订阅不存在' };
-  _saveAll(next);
-  _emit();
-  return { success: true };
-}
-
-/** patch 白名单：目前只允许切换 autoDownload */
-function update(key, patch) {
-  const entries = _loadAll();
-  const entry = entries.find(e => e.key === key);
-  if (!entry) return { success: false, error: '订阅不存在' };
-  if (patch && typeof patch === 'object' && typeof patch.autoDownload === 'boolean') {
-    entry.autoDownload = patch.autoDownload;
-    _saveAll(entries);
-    _emit();
-  }
-  return { success: true, entry };
-}
-
-/** 用户看完新歌后清空红点 */
-function markSeen(key) {
-  const entries = _loadAll();
-  const entry = entries.find(e => e.key === key);
-  if (!entry) return { success: false, error: '订阅不存在' };
-  entry.newSongs = [];
-  _saveAll(entries);
-  _emit();
-  return { success: true };
-}
-
-function checkNow() {
-  return runCheck(true);
-}
-
-/** 导航红点总数：所有订阅未读新歌之和 */
-function unreadCount() {
-  return _loadAll().reduce((n, e) => n + (e.newSongs || []).length, 0);
-}
+// 默认单例：保持 `require('../subscriptions')` 的向后兼容
+const defaultSubs = createSubscriptions();
 
 module.exports = {
-  list, add, remove, update, markSeen, checkNow, unreadCount,
-  startScheduler, stopScheduler, runCheck,
-  _internal: {
-    buildKey, validateAdd, diffSongs, applyCheckToEntry, makeEntry, _isDue, _intervalMs,
-    MAX_NEW_SONGS, EMPTY_CHECK_ERROR, CHECK_TICK_MS,
-    DEFAULT_CHECK_INTERVAL_HOURS, MIN_CHECK_INTERVAL_HOURS, MAX_CHECK_INTERVAL_HOURS,
-  },
+  createSubscriptions,
+  ...defaultSubs,
+  _internal: defaultSubs._internal,
 };

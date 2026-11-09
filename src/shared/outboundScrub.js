@@ -11,9 +11,14 @@
  *     把它一起剥掉是砍功能不是堵泄漏。
  */
 
-/** 发给大模型厂商的文本里不许出现的键名（本机路径与凭据类）。唯一出处。 */
+/** 发给大模型厂商的文本里不许出现的键名（本机路径与凭据类）。唯一出处。 @type {string[]} */
 const LEAK_KEYS = ['path', 'localPath', 'filePath', 'dir', 'cookie', 'cookies', 'token', 'accessToken', 'apiKey', 'secret', 'savePath', 'subpath'];
 
+/**
+ * 递归剥除对象 / 数组里的泄漏键；标量原样返回。
+ * @param {*} value 任意出网值
+ * @returns {*} 剥除后的新值（不修改入参）
+ */
 function scrubOutbound(value) {
   if (Array.isArray(value)) return value.map(scrubOutbound);
   if (value && typeof value === 'object') {
@@ -33,6 +38,8 @@ function scrubOutbound(value) {
 /**
  * 桥返回的 text 是 JSON 文本；解析不动就回空串 —— 一条读不出来的返回值
  * 不该带着看不见的原文出网。截断仍由调用方那枚 8000 的闸管，这里只负责剥。
+ * @param {string} text 桥返回的 JSON 文本
+ * @returns {string} 剥除后的 JSON 文本；解析失败返回空串
  */
 function scrubToolText(text) {
   if (typeof text !== 'string' || !text.trim()) return '';

@@ -21,6 +21,14 @@ const _readFile = (p) => fs.readFileSync(path.resolve(p), 'utf8');
 // 设置视图已拆成多文件：读到 settings 相关路径时返回整视图（兼容层 + 子模块）源码
 const read = (p) => (isSettingsViewPath(p) ? readSettingsView() : _readFile(p));
 
+// ADR 0003 §5 步骤 6：单曲 attempt 循环（快照 / 循环界 / 重试条件）已迁到
+// src/main/downloadQueue/songTask.js；MAX_RETRY 与 getMaxAttempts 仍留在 facade。
+// 源码钉取两者并集：任一侧被改回去（快照丢失、循环改回直引常量）都必须红。
+const PIPELINE_SRC = [
+  'src/main/downloadQueue.js',
+  'src/main/downloadQueue/songTask.js',
+].map((p) => _readFile(path.resolve(p))).join('\n');
+
 // ── 1. 运行时：engine.getMaxAttempts() 真调用 ────────────────
 function engineWithPrefs(store) {
   const prefs = require('../src/utils/prefs');
@@ -30,7 +38,7 @@ function engineWithPrefs(store) {
     const { createDownloadQueueEngine } = require('../src/main/downloadQueue.js');
     return createDownloadQueueEngine({
       userDataDir: () => os.tmpdir(),
-      safeSend: () => {},
+      progress: { emitQueueUpdated() {}, emitProgress() {}, emitError() {} },
       getDownloadUrlSmart: async () => { throw new Error('not used'); },
       getLyrics: async () => null,
       downloader: { downloadFileWithRetry: async () => {}, embedId3Tags: async () => {} },
@@ -70,8 +78,8 @@ test('getMaxAttempts：0/6/2.5/abc 等脏值一律回落 2（循环体最少跑�
 });
 
 // ── 2. 静态：重试循环用逐曲快照，不再直引常量 ────────────────
-test('downloadQueue.js：循环界/重试条件/日志都走 maxAttempts 快照（MAX_RETRY 仅作回落值）', () => {
-  const src = read('src/main/downloadQueue.js');
+test('downloadQueue.js + songTask.js：循环界/重试条件/日志都走 maxAttempts 快照（MAX_RETRY 仅作回落值）', () => {
+  const src = PIPELINE_SRC;
   assert.match(src, /const maxAttempts = getMaxAttempts\(\);/, '缺少逐曲快照');
   assert.match(src, /attempt <= maxAttempts/, '循环界应使用快照而非常量');
   assert.match(src, /attempt < maxAttempts && isRetriable/, '重试条件应使用快照');
@@ -104,7 +112,7 @@ test('settings.js + index.html + zh/en：maxAttempts 设置四件套齐备且域
 });
 
 test('等值钉：UI default/min/max == 引擎 MAX_RETRY/域界（防"看到的≠生效的"漂移）', () => {
-  const src = read('src/main/downloadQueue.js');
+  const src = PIPELINE_SRC;
   const def = Number(src.match(/const MAX_RETRY = (\d+)/)[1]);
   const range = src.match(/n >= (\d+) && n <= (\d+) \? n : MAX_RETRY/);
   assert.ok(range, 'getMaxAttempts 的整数域校验形态变了，本测试需同步');

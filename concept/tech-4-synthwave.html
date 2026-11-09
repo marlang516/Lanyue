@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>科技风 · 四 · Synthwave 复古未来</title>
+<style>
+/* 80s 复古未来：落日渐变地平线 + 透视霓虹网格 + 铬合金标题 + 品红/青；
+   街机 / outrun 海报气质，比 T1 更张扬 */
+:root{
+  --bg:#0a0514; --s1:#140a24; --s2:#1c0f33;
+  --mg:#ff2e88; --cy:#22d3ee; --pu:#a855f7; --or:#ff9e40;
+  --ink:#f4ecff; --ink2:#b39dd4; --ink3:#6b5a8f;
+  --line:rgba(168,85,247,.25);
+  --e:cubic-bezier(.22,1,.36,1);
+  font-size:14px;
+}
+*{margin:0;box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--bg);color:var(--ink);font-family:"Microsoft YaHei UI","PingFang SC",system-ui,sans-serif;overflow:hidden;display:flex;flex-direction:column}
+/* 地平线：落日 + 扫描线 */
+.sunzone{position:fixed;left:0;right:0;bottom:0;height:46vh;pointer-events:none;overflow:hidden}
+.sunzone .sun{position:absolute;left:50%;bottom:34%;transform:translateX(-50%);width:340px;height:340px;border-radius:50%;background:linear-gradient(180deg,var(--or) 0%,var(--mg) 55%,var(--pu) 100%);box-shadow:0 0 90px rgba(255,46,136,.5);mask-image:repeating-linear-gradient(180deg,#000 0 14px,transparent 14px 20px);-webkit-mask-image:repeating-linear-gradient(180deg,#000 0 14px,transparent 14px 20px)}
+.sunzone .grid{position:absolute;left:-60%;right:-60%;bottom:-30%;height:60%;background:
+  repeating-linear-gradient(90deg,rgba(255,46,136,.5) 0 2px,transparent 2px 90px),
+  repeating-linear-gradient(0deg,rgba(34,211,238,.4) 0 2px,transparent 2px 60px);
+  transform:perspective(340px) rotateX(62deg);mask-image:linear-gradient(180deg,transparent,#000 45%);-webkit-mask-image:linear-gradient(180deg,transparent,#000 45%)}
+.app{flex:1;display:flex;min-height:0;position:relative;z-index:2}
+.rail{width:80px;flex-shrink:0;border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:20px 0;background:rgba(10,5,20,.55);backdrop-filter:blur(10px)}
+.mark{font-size:20px;font-weight:900;font-style:italic;background:linear-gradient(180deg,#fff 20%,var(--cy) 50%,var(--mg) 80%);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 10px rgba(255,46,136,.6));letter-spacing:.05em}
+.rail nav{margin-top:30px;display:flex;flex-direction:column;gap:10px;flex:1}
+.rail a{width:46px;height:46px;display:flex;align-items:center;justify-content:center;color:var(--ink3);cursor:pointer;transition:.2s var(--e);clip-path:polygon(12% 0,100% 0,88% 100%,0 100%)}
+.rail a svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.8}
+.rail a:hover{color:var(--cy);background:rgba(34,211,238,.1)}
+.rail a.on{color:#0a0514;background:linear-gradient(135deg,var(--cy),var(--mg));filter:drop-shadow(0 0 12px rgba(34,211,238,.6))}
+main{flex:1;min-width:0;overflow-y:auto;scrollbar-width:none;padding:34px 44px}
+.logo-line{display:flex;align-items:baseline;gap:16px}
+.logo-line h0{font-size:11px;letter-spacing:.4em;color:var(--cy)}
+.logo-line .yr{margin-left:auto;font-family:Consolas,monospace;font-size:10px;color:var(--ink3)}
+.hero{margin-top:20px}
+.hero h1{font-size:56px;font-weight:900;font-style:italic;letter-spacing:.01em;line-height:1.05;background:linear-gradient(180deg,#ffffff 15%,var(--cy) 45%,var(--mg) 78%,var(--or));-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 4px 24px rgba(255,46,136,.45))}
+.hero .sub{margin-top:12px;color:var(--ink2);font-size:13.5px;line-height:1.8;max-width:46ch}
+.chips{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap}
+.chip{font-family:Consolas,monospace;font-size:10.5px;letter-spacing:.12em;padding:7px 14px;color:var(--cy);border:1px solid var(--cy);background:rgba(34,211,238,.06);clip-path:polygon(8px 0,100% 0,calc(100% - 8px) 100%,0 100%)}
+.chip.m{color:var(--mg);border-color:var(--mg);background:rgba(255,46,136,.07)}
+.act{margin-top:26px;display:flex;gap:14px}
+.btn{padding:15px 34px;font-size:13.5px;font-weight:800;letter-spacing:.1em;cursor:pointer;border:0;transition:.2s var(--e);clip-path:polygon(12px 0,100% 0,calc(100% - 12px) 100%,0 100%);font-style:italic}
+.btn-p{background:linear-gradient(93deg,var(--mg),var(--or));color:#fff;filter:drop-shadow(0 0 16px rgba(255,46,136,.6))}
+.btn-p:hover{transform:translateY(-2px);filter:drop-shadow(0 0 26px rgba(255,46,136,.8))}
+.btn-o{background:transparent;color:var(--cy);box-shadow:inset 0 0 0 1px var(--cy)}
+.btn-o:hover{background:rgba(34,211,238,.1)}
+.tracks{margin-top:36px;display:flex;flex-direction:column;gap:9px;max-width:860px}
+.tr{display:grid;grid-template-columns:56px 1fr 130px 100px 60px;gap:14px;align-items:center;padding:14px 20px;background:rgba(20,10,36,.6);backdrop-filter:blur(8px);border:1px solid var(--line);cursor:pointer;transition:.18s;clip-path:polygon(14px 0,100% 0,calc(100% - 14px) 100%,0 100%)}
+.tr:hover{border-color:var(--cy);background:rgba(28,15,51,.8);transform:translateX(6px)}
+.tr.on{border-color:var(--mg);background:linear-gradient(90deg,rgba(255,46,136,.22),rgba(20,10,36,.6));box-shadow:0 0 22px rgba(255,46,136,.3)}
+.tr .no{font-family:Consolas,monospace;font-size:12px;color:var(--ink3)}
+.tr.on .no{color:var(--mg);font-weight:700}
+.tr .t{font-size:14px;font-weight:700;font-style:italic}
+.tr.on .t{color:#fff;text-shadow:0 0 12px rgba(255,46,136,.8)}
+.tr .a{font-size:11.5px;color:var(--ink3);margin-top:2px;font-style:normal;font-weight:400}
+.tr .q{font-family:Consolas,monospace;font-size:10.5px;color:var(--cy)}
+.tr .s{font-size:11.5px;color:var(--ink2)}
+.tr .d{font-family:Consolas,monospace;font-size:11.5px;color:var(--ink3);text-align:right}
+footer{flex-shrink:0;height:86px;background:rgba(10,5,20,.75);backdrop-filter:blur(14px);border-top:1px solid var(--mg);box-shadow:0 -8px 30px rgba(255,46,136,.25);display:grid;grid-template-columns:1fr 2fr 1fr;align-items:center;padding:0 28px;gap:22px;position:relative;z-index:3}
+.np{display:flex;gap:13px;align-items:center;min-width:0}
+.np .th{width:46px;height:46px;background:linear-gradient(135deg,var(--mg),var(--pu));clip-path:polygon(10% 0,100% 0,90% 100%,0 100%);flex-shrink:0;box-shadow:0 0 16px rgba(168,85,247,.6)}
+.np .t{font-size:13px;font-weight:800;font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.np .a{font-size:11px;color:var(--ink3);font-style:normal}
+.ctr{display:flex;flex-direction:column;gap:9px;align-items:center}
+.ctl{display:flex;gap:22px;align-items:center}
+.ctl svg{width:16px;height:16px;stroke:var(--ink2);fill:none;stroke-width:1.8;cursor:pointer;transition:.15s}
+.ctl svg:hover{stroke:var(--cy);filter:drop-shadow(0 0 6px var(--cy))}
+.ctl .pp{width:40px;height:40px;background:linear-gradient(135deg,var(--cy),var(--mg));clip-path:polygon(14% 0,100% 0,86% 100%,0 100%);display:flex;align-items:center;justify-content:center;cursor:pointer;filter:drop-shadow(0 0 14px rgba(34,211,238,.6))}
+.ctl .pp svg{stroke:none;fill:#0a0514;width:13px;height:13px}
+.scrub{display:flex;align-items:center;gap:11px;width:100%;max-width:520px;font-family:Consolas,monospace;font-size:10px;color:var(--ink3)}
+.scrub .rl{flex:1;height:4px;background:rgba(168,85,247,.2);position:relative}
+.scrub .rl i{position:absolute;left:0;top:0;bottom:0;width:34%;background:linear-gradient(90deg,var(--cy),var(--mg));box-shadow:0 0 10px rgba(255,46,136,.7)}
+.scrub .rl u{position:absolute;left:34%;top:50%;width:10px;height:10px;margin:-5px 0 0 -5px;background:#fff;transform:rotate(45deg);box-shadow:0 0 10px var(--cy)}
+.viz{display:flex;gap:3px;align-items:flex-end;justify-content:flex-end;height:26px}
+.viz i{width:4px;background:linear-gradient(180deg,var(--cy),var(--mg));animation:q 1.2s infinite}
+.viz i:nth-child(odd){animation-delay:.3s}.viz i:nth-child(3n){animation-delay:.6s}
+@keyframes q{0%,100%{transform:scaleY(.4)}50%{transform:scaleY(1)}}
+@keyframes up{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.rise{animation:up .7s var(--e) both}
+</style>
+</head>
+<body>
+<div class="sunzone"><div class="sun"></div><div class="grid"></div></div>
+<div class="app">
+  <div class="rail">
+    <div class="mark">揽</div>
+    <nav>
+      <a class="on"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg></a>
+      <a><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg></a>
+      <a><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg></a>
+      <a><svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M6 9l6 6 6-6"/><path d="M4 21h16"/></svg></a>
+      <a><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></a>
+    </nav>
+    <a style="color:var(--ink3)"><svg viewBox="0 0 24 24" style="width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></a>
+  </div>
+
+  <main>
+    <div class="logo-line"><h0>NIGHT DRIVE // LANYUE</h0><span class="yr">SYS 1984.2026 · 8 SOURCES ONLINE</span></div>
+    <div class="hero rise">
+      <h1>深夜爵士<br>聚合引擎</h1>
+      <p class="sub">从 328 次红心实时聚合 24 首，跨 8 音源自动比价，永远取最高码率——无损直出，夜航开始。</p>
+      <div class="chips"><span class="chip">FLAC × 14</span><span class="chip">320K × 10</span><span class="chip m">CROSSFALL 3S</span><span class="chip m">EQ · MIDNIGHT</span></div>
+      <div class="act"><button class="btn btn-p">▶ START ENGINE</button><button class="btn btn-o">随机试听</button></div>
+    </div>
+
+    <div class="tracks">
+      <div class="tr on rise" style="animation-delay:.1s"><span class="no">001</span><div><div class="t">Blue in Green</div><div class="a">Bill Evans · Waltz for Debby</div></div><span class="q">FLAC 24/96</span><span class="s">网易云</span><span class="d">5:37</span></div>
+      <div class="tr rise" style="animation-delay:.16s"><span class="no">002</span><div><div class="t">夜航船</div><div class="a">陈粒 · 小梦大半</div></div><span class="q">320K</span><span class="s">QQ 音乐</span><span class="d">4:12</span></div>
+      <div class="tr rise" style="animation-delay:.22s"><span class="no">003</span><div><div class="t">Merry Christmas Mr. Lawrence</div><div class="a">坂本龍一 · Coda</div></div><span class="q">FLAC</span><span class="s">酷狗</span><span class="d">6:02</span></div>
+      <div class="tr rise" style="animation-delay:.28s"><span class="no">004</span><div><div class="t">山丘</div><div class="a">李宗盛 · 山丘</div></div><span class="q">320K</span><span class="s">B站</span><span class="d">4:35</span></div>
+      <div class="tr rise" style="animation-delay:.34s"><span class="no">005</span><div><div class="t">Feeling Good</div><div class="a">Nina Simone · I Put a Spell on You</div></div><span class="q">FLAC</span><span class="s">网易云</span><span class="d">3:38</span></div>
+    </div>
+  </main>
+</div>
+
+<footer>
+  <div class="np"><div class="th"></div><div style="min-width:0"><div class="t" id="npT">Blue in Green</div><div class="a" id="npA">Bill Evans · 网易云</div></div></div>
+  <div class="ctr">
+    <div class="ctl">
+      <svg viewBox="0 0 24 24"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 014-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 01-4 4H3"/></svg>
+      <svg viewBox="0 0 24 24"><path d="M11 19L2 12l9-7v14zM22 19l-9-7 9-7v14z"/></svg>
+      <div class="pp" id="pp"><svg viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg></div>
+      <svg viewBox="0 0 24 24"><path d="M13 19l9-7-9-7v14zM2 19l9-7-9-7v14z"/></svg>
+      <svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+    </div>
+    <div class="scrub"><span>01:52</span><div class="rl"><i id="fill"></i><u></u></div><span>05:37</span></div>
+  </div>
+  <div class="viz"><i style="height:45%"></i><i style="height:80%"></i><i style="height:55%"></i><i style="height:95%"></i><i style="height:65%"></i><i style="height:85%"></i></div>
+</footer>
+
+<script>
+document.querySelectorAll('.tr').forEach(r=>r.addEventListener('click',()=>{
+  document.querySelectorAll('.tr').forEach(x=>x.classList.remove('on'));r.classList.add('on');
+  document.getElementById('npT').textContent=r.querySelector('.t').textContent;
+}));
+const pp=document.getElementById('pp');let playing=true;
+pp.addEventListener('click',()=>{playing=!playing;pp.innerHTML=playing?'<svg viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>':'<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>'});
+let w=34;setInterval(()=>{if(playing){w=(w+0.12)%100;document.getElementById('fill').style.width=w+'%'}},200);
+</script>
+</body>
+</html>
