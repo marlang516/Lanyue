@@ -160,3 +160,31 @@ test('P1-5（对照组）：长度相符时照常成功并转正名', async () =
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('限速成功路径：响应体必须灌进 throttle，文件按声明长度落盘', async () => {
+  // P0-2 的回归测试只断言「断流会 reject」。2026-10-13 把 res.pipe(throttle)
+  // 改成 throttle || res 之后，错误能 settle，但正常字节再也进不了限速流：
+  // .tmp 停在 0 字节，直到 60s 空闲超时。这里用远小于超时的截止时间钉住成功路径。
+  const dir = tmpDir();
+  const savePath = path.join(dir, 'song.mp3');
+  const body = Buffer.alloc(8192, 9);
+  const srv = await serve((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Content-Length': String(body.length) });
+    res.end(body);
+  });
+  try {
+    const p = downloadFileWithRetry(srv.url, savePath, null, {}, {
+      skipSsrfCheck: true,
+      speedLimit: 64 * 1024,
+      maxRetry: 0,
+    });
+    const r = await withDeadline(p, 5000);
+    assert.ok(!r.hung, '限速下载必须在超时前结束（旧实现会挂到 socket 空闲超时）');
+    assert.strictEqual(r.ok, true, r.e && r.e.message);
+    assert.strictEqual(fs.statSync(savePath).size, body.length);
+    assert.strictEqual(fs.existsSync(savePath + '.tmp'), false);
+  } finally {
+    await srv.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

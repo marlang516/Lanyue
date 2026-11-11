@@ -444,6 +444,13 @@ function _downloadFileInner(url, savePath, onProgress, extraHeaders = {}, redire
         }
       });
 
+      // 限速流是独立的 Transform，必须由响应体灌进去。
+      // 2026-10-13 补 error 监听时把 `res.pipe(throttle)` 写成了 `throttle || res`：
+      // 断流能 reject，但正常响应的字节再也进不了 throttle，文件停在 0 字节，
+      // 直到 socket 空闲超时。监听先挂上再 pipe，避免首包在 'data' 挂上之前被吃掉，
+      // 否则 downloaded 偏小，短包检查会把成功的下载判失败。
+      if (throttle) res.pipe(throttle);
+
       writeStream.on('finish', () => {
         // P1-5（2026-10-13 复审）：短包不算成功。
         // 服务端给了 Content-Length 却没写够（提前 end、中间有 CDN 截断）时，旧实现

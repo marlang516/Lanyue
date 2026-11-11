@@ -277,6 +277,62 @@ async function refreshUpstreamOn403(entry, deps, referer, rangeHeader) {
 }
 
 /**
+ * 把上游响应体转成给 Chromium 的可读流。
+ *
+ * `IncomingMessage.read()` 返回 null 的意思是「这一拍缓冲区是空的」，不是 EOF。
+ * 旧实现把 null 当成结束：`push(null)` 之后 Chromium 不再读，慢网上在线播放
+ * 在第一个 TCP 块（约 16KB）处截断，seek 的 Range 重取同样只响一声就停。
+ * 这里改成流动模式：`'data'` 才是字节，`'end'` 才是结束；下游背压时 pause。
+ *
+ * @param {import('http').IncomingMessage} res 上游响应（调用时应仍是暂停态）
+ * @param {number} maxBytes 单次响应体积上限，超出后断流但保留已推出的前缀
+ * @returns {import('stream').Readable}
+ */
+function createUpstreamBody(res, maxBytes) {
+  let received = 0;
+  let ended = false;
+
+  const body = new Readable({
+    read() {
+      if (!ended) res.resume();
+    },
+    destroy(err, cb) {
+      ended = true;
+      if (!res.destroyed) res.destroy();
+      cb(err);
+    },
+  });
+
+  res.on('data', (chunk) => {
+    if (ended) return;
+    received += chunk.length;
+    if (received > maxBytes) {
+      // 超限就断流：已播出的部分还能听，但不再继续拉
+      ended = true;
+      if (!res.destroyed) res.destroy();
+      body.push(null);
+      return;
+    }
+    if (!body.push(chunk)) res.pause();
+  });
+
+  res.on('end', () => {
+    if (!ended) {
+      ended = true;
+      body.push(null);
+    }
+  });
+
+  res.on('error', (err) => {
+    if (ended || body.destroyed) return;
+    ended = true;
+    body.destroy(err);
+  });
+
+  return body;
+}
+
+/**
  * 注册流式 scheme
  *
  * @param {object} protocol Electron 的 protocol 模块
@@ -388,28 +444,7 @@ function registerStreamScheme(protocol, resolveMeta) {
       ? contentLengthOfRange(res.headers)
       : declared;
 
-    let received = 0;
-    let aborted = false;
-    const body = new Readable({
-      read() {
-        if (aborted) return;
-        const chunk = res.read();
-        if (chunk) {
-          received += chunk.length;
-          if (received > MAX_BYTES) {
-            // 超限就断流：已播出的部分还能听，但不再继续拉
-            aborted = true;
-            res.destroy();
-            this.push(null);
-            return;
-          }
-          this.push(chunk);
-          return;
-        }
-        this.push(null);
-      },
-      destroy(_err, cb) { res.destroy(); cb(_err); },
-    });
+    const body = createUpstreamBody(res, MAX_BYTES);
 
     return new Response(body, {
       status: partial ? 206 : 200,
@@ -440,6 +475,7 @@ module.exports = {
   normalizeRangeHeader,
   contentTypeOf,
   contentLengthOfRange,
+  createUpstreamBody,
   registerStreamScheme,
   requestUpstream,
   requestUpstreamFollowing,
