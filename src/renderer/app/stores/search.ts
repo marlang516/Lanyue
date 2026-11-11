@@ -170,7 +170,11 @@ export async function doSearch(page = 1): Promise<void> {
       search.albums = [];
       search.singers = [];
       search.total = search.songs.length;
-      search.hasNext = search.songs.length >= PAGE_SIZE;
+      // hasMore 由聚合层按「该源本页是否取满」给出。旧启发式 length>=20
+      // 会把 5sing 这种每页 10 条的源当成没有下一页，也会在全部平台
+      // 被截成十几条时让翻页请求打回同一页。
+      const more = r && r.hasMore;
+      search.hasNext = typeof more === 'boolean' ? more : search.songs.length >= PAGE_SIZE;
       if (!search.songs.length) search.error = (r && r.error) || '没有匹配结果';
     } else if (search.type === 'album') {
       const r = await call<SearchAlbumResult>(

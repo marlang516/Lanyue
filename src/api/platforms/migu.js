@@ -36,6 +36,9 @@ const { asSong } = require('../songShape');
 const { testAudioLink } = require('../request');
 const logger = require('../../utils/logger');
 
+/** 单曲搜索每页条数。aggregateLimit 必须与它相同，否则合并前会丢掉本页多取回的歌。 */
+const SEARCH_PAGE_SIZE = 20;
+
 const SEARCH_HOST = 'https://pd.musicapp.migu.cn';
 const API_HOST = 'https://c.musicapp.migu.cn';
 const REFERER = 'https://music.migu.cn/';
@@ -108,7 +111,7 @@ async function miguSearch(keyword, page = 1) {
     version: API_VERSION,
     text: keyword,
     pageNo: String(Math.max(1, parseInt(page, 10) || 1)),
-    pageSize: '20',
+    pageSize: String(SEARCH_PAGE_SIZE),
     searchSwitch,
   });
   const res = await request(`${SEARCH_HOST}/MIGUM2.0/v1.0/content/search_all.do?${params}`, {
@@ -245,7 +248,7 @@ module.exports = {
     ],
   },
   linkPatterns: [],
-  policies: { order: 60, fallbackSource: true, probeable: true, aggregateLimit: 5 },
+  policies: { order: 60, fallbackSource: true, probeable: true, aggregateLimit: SEARCH_PAGE_SIZE },
 
   // ── 实现（方法存在 = 能力存在，capabilities 由此推导）────────
   search: miguSearch,

@@ -52,7 +52,7 @@ const POLICY_DEFAULTS = Object.freeze({
   fallbackSource: false, // 参与跨源换源候选
   probeable: false,      // 参与可用性探针
   order: 100,            // 展示与聚合顺序（小者在前）
-  aggregateLimit: 5,     // 'all' 聚合搜索时最多取几条
+  aggregateLimit: 5,     // 'all' 聚合时每页最多留几条；必须等于该源 search 页大小，更小会丢掉已取回的歌。0 = 不参与
 });
 
 const PLATFORMS_DIR = path.join(__dirname, 'platforms');

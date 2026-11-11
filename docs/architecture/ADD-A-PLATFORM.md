@@ -72,7 +72,7 @@ module.exports = {
     fallbackSource: true,  // 是否参与跨源换源候选。反例：bilibili=false，
                            // 因其 artist 是 UP 主名，参与换源只会制造错配。
     probeable: true,       // 是否参与设置页的可用性探针
-    aggregateLimit: 5,     // 'all' 聚合搜索时最多取几条
+    aggregateLimit: 30,    // 'all' 聚合时每页最多留几条，应等于 search() 的页大小；0 = 不参与
     supportsQuality: ['128k', '320k'],
   },
 

@@ -36,9 +36,21 @@ const reg = defaultRegistry;
 const ALL_IDS = ['netease', 'qq', 'bilibili', 'kugou', 'kuwo', 'migu', 'fivesing', 'soda'];
 /** 平台顺序 = 展示顺序 = 聚合权重顺序，改动会静默影响搜索结果条数 */
 const FROZEN_ORDER = ['netease', 'qq', 'bilibili', 'kugou', 'kuwo', 'migu', 'fivesing', 'soda'];
-/** 'all' 聚合时各源取几条（原来按下标 i===0?10:i===1?10:5 硬编码） */
-const FROZEN_AGG_LIMIT = { netease: 10, qq: 10 };
-const DEFAULT_AGG_LIMIT = 5;
+/**
+ * 'all' 聚合时每源每页保留几条。必须等于该源单曲搜索的页大小
+ * （网易/QQ/酷狗/酷我 30，B 站/咪咕/汽水 20，5sing 服务端默认 10）。
+ * 小于页大小会把已经取回的结果在合并前丢掉。
+ */
+const FROZEN_AGG_LIMIT = {
+  netease: 30,
+  qq: 30,
+  bilibili: 20,
+  kugou: 30,
+  kuwo: 30,
+  migu: 20,
+  fivesing: 10,
+  soda: 20,
+};
 /** 换源候选：故意排除 bilibili（其 artist 是 UP 主名，参与换源只会制造错配） */
 const FROZEN_FALLBACK = ['netease', 'qq', 'kugou', 'kuwo', 'migu', 'fivesing', 'soda'];
 /** 链接识别支持直取详情的平台 */
@@ -195,12 +207,13 @@ test('派生：被排除换源的平台必须**显式**说明（不计入默认�
   }
 });
 
-test('派生：聚合条数 netease/qq=10、其余=5（原为按数组下标 10/10/5）', () => {
+test('派生：聚合条数等于各源单曲搜索页大小（不再是 10/10/5 预览上限）', () => {
   for (const p of reg.getAll()) {
-    const want = FROZEN_AGG_LIMIT[p.id] ?? DEFAULT_AGG_LIMIT;
+    const want = FROZEN_AGG_LIMIT[p.id];
+    assert.ok(want > 0, `${p.id}: 内置平台必须显式冻结 aggregateLimit`);
     assert.strictEqual(
       p._policies.aggregateLimit, want,
-      `${p.id}: aggregateLimit 应为 ${want}`,
+      `${p.id}: aggregateLimit 应为 ${want}（等于该源 search 页大小）`,
     );
   }
 });

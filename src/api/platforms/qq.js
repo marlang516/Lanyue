@@ -20,6 +20,9 @@ const {
 } = require('../../utils/cookie');
 const logger = require('../../utils/logger');
 
+/** 单曲搜索每页条数。aggregateLimit 必须与它相同，否则合并前会丢掉本页多取回的歌。 */
+const SEARCH_PAGE_SIZE = 30;
+
 /**
  * 安全调用 qq-music-api 的路由。
  *
@@ -208,7 +211,7 @@ async function qqSearch(keyword, page = 1) {
     const result = await safeQQApi('search', {
       key: keyword,
       pageNo: page,
-      pageSize: 30,
+      pageSize: SEARCH_PAGE_SIZE,
       t: 0, // 0=单曲
     });
     const songs = result?.list || [];
@@ -946,8 +949,8 @@ module.exports = {
     // 专辑：/n/ryqq/albumDetail/MID
     { type: 'album', re: /y\.qq\.com\/n\/ryqq\/albumDetail\/([A-Za-z0-9]{10,18})(?:[?/]|$)/, extract: m => m[1] },
   ],
-  // aggregateLimit 10：第二位源，同 netease，改为显式声明
-  policies: { order: 20, fallbackSource: true, probeable: true, aggregateLimit: 10 },
+  // aggregateLimit = 单曲搜索页大小。小于页大小会把已经取回的歌丢掉。
+  policies: { order: 20, fallbackSource: true, probeable: true, aggregateLimit: SEARCH_PAGE_SIZE },
 
   // ── 实现（方法存在 = 能力存在）──────────────────────────────
   search: qqSearch,

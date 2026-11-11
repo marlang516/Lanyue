@@ -10,6 +10,9 @@ const { asSong } = require('../songShape');
 const logger = require('../../utils/logger');
 const { AppError } = require('../../shared/errors');
 
+/** 视频搜索每页条数。aggregateLimit 必须与它相同，否则合并前会丢掉本页多取回的结果。 */
+const SEARCH_PAGE_SIZE = 20;
+
 // ── 访客 Cookie（无登录态时自动获取）──────────────────
 // B 站 2024 起匿名请求带假 buvid3 会被风控：playurl 不返回 DASH 音频流
 // （走 LOGIN_REQUIRED 误判）。spi 接口可拿正式访客指纹 buvid3/buvid4，
@@ -209,7 +212,7 @@ async function bilibiliGetLyrics(bvid) {
  */
 async function bilibiliSearch(keyword, page = 1, cookie = '') {
   if (!keyword || typeof keyword !== 'string') return [];
-  const url = `https://api.bilibili.com/x/web-interface/search/type?search_type=video&keyword=${encodeURIComponent(keyword)}&page=${Number(page) || 1}&page_size=20&order=totalrank`;
+  const url = `https://api.bilibili.com/x/web-interface/search/type?search_type=video&keyword=${encodeURIComponent(keyword)}&page=${Number(page) || 1}&page_size=${SEARCH_PAGE_SIZE}&order=totalrank`;
 
   const result = await request(url, {
     headers: {
@@ -220,7 +223,7 @@ async function bilibiliSearch(keyword, page = 1, cookie = '') {
   });
 
   const videos = result?.data?.result || [];
-  return videos.slice(0, 20).map((v) => asSong({
+  return videos.slice(0, SEARCH_PAGE_SIZE).map((v) => asSong({
     id: v.bvid || String(v.aid),
     aid: v.aid,
     title: (v.title || '').replace(/<[^>]+>/g, ''),
@@ -374,7 +377,7 @@ module.exports = {
   // ⚠️ fallbackSource: false —— 唯一不参与跨源换源的平台。
   // B 站搜索结果的 artist 是 UP 主名，与音乐源的真实歌手永远对不上，
   // 参与换源只会制造错配（把翻唱合集 / DJ 版误当原曲）。
-  policies: { order: 30, fallbackSource: false, probeable: true, aggregateLimit: 5 },
+  policies: { order: 30, fallbackSource: false, probeable: true, aggregateLimit: SEARCH_PAGE_SIZE },
 
   // ── 实现（方法存在 = 能力存在）──────────────────────────────
   search: bilibiliSearch,

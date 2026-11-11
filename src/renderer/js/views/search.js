@@ -224,7 +224,7 @@ async function doSearchByType(type, page, keyword, source, reqId = ++_typeSearch
     const paginationMap = { song: renderPagination, album: renderAlbumPagination, singer: renderSingerPagination };
     setState(stateKey[type], cached.items);
     renderMap[type](cached.items);
-    if (paginationMap[type]) paginationMap[type](page, cached.items.length, cached.total);
+    if (paginationMap[type]) paginationMap[type](page, cached.items.length, cached.total, cached.hasMore);
     if (type === 'song') announceFailed(cached.failed);
     if (type === 'song' && cached.items.length > 0 && _searchBatchMode) {
       if (_dom.batchToolbar) _dom.batchToolbar.style.display = 'flex';
@@ -247,7 +247,12 @@ async function doSearchByType(type, page, keyword, source, reqId = ++_typeSearch
     const items = (result && result[type === 'song' ? 'songs' : type + 's']) || [];
     // 存入缓存（failed 随行：命中缓存时同样点名未返回的源）
     if (!result?.error) {
-      searchCacheSet(cacheKey, { items, total: result?.total || 0, failed: result?.failed });
+      searchCacheSet(cacheKey, {
+        items,
+        total: result?.total || 0,
+        failed: result?.failed,
+        hasMore: result?.hasMore,
+      });
     }
     // 迟到的旧请求结果只进缓存，不再覆盖界面（新搜索已在途时序号已变）
     if (reqId !== _typeSearchReqId) return [];
@@ -256,7 +261,7 @@ async function doSearchByType(type, page, keyword, source, reqId = ++_typeSearch
     renderMap[type](items);
     if (type === 'song') announceFailed(result && result.failed);
     if (paginationMap[type]) {
-      paginationMap[type](page, items.length, result.total);
+      paginationMap[type](page, items.length, result && result.total, result && result.hasMore);
     }
     if (type === 'song' && items.length > 0 && _searchBatchMode) {
       if (_dom.batchToolbar) _dom.batchToolbar.style.display = 'flex';
@@ -621,10 +626,11 @@ function songListContext(e) {
 }
 document.addEventListener('contextmenu', songListContext);
 
-function renderPagination(page, count) {
+function renderPagination(page, count, _total, hasMoreFlag) {
   const pg = document.getElementById('pagination');
-  if (count < 10) { pg.style.display = 'none'; return; }
-  const hasMore = count >= 20;
+  // 有布尔 hasMore 时以它为准：5sing 每页只有 10 条，count>=20 会把下一页关掉。
+  const hasMore = typeof hasMoreFlag === 'boolean' ? hasMoreFlag : count >= 20;
+  if (count < 10 && !hasMore) { pg.style.display = 'none'; return; }
   pg.style.display = 'flex';
   pg.innerHTML = `
     <button class="page-btn" ${page <= 1 ? 'disabled' : ''} onclick="doSearch(${page - 1})">上一页</button>
