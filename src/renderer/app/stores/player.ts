@@ -6,12 +6,17 @@
  *   → proxyPlay(url, referer, {id, source, quality}) → {fileUrl}
  *   → audio.src = lanyue-stream://...
  *
+ * 切歌延迟：若等用户点了下一首才串行做上面两步，出声前会空一段。
+ * 可预测的邻居在当前这首一开始就解析，并静音预热到备用元素上；
+ * 点击时直接播那个元素，不再等新的取流。随机模式猜不到下一首，仍走冷路径。
+ *
  * 竞态：切歌后旧请求的结果必须丢弃（_reqSeq），否则慢源会盖掉快源。
  * 唯一 audio 所有者：本模块，视图只读 state。
  */
 import { reactive, computed, watch } from 'vue';
 import type { ComputedRef } from 'vue';
 import { fileUrlFromPath } from '../../../shared/fileUrl.mjs';
+import { createSkipPrep, prepKey } from '../../js/skipPrep.js';
 import { call, callSafe } from '../core/bridge';
 import { normalizeSong, songKey } from '../core/song';
 import type { Song } from '../core/song';
@@ -77,29 +82,204 @@ export const player = reactive<PlayerState>({
 export const hasCurrent: ComputedRef<boolean> = computed(() => !!player.current);
 export const currentKey: ComputedRef<string> = computed(() => (player.current ? songKey(player.current) : ''));
 
-let audio: HTMLAudioElement | null = null;
+/** 正在出声的元素。备用元素只负责把下一首/上一首的字节提前拉进来。 */
+let activeEl: HTMLAudioElement | null = null;
 let _reqSeq = 0;
+/** 同时只保留「正在听 + 下一首 + 上一首」，多出来的元素回收再复用。 */
+const POOL = 3;
+let created = 0;
+const owners = new Map<string, HTMLAudioElement>();
+const keyOfEl = new WeakMap<HTMLAudioElement, string>();
+const urlOf = new WeakMap<HTMLAudioElement, string>();
+const spares: HTMLAudioElement[] = [];
 
-function ensureAudio(): HTMLAudioElement {
-  if (audio) return audio;
+function createBoundAudio(): HTMLAudioElement {
+  created += 1;
   const a = new Audio();
-  audio = a;
   a.preload = 'auto';
+  a.muted = true;
+  a.volume = 0;
+  a.playbackRate = player.rate;
+  // 备用元素也会 play/pause（用来逼 Chromium 真的去缓冲）。
+  // 不是当前元素的事件一律丢掉，否则预热会把界面打成「已暂停」。
   a.addEventListener('timeupdate', () => {
+    if (a !== activeEl) return;
     player.progress = a.currentTime || 0;
     if (Number.isFinite(a.duration) && a.duration > 0) player.duration = a.duration;
     syncOutputs();
   });
-  a.addEventListener('play', () => { player.playing = true; syncOutputs(true); });
-  a.addEventListener('pause', () => { player.playing = false; syncOutputs(true); });
-  a.addEventListener('ended', () => next(true));
+  a.addEventListener('play', () => {
+    if (a !== activeEl) return;
+    player.playing = true;
+    syncOutputs(true);
+  });
+  a.addEventListener('pause', () => {
+    if (a !== activeEl) return;
+    player.playing = false;
+    syncOutputs(true);
+  });
+  a.addEventListener('ended', () => {
+    if (a !== activeEl) return;
+    next(true);
+  });
   a.addEventListener('error', () => {
+    if (a !== activeEl) return;
     player.error = '播放失败：音源不可达或已过期';
     player.playing = false;
   });
-  a.playbackRate = player.rate;
   bindMediaHandlers();
   return a;
+}
+
+function ensureActive(): HTMLAudioElement {
+  if (!activeEl) activeEl = createBoundAudio();
+  return activeEl;
+}
+
+function bindOwner(el: HTMLAudioElement, key: string): void {
+  const prev = keyOfEl.get(el);
+  if (prev && prev !== key) owners.delete(prev);
+  owners.set(key, el);
+  keyOfEl.set(el, key);
+}
+
+function releaseElement(key: string): void {
+  const el = owners.get(key);
+  // 正在听的那首只从预取表摘掉，元素和已缓冲的字节留着，切回来不用再取流。
+  if (!el || el === activeEl) return;
+  owners.delete(key);
+  keyOfEl.delete(el);
+  urlOf.delete(el);
+  el.pause();
+  el.muted = true;
+  el.volume = 0;
+  el.removeAttribute('src');
+  el.src = '';
+  try { el.load(); } catch { /* 释放备用元素失败不影响当前这首 */ }
+  if (!spares.includes(el)) spares.push(el);
+}
+
+function elementFor(key: string): HTMLAudioElement {
+  const existing = owners.get(key);
+  if (existing) return existing;
+  let el = spares.pop();
+  if (!el && created >= POOL) {
+    for (const [k, candidate] of owners) {
+      if (candidate === activeEl) continue;
+      owners.delete(k);
+      keyOfEl.delete(candidate);
+      urlOf.delete(candidate);
+      candidate.pause();
+      el = candidate;
+      break;
+    }
+  }
+  if (!el) el = createBoundAudio();
+  bindOwner(el, key);
+  return el;
+}
+
+/**
+ * Chromium 把 preload=auto 当提示，经常要点了 play 才真正拉字节。
+ * 备用元素静音 play 再立刻 pause：缓冲留下来，当前这首不会被盖掉。
+ */
+function prime(el: HTMLAudioElement): void {
+  if (el === activeEl) return;
+  el.muted = true;
+  el.volume = 0;
+  const pending = el.play();
+  if (pending && typeof pending.then === 'function') {
+    pending.then(() => {
+      if (el === activeEl) return;
+      el.pause();
+    }).catch(() => { /* 预热被切歌打断不是失败 */ });
+  }
+}
+
+function attachUrl(el: HTMLAudioElement, key: string | null, fileUrl: string, primeIt: boolean): void {
+  if (key) bindOwner(el, key);
+  if (urlOf.get(el) === fileUrl && el.src) return;
+  urlOf.set(el, fileUrl);
+  const warming = primeIt && el !== activeEl;
+  el.muted = warming ? true : el === activeEl ? false : el.muted;
+  el.volume = warming ? 0 : (el === activeEl ? player.volume : el.volume);
+  el.preload = 'auto';
+  el.src = fileUrl;
+  try { el.load(); } catch { /* 个别环境对尚未就绪的元素 load 会抛 */ }
+  if (warming) prime(el);
+}
+
+function bufferedElement(song: Song, quality: string): HTMLAudioElement | null {
+  const key = prepKey(song, quality);
+  if (!key) return null;
+  const el = owners.get(key);
+  if (!el || !el.src || el.error) return null;
+  if (!urlOf.get(el)) return null;
+  return el;
+}
+
+async function activate(el: HTMLAudioElement, restart: boolean): Promise<void> {
+  const prev = activeEl;
+  activeEl = el;
+  if (prev && prev !== el) prev.pause();
+  if (restart) {
+    try {
+      if (el.currentTime !== 0) el.currentTime = 0;
+    } catch { /* 还没有 metadata，play() 会从头开始 */ }
+  }
+  el.muted = false;
+  el.volume = player.volume;
+  el.playbackRate = player.rate;
+  if (Number.isFinite(el.duration) && el.duration > 0) player.duration = el.duration;
+  player.playing = true;
+  await el.play();
+}
+
+type ResolvedPlayable = { fileUrl: string } | { error: string };
+
+async function resolvePlayable(song: Song, quality: string): Promise<ResolvedPlayable> {
+  try {
+    if (song.filePath) return { fileUrl: fileUrlFromPath(song.filePath) };
+    const result = await call<PlayUrlInfo>('getDownloadUrlSmart', song, quality);
+    if (!result || !result.url) {
+      const err = result && (result.error || result.code);
+      return { error: err ? String(err) : '无可用音源' };
+    }
+    if (result.degradedLocal) return { fileUrl: result.url };
+    const playSource = result.source || song.source;
+    const proxied = await call<ProxyPlayResult>('proxyPlay', result.url, REFERERS[playSource] || '', {
+      id: String(result.id ?? song.id),
+      source: playSource,
+      quality,
+    });
+    if (!proxied || !proxied.fileUrl) return { error: (proxied && proxied.error) || '流代理失败' };
+    return { fileUrl: proxied.fileUrl };
+  } catch (e) {
+    return { error: errorMessage(e) || '播放异常' };
+  }
+}
+
+const prep = createSkipPrep({
+  resolve: async (song, quality) => {
+    const resolved = await resolvePlayable(song as Song, quality);
+    if ('fileUrl' in resolved && resolved.fileUrl) return { fileUrl: resolved.fileUrl };
+    return null;
+  },
+  onReady: ({ key, fileUrl }) => {
+    attachUrl(elementFor(key), key, fileUrl, true);
+  },
+  onDrop: (key) => releaseElement(key),
+});
+
+function armNeighbors(hold: Song | null): void {
+  prep.arm({
+    queue: player.queue,
+    index: player.queueIdx,
+    mode: player.mode,
+    quality: player.quality,
+    holdKey: hold ? prepKey(hold, player.quality) : null,
+    skipResolve: (song, quality) => !!bufferedElement(song as Song, quality),
+  });
 }
 
 function fmtClock(s: number): string {
@@ -219,10 +399,11 @@ watch(() => lyricsState.items, () => {
 // 播放态变化立即同步（不等 timeupdate）
 watch(() => player.playing, () => syncOutputs(true));
 
-/** 仅设置队列与当前项，不触发取流 */
+/** 设置队列与当前项，不开始播放。已经在播时顺手预取新的邻居。 */
 export function setQueue(list: unknown, index = 0): void {
   player.queue = (Array.isArray(list) ? list : []).map(normalizeSong).filter((s): s is Song => s !== null);
   player.queueIdx = Math.max(0, Math.min(index, player.queue.length - 1));
+  if (activeEl && activeEl.src) armNeighbors(player.queue[player.queueIdx] || null);
 }
 
 /**
@@ -250,54 +431,56 @@ export async function playSong(song: unknown): Promise<void> {
   // 歌词异步加载：不阻塞出声，到达后歌词面板/桌面歌词自动刷新
   void loadLyricsFor(s);
 
-  const a = ensureAudio();
-
-  // 本地文件直出：不走取流/代理。# 与 ? 必须编码，否则 URL 片段会截断文件名。
-  if (s.filePath) {
-    try {
-      a.src = fileUrlFromPath(s.filePath);
-      await a.play();
-      player.loading = false;
-      addRecent(s);
-    } catch (e) {
-      player.loading = false;
-      if (!isBenignPlayError(e)) player.error = errorMessage(e) || '本地文件播放失败';
-    }
-    return;
-  }
-
   try {
-    const result = await call<PlayUrlInfo>('getDownloadUrlSmart', s, player.quality);
+    // hold 住即将播放的这首，避免「索引已经挪过去」把正在飞的预取拆掉。
+    armNeighbors(s);
+    const played = await playPreparedOrCold(s, reqId);
     if (reqId !== _reqSeq) return;
-    if (!result || !result.url) {
-      player.error = (result && (result.error || result.code)) || '无可用音源';
-      return;
+    if (played) {
+      addRecent(s);
+      armNeighbors(null);
     }
-
-    let fileUrl = result.url;
-    if (!result.degradedLocal) {
-      const playSource = result.source || s.source;
-      const proxied = await call<ProxyPlayResult>('proxyPlay', result.url, REFERERS[playSource] || '', {
-        id: String(result.id ?? s.id),
-        source: playSource,
-        quality: player.quality,
-      });
-      if (reqId !== _reqSeq) return;
-      if (!proxied || !proxied.fileUrl) {
-        player.error = (proxied && proxied.error) || '流代理失败';
-        return;
-      }
-      fileUrl = proxied.fileUrl;
-    }
-
-    a.src = fileUrl;
-    await a.play();
-    addRecent(s);
   } catch (e) {
-    if (reqId === _reqSeq && !isBenignPlayError(e)) player.error = errorMessage(e) || '播放异常';
+    if (reqId === _reqSeq && !isBenignPlayError(e)) {
+      player.playing = false;
+      player.error = errorMessage(e) || (s.filePath ? '本地文件播放失败' : '播放异常');
+    }
   } finally {
     if (reqId === _reqSeq) player.loading = false;
   }
+}
+
+async function playPreparedOrCold(s: Song, reqId: number): Promise<boolean> {
+  const qualityAtStart = player.quality;
+  const key = prepKey(s, qualityAtStart);
+  let el: HTMLAudioElement | null = key ? bufferedElement(s, qualityAtStart) : null;
+
+  if (!el && key && (prep.peek(s, qualityAtStart) || prep.isInflight(s, qualityAtStart))) {
+    const hit = await prep.join(s, qualityAtStart);
+    if (reqId !== _reqSeq) return false;
+    el = bufferedElement(s, player.quality);
+    if (!el && hit && hit.fileUrl && player.quality === qualityAtStart) {
+      el = ensureActive();
+      attachUrl(el, key, hit.fileUrl, false);
+    }
+  }
+
+  if (!el) {
+    const quality = player.quality;
+    const resolved = await resolvePlayable(s, quality);
+    if (reqId !== _reqSeq) return false;
+    if (!('fileUrl' in resolved) || !resolved.fileUrl) {
+      player.error = 'error' in resolved && resolved.error ? resolved.error : '无可用音源';
+      return false;
+    }
+    const freshKey = prepKey(s, quality);
+    el = (freshKey && bufferedElement(s, quality)) || ensureActive();
+    if (urlOf.get(el) !== resolved.fileUrl || !el.src) attachUrl(el, freshKey, resolved.fileUrl, false);
+  }
+
+  if (reqId !== _reqSeq) return false;
+  await activate(el, true);
+  return reqId === _reqSeq;
 }
 
 /** 从 unknown 异常里取可读文案（等价于 `(e && e.message) || 兜底`） */
@@ -322,7 +505,7 @@ function isBenignPlayError(e: unknown): boolean {
 }
 
 export function togglePlay(): void {
-  const a = ensureAudio();
+  const a = ensureActive();
   if (!a.src) {
     if (player.current) void playSong(player.current);
     return;
@@ -332,33 +515,39 @@ export function togglePlay(): void {
 }
 
 export function seekTo(seconds: number): void {
-  const a = ensureAudio();
+  const a = activeEl;
   const s = Math.max(0, Number(seconds) || 0);
-  if (a.src) a.currentTime = s;
+  if (a && a.src) a.currentTime = s;
   player.progress = s;
 }
 
 export function setVolume(v: number): void {
   const n = Math.min(1, Math.max(0, Number(v) || 0));
-  ensureAudio().volume = n;
   player.volume = n;
+  if (activeEl && !activeEl.muted) activeEl.volume = n;
 }
 
 export function setRate(r: number | string): number {
   const n = Math.min(2, Math.max(0.5, Number(r) || 1));
   player.rate = n;
-  ensureAudio().playbackRate = n;
+  if (activeEl) activeEl.playbackRate = n;
   return n;
 }
 
 export function setQuality(q: string | null | undefined): void {
-  player.quality = q || 'standard';
+  const nextQ = q || 'standard';
+  if (nextQ === player.quality) return;
+  player.quality = nextQ;
+  // 旧音质的缓冲不能拿来播。正在听的这首不打断，邻居按新音质重取。
+  prep.invalidate();
+  if (activeEl && activeEl.src) armNeighbors(player.queue[player.queueIdx] || null);
 }
 
 export function cycleMode(): PlayMode {
   const order: PlayMode[] = ['order', 'list-loop', 'single', 'shuffle'];
   const i = order.indexOf(player.mode);
   player.mode = order[(i + 1) % order.length];
+  if (activeEl && activeEl.src) armNeighbors(player.queue[player.queueIdx] || null);
   return player.mode;
 }
 
@@ -380,8 +569,13 @@ function pickIndex(dir: number): number {
 
 /** @param auto true=播完自动推进（single 模式重播本曲） */
 export function next(auto = false): void {
-  if (player.mode === 'single' && auto) {
-    void playSong(player.current);
+  // 单曲循环播完：同一条已经打开的流回到开头，不再取一次 URL。
+  if (player.mode === 'single' && auto && activeEl && activeEl.src && !activeEl.error) {
+    player.progress = 0;
+    try { activeEl.currentTime = 0; } catch { /* metadata 未到时从头 play 即可 */ }
+    activeEl.play().catch((e) => {
+      if (!isBenignPlayError(e)) player.error = '播放失败';
+    });
     return;
   }
   const idx = pickIndex(1);
@@ -405,15 +599,18 @@ export function removeFromQueue(index: number): void {
   if (!player.queue.length) {
     player.queueIdx = -1;
     player.current = null;
+    prep.invalidate();
     return;
   }
   if (index < player.queueIdx) player.queueIdx -= 1;
   else if (wasCurrent) player.queueIdx = Math.min(index, player.queue.length - 1);
+  if (activeEl && activeEl.src) armNeighbors(player.queue[player.queueIdx] || null);
 }
 
 export function clearQueue(): void {
   player.queue.splice(0);
   player.queueIdx = -1;
+  prep.invalidate();
 }
 
 /** 把歌曲追加到队列（不打断当前播放） */
@@ -424,6 +621,7 @@ export function appendToQueue(songs: unknown): number {
   if (!list.length) return 0;
   player.queue.push(...list);
   if (player.queueIdx < 0) player.queueIdx = 0;
+  if (activeEl && activeEl.src) armNeighbors(player.queue[player.queueIdx] || null);
   return list.length;
 }
 
