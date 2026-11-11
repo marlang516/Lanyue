@@ -167,7 +167,7 @@ const resolveTrack = createResolveTrackService({
   findCandidates: findMatchedCandidates,
   sourceHealth,
   // 候选直链预检：HEAD 被拒自动退化为 Range GET（见 request.testAudioLink）。
-  // 第二参是取流结果。不带 Referer 时部分 CDN 回 200 + text/*，预检会把能播的
+  // 第二参是取流结果。不带 Referer 时部分 CDN 回 200 且类型是 text，预检会把能播的
   // 候选当成死链丢掉。403 仍按不定证据接受，这里只补头。
   probeUrl: (url, result) => request.testAudioLink(url, { timeout: 6000, headers: probeHeaders(result) }),
   // 换源禁用平台清单：懒加载 prefs —— 本模块被大量测试 require，
