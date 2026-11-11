@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import Icon from '../common/Icon.vue';
-import { fmtDuration, qualityBadge, platformName } from '../../core/format';
+import { fmtDurationMs, qualityBadge, platformName } from '../../core/format';
 import { songKey } from '../../core/song';
 import type { SongLike } from '../../core/song';
 
@@ -82,11 +82,15 @@ function dropBrokenImg(e: Event): void {
         <label v-if="batchMode" class="pick" @click.stop>
           <input type="checkbox" :checked="isSel(s)" @change="emit('select', s)" />
         </label>
-        <span v-else class="idx">{{ String(i + 1).padStart(2, '0') }}</span>
+        <span v-else class="idx">
+          <span v-if="isOn(s)" class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+          <template v-else>{{ String(i + 1).padStart(2, '0') }}</template>
+        </span>
 
         <div class="cover" :class="{ nocover: !s.cover }">
           <img v-if="s.cover" :src="s.cover" alt="" loading="lazy" decoding="async" @error="dropBrokenImg" />
           <Icon v-if="!s.cover" name="music" :size="15" />
+          <span class="cover-play" aria-label="播放" @click.stop="emit('play', i)"><Icon name="play" :size="12" /></span>
         </div>
 
         <div class="meta">
@@ -98,7 +102,7 @@ function dropBrokenImg(e: Event): void {
 
         <span class="q ly-tag" :class="{ 'ly-tag-accent': s.lossless }">{{ qualityBadge(s) }}</span>
         <span v-if="showSource" class="src">{{ platformName(s.source) }}</span>
-        <span class="dur">{{ fmtDuration(s.duration) }}</span>
+        <span class="dur">{{ fmtDurationMs(s.duration) }}</span>
 
         <div class="act">
           <button class="ly-icon-btn" title="播放" aria-label="播放" @click.stop="emit('play', i)">
@@ -118,44 +122,119 @@ function dropBrokenImg(e: Event): void {
 
 <style scoped>
 .song-table { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.rows { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 1px; padding-right: 2px; }
+.rows {
+  overflow-y: auto; min-height: 0;
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 2px 4px 4px 2px;
+}
 
 .row {
+  position: relative;
   display: flex; align-items: center; gap: var(--sp-3);
-  min-height: 52px; padding: 6px var(--sp-3);
+  min-height: 62px; padding: 7px var(--sp-3) 7px 6px;
   border-radius: var(--r-md);
-  transition: background var(--dur-1) var(--ease);
+  transition: background var(--dur-1) var(--ease),
+              transform var(--dur-1) var(--ease),
+              box-shadow var(--dur-1) var(--ease);
 }
-.row:hover { background: var(--glass-3); }
+/* 左侧极光强调条：仅播放中行点亮 */
+.row::before {
+  content: ""; position: absolute; left: -2px; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 24px; border-radius: var(--r-full);
+  background: var(--au-grad);
+  opacity: 0; transition: opacity var(--dur-1) var(--ease);
+}
+.row:hover { background: var(--glass-3); transform: translateX(2px); }
 .row.sel { background: var(--accent-soft); }
-.row.on { background: linear-gradient(95deg, rgba(124, 92, 255, .14), rgba(0, 198, 255, .1)); box-shadow: inset 0 0 0 1px var(--accent-line); }
+.row.on {
+  background: linear-gradient(95deg, rgba(124, 92, 255, .16), rgba(0, 198, 255, .09));
+  box-shadow: inset 0 0 0 1px var(--accent-line), 0 6px 18px rgba(124, 92, 255, .12);
+}
+.row.on::before { opacity: 1; }
 
-.idx { width: 26px; flex-shrink: 0; text-align: right; font-size: var(--fs-xs); color: var(--ink-3); font-variant-numeric: tabular-nums; }
-.pick { width: 26px; flex-shrink: 0; display: flex; justify-content: center; }
+.idx {
+  width: 30px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  font-size: var(--fs-xs); color: var(--ink-3); font-variant-numeric: tabular-nums;
+}
+.row.on .idx { color: var(--au-1); }
+.pick { width: 30px; flex-shrink: 0; display: flex; justify-content: center; }
 .pick input { width: 14px; height: 14px; accent-color: var(--au-1); cursor: pointer; }
 
+/* 播放中均衡器：仅当前行一根，4 条细柱，极轻量 */
+.eq { display: inline-flex; align-items: flex-end; gap: 2px; height: 13px; }
+.eq i {
+  display: block; width: 2.5px; border-radius: 2px;
+  background: var(--au-grad);
+  transform-origin: bottom;
+  animation: eq-bars 1.05s ease-in-out infinite;
+}
+.eq i:nth-child(1) { height: 55%; animation-delay: -.55s; }
+.eq i:nth-child(2) { height: 100%; animation-delay: -.25s; }
+.eq i:nth-child(3) { height: 70%; animation-delay: -.4s; }
+.eq i:nth-child(4) { height: 45%; animation-delay: -.7s; }
+@keyframes eq-bars { 0%, 100% { transform: scaleY(.35); } 50% { transform: scaleY(1); } }
+
 .cover {
-  width: 38px; height: 38px; flex-shrink: 0; border-radius: 10px;
+  position: relative;
+  width: 46px; height: 46px; flex-shrink: 0; border-radius: 12px;
   overflow: hidden; background: var(--glass-3);
   display: flex; align-items: center; justify-content: center;
   color: var(--ink-3);
+  box-shadow: 0 2px 10px rgba(20, 24, 36, .12);
+  transition: transform var(--dur-1) var(--ease), box-shadow var(--dur-1) var(--ease);
 }
-.cover img { width: 100%; height: 100%; object-fit: cover; }
+.cover img { width: 100%; height: 100%; object-fit: cover; transition: transform var(--dur-2) var(--ease); }
+.row:hover .cover { transform: scale(1.05); box-shadow: 0 8px 20px rgba(20, 24, 36, .20); }
+.row:hover .cover img { transform: scale(1.1); }
 .cover.nocover { background: linear-gradient(135deg, var(--glass-2), var(--accent-soft)); }
+.cover-play {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(20, 24, 36, .42); color: #fff;
+  opacity: 0; cursor: pointer;
+  transition: opacity var(--dur-1) var(--ease);
+}
+.cover-play svg { width: 12px; height: 12px; transform: translateX(1px); }
+.row:hover .cover-play { opacity: 1; }
+.row.on .cover-play { background: rgba(124, 92, 255, .55); }
 
 .meta { flex: 1; min-width: 0; }
-.t { font-size: var(--fs-sm); font-weight: var(--fw-med); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.row.on .t { color: var(--au-1); }
-.a { font-size: var(--fs-xs); color: var(--ink-3); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.t {
+  font-size: var(--fs-md); font-weight: var(--fw-bold); color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.row.on .t {
+  background: linear-gradient(95deg, var(--au-1) 30%, var(--au-2));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.a {
+  font-size: var(--fs-xs); color: var(--ink-2); margin-top: 3px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 
 .q { flex-shrink: 0; min-width: 42px; justify-content: center; }
-.src { width: 70px; flex-shrink: 0; font-size: var(--fs-xs); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dur { width: 46px; flex-shrink: 0; text-align: right; font-size: var(--fs-xs); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.src {
+  width: 72px; flex-shrink: 0; font-size: var(--fs-xs); color: var(--ink-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dur {
+  width: 48px; flex-shrink: 0; text-align: right;
+  font-size: var(--fs-xs); color: var(--ink-3); font-variant-numeric: tabular-nums;
+}
+.row.on .dur { color: var(--au-1); font-weight: var(--fw-med); }
 
-.act { display: flex; gap: 0; flex-shrink: 0; opacity: 0; transition: opacity var(--dur-1) var(--ease); }
+.act {
+  display: flex; gap: 2px; flex-shrink: 0;
+  opacity: 0; transition: opacity var(--dur-1) var(--ease);
+}
 .row:hover .act, .row.on .act { opacity: 1; }
 
-.compact .row { min-height: 44px; padding: 4px var(--sp-2); }
-.compact .cover { width: 32px; height: 32px; }
+/* compact 变体：mini player / 抽屉复用，保持紧凑但沿用新视觉 */
+.compact .row { min-height: 46px; padding: 5px var(--sp-2); }
+.compact .row::before { height: 18px; }
+.compact .cover { width: 34px; height: 34px; box-shadow: 0 1px 6px rgba(20, 24, 36, .1); }
+.compact .idx { width: 26px; }
+.compact .eq { height: 10px; }
+.compact .t { font-size: var(--fs-sm); }
+.compact .a { margin-top: 1px; }
 .compact .src { display: none; }
 </style>

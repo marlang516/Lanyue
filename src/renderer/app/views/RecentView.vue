@@ -43,10 +43,10 @@ async function onClear() {
 
 <style scoped>
 .rv { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--gap-app); }
-.head { flex-shrink: 0; display: flex; align-items: flex-end; gap: var(--sp-4); padding: var(--sp-5) var(--sp-6); }
+.head { flex-shrink: 0; display: flex; align-items: flex-end; gap: var(--sp-4); padding: var(--sp-5) var(--sp-6); background: var(--glass); backdrop-filter: blur(var(--glass-blur)); -webkit-backdrop-filter: blur(var(--glass-blur)); border: 1px solid var(--stroke); border-radius: var(--r-xl); box-shadow: var(--shadow-card); }
 .htx { flex: 1; }
 .tag { font-size: var(--fs-2xs); letter-spacing: .28em; color: var(--au-1); font-weight: var(--fw-bold); }
-h2 { margin-top: var(--sp-2); font-size: var(--fs-2xl); font-weight: var(--fw-black); }
+h2 { margin-top: var(--sp-2); font-size: var(--fs-2xl); font-weight: var(--fw-black); background: linear-gradient(95deg, var(--ink) 25%, var(--au-1) 60%, var(--au-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
 p { margin-top: var(--sp-2); font-size: var(--fs-xs); color: var(--ink-3); }
-.body { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: var(--sp-4) var(--sp-5); overflow: hidden; }
+.body { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: var(--sp-4) var(--sp-5); overflow: hidden; background: var(--glass); backdrop-filter: blur(var(--glass-blur)); -webkit-backdrop-filter: blur(var(--glass-blur)); border: 1px solid var(--stroke); border-radius: var(--r-xl); box-shadow: var(--shadow-card); }
 </style>

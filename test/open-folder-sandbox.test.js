@@ -54,6 +54,17 @@ const approvedDirs = require(path.join(ROOT, 'src/main/approvedDirs'));
 const ipcWindow = require(path.join(ROOT, 'src/main/ipc/window'));
 Module._load = originalLoad;
 
+// T4 端口注入：window.js 的 _shell()/_app()/_dialog() 在调用时惰性取 require('electron')，
+// 本测试不装 electron，所以经设计为端口注入提供能力桩（register 前的 Module._load 桩只覆盖 ipcMain 注册期）。
+// 保留 shell.showItemInFolder 桩，控制组断言才会真正命中「打开目录」行为。
+ipcWindow.setWindowPort({
+  ipcMain: { handle: (channel, fn) => handlers.set(channel, fn), on: () => {} },
+  app: { getPath: (name) => (name === 'userData' ? userDataDir : musicDir) },
+  shell: { showItemInFolder: (p) => { shown.push(p); } },
+  dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }) },
+  BrowserWindow: class { static getAllWindows() { return []; } },
+});
+
 ipcWindow.register();
 
 const { ENVELOPE_KEY } = require(path.join(ROOT, 'src/shared/ipcContract'));

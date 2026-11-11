@@ -22,7 +22,7 @@ const exportPlaylist = require('./download/exportPlaylist');
 function register(opts = {}) {
   stream.register();
   queue.register(opts.queue);
-  exportPlaylist.register();
+  exportPlaylist.register(opts.port);
 }
 
 module.exports = {

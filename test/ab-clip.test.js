@@ -215,7 +215,7 @@ test('接线：菜单项 / 面板入口 / 主进程透传 / 零新通道 全齐'
 
   // 复用既有通道：契约里 convert-audio 仍是自由对象参数，且没冒出新通道名
   const contract = read('src/shared/ipcContract.js');
-  assert.match(contract, /'convert-audio':\s*\{ invoke: MAIN, args: \[\['params', t\.obj\(\)\]\] \}/);
+  assert.match(contract, /'convert-audio':\s*\{ invoke: MAIN, args: \[\['params', t\.shape\(\{ fields: \{\}, required: \[\] \}\)\]\] \}/);
   assert.ok(!/'[a-z-]*(export-clip|clip-export|cut-audio|audio-clip|clip-save)'/.test(contract), '不该为此功能新增通道名');
   const clipMod = read('src/renderer/js/abClip.js');
   assert.match(clipMod, /api\.convertAudio\(/, '渲染层未复用转码通道');

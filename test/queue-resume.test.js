@@ -123,7 +123,8 @@ test('接线钉：index.js 恢复队列后必须调用 resumeRestoredQueue', () 
   assert.ok(loadAt >= 0, 'index.js 应仍有启动恢复调用（改动请同步本守卫）');
   assert.ok(resumeAt > loadAt,
     '必须在恢复之后调用 resumeRestoredQueue —— 原 bug 正是「只加载不调度」');
-  const regAt = src.indexOf('registerAllIpcHandlers()');
+  const regAt = src.indexOf('registerAllIpc(');
+  assert.ok(regAt >= 0, 'index.js 应仍调用装配入口（registerAllIpc / registerAllIpcHandlers）');
   assert.ok(resumeAt > regAt,
-    '应在 registerAllIpcHandlers 之后调度：取流/歌词等上下文在那段装配里才就绪');
+    '应在 registerAllIpc 之后调度：取流/歌词等上下文在那段装配里才就绪');
 });

@@ -14,6 +14,10 @@ export function fmtDuration(sec: unknown): string {
   return `${m}:${String(r).padStart(2, '0')}`;
 }
 
+export function fmtDurationMs(ms: unknown): string {
+  return fmtDuration((Number(ms) || 0) / 1000);
+}
+
 export function fmtSize(bytes: unknown): string {
   const n = Number(bytes) || 0;
   if (n < 1024) return `${n} B`;

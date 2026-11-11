@@ -65,9 +65,9 @@ test('契约：通道已声明且为 main invoke', () => {
   assert.match(m[0], /invoke:\s*MAIN/, '应为 main invoke');
 });
 
-test('契约：参数规格已声明（opts 走 t.obj，不放行任意值）', () => {
-  const m = CONTRACT.match(new RegExp(`'${CH}':\\s*\\{[^}]*\\}`));
-  assert.match(m[0], /'opts',\s*t\.obj\(\)/, 'opts 应声明为 t.obj()，与仓库其他对象参数一致');
+test('契约：参数规格已声明（opts 走 t.shape 自由对象，不放行任意值）', () => {
+  const m = CONTRACT.match(new RegExp(`'${CH}':\\s*\\{[\\s\\S]*?\\]\\]\\s*\\}`));
+  assert.match(m[0], /'opts',\s*t\.shape\(\{ fields: \{[\s\S]*?\}, required: \[\] \}\)/, 'opts 应声明为 t.shape 自由对象，与仓库其他对象参数一致');
 });
 
 test('契约：METHODS 里已挂上 camelCase 方法名（preload 靠它生成 api.<method>）', () => {
@@ -96,19 +96,18 @@ test('主进程：handler 已注册（契约声明却没人注册 ⇒ assertCont
 });
 
 test('主进程：playlist 模块确实被装载（否则 handler 白写）', () => {
-  // ipc/playlist 由 main/index.js require 并以 domain/infra 注入式 register；
-  // 只匹配 register() 会把「注入了什么」这层信息整个漏掉。
-  const MAIN = read('src/main/index.js');
-  assert.match(MAIN, /require\('\.\/ipc\/playlist'\)/, 'main/index.js 应 require ipc/playlist');
-  const reg = MAIN.match(/ipcPlaylist\.register\(\s*\{([\s\S]*?)\}\s*\)/);
-  assert.ok(reg, 'main/index.js 应以注入式调用 ipcPlaylist.register({ domain, infra })');
+  // T5：IPC 装配已从 main/index.js 抽出到 ipc/index.js 的 registerAllIpcHandlers；
+  // ipcPlaylist 作为依赖从 main/index.js 注入（不再在装配根里 require）。
+  const ASSEMBLY = read('src/main/ipc/index.js');
+  const reg = ASSEMBLY.match(/ipcPlaylist\.register\(\s*\{([\s\S]*?)\}\s*\)/);
+  assert.ok(reg, 'ipc/index.js 应以注入式调用 ipcPlaylist.register({ domain, infra })');
   assert.match(reg[1], /domain:\s*playlistDomain/, 'register 未注入 playlist domain');
   assert.match(reg[1], /infra:\s*createPlaylistInfra\(\)/, 'register 未注入 playlist infra');
   // 注入的两个标识符必须真的定义出来（拼错名字 ⇒ 启动即 ReferenceError）
-  assert.match(MAIN, /const playlistDomain = require\('\.\/ipc\/playlist\/domain'\)/,
-    'main/index.js 缺 playlistDomain 定义');
-  assert.match(MAIN, /const \{ createInfra: createPlaylistInfra \} = require\('\.\/ipc\/playlist\/infra'\)/,
-    'main/index.js 缺 createPlaylistInfra 定义');
+  assert.match(ASSEMBLY, /const playlistDomain = require\('\.\/playlist\/domain'\)/,
+    'ipc/index.js 缺 playlistDomain 定义');
+  assert.match(ASSEMBLY, /const \{ createInfra: createPlaylistInfra \} = require\('\.\/playlist\/infra'\)/,
+    'ipc/index.js 缺 createPlaylistInfra 定义');
 });
 
 // ── 4. 只读纪律 ───────────────────────────────────────

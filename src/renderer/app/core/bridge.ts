@@ -9,7 +9,7 @@
  *  3. 错误不吞：preload 已把信封解包成 reject，调用方自行决定兜底；
  *     只有「读偏好」这类非关键路径才允许静默降级。
  */
-import type { MusicApi } from './env';
+import type { BridgeMethods, BridgeMethodName, BridgeEvents, BridgeEventName } from './bridge.gen';
 
 /**
  * 事件订阅回调。
@@ -21,10 +21,10 @@ import type { MusicApi } from './env';
 export type EventListener = (...args: any[]) => void;
 
 /** 契约探测：主窗口有 preload，二级窗口走最小契约 */
-export function api(): MusicApi {
+export function api(): BridgeMethods {
   const a = window.musicAPI;
   if (!a) throw new Error('musicAPI 未注入（preload 缺失？）');
-  return a;
+  return a as unknown as BridgeMethods;
 }
 
 export function hasApi(): boolean {
@@ -45,13 +45,13 @@ function errMessage(e: unknown): string | undefined {
  * @param method preload 契约方法名（camelCase）
  * @param args 原样转发给契约方法
  */
-export async function call<T = unknown>(method: string, ...args: unknown[]): Promise<T> {
+export async function call<T = unknown>(method: BridgeMethodName, ...args: unknown[]): Promise<T> {
   const mockMethod = window.__LY_MOCK__?.[method];
   if (typeof mockMethod === 'function') {
-    return mockMethod(...args) as T;
+    return (mockMethod as (...a: unknown[]) => unknown)(...args) as T;
   }
   const a = api();
-  const fn = a[method];
+  const fn = a[method] as ((...args: unknown[]) => unknown) | undefined;
   if (typeof fn !== 'function') {
     throw new Error(`musicAPI.${method} 不在契约白名单`);
   }
@@ -65,11 +65,7 @@ export async function call<T = unknown>(method: string, ...args: unknown[]): Pro
  * 桥接层无法收敛成统一结构；需要类型时显式传 T（见 core/prefs.ts）。
  * @param fallback 失败时的返回值（类型参与返回值推导）
  */
-export async function callSafe<T = any, F = null>(
-  method: string,
-  args: unknown[] = [],
-  fallback: F = null as F,
-): Promise<T | F> {
+export async function callSafe<T = any, F = null>(method: BridgeMethodName, args: unknown[] = [], fallback: F = null as F): Promise<T | F> {
   try {
     return await call<T>(method, ...args);
   } catch {
@@ -96,7 +92,7 @@ export async function invoke<T = unknown>(channel: string, ...args: unknown[]): 
  * preload 的订阅方法签名为 (cb) => ipcRenderer.on(channel, cb)。
  * @returns 尽力解绑；preload 未暴露 removeListener 时为空操作。
  */
-export function on(event: string, cb: EventListener): () => void {
+export function on(event: BridgeEventName, cb: EventListener): () => void {
   // 无头验证台：桩数据同样可以推事件
   const mockListener = window.__LY_MOCK__?.[event];
   if (typeof mockListener === 'function') {
@@ -110,7 +106,7 @@ export function on(event: string, cb: EventListener): () => void {
   }
   try {
     const a = api();
-    const subscribe = a[event];
+    const subscribe = a[event as unknown as BridgeMethodName] as ((cb: EventListener) => void) | undefined;
     if (typeof subscribe !== 'function') {
       console.warn(`[bridge] 未知事件 ${event}`);
       return () => {};

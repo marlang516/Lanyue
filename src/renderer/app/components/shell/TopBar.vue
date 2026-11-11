@@ -69,9 +69,8 @@ function openDownloadDir() {
   padding: 0 var(--sp-5) 0 var(--sp-6);
   border-bottom: 1px solid var(--hairline);
   background: var(--glass);
-  backdrop-filter: blur(20px) saturate(150%);
-  -webkit-backdrop-filter: blur(20px) saturate(150%);
-  -webkit-app-region: drag;
+  backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
   z-index: var(--z-topbar);
 }
 .drag-blank { flex: 1; min-width: 8px; -webkit-app-region: drag; }

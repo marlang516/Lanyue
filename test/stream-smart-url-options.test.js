@@ -169,13 +169,13 @@ test('handler 忽略非布尔的 allowToggleSource（脏值不污染语义）', 
   }
 });
 
-test('契约声明了 get-download-url-smart 的 options 参数（形状校验走 t.obj()）', () => {
+test('契约声明了 get-download-url-smart 的 options 参数（形状校验走 t.shape 自由对象）', () => {
   const contract = require('../src/shared/ipcContract');
   const entry = contract.CHANNELS['get-download-url-smart'];
   assert.ok(entry, '通道必须存在');
   const argNames = entry.args.map((a) => a[0]);
   assert.deepStrictEqual(argNames, ['song', 'quality', 'options'], 'args 应含 options');
-  assert.strictEqual(entry.args[2][1].k, 'obj', 'options 的规格必须是 t.obj()');
+  assert.strictEqual(entry.args[2][1].k, 'shape', 'options 的规格必须是 t.shape()');
 });
 
 test('契约工具能正确校验 options 形状（不拒绝合法对象，不放过非对象）', () => {

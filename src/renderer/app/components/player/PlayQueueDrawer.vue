@@ -4,7 +4,7 @@ import {
   player, togglePlay, next, prev, seekTo, playSong, removeFromQueue,
   clearQueue, persistQueue,
 } from '../../stores/player';
-import { fmtDuration, platformName } from '../../core/format';
+import { fmtDurationMs, platformName } from '../../core/format';
 import { toast } from '../../core/toast';
 import Icon from '../common/Icon.vue';
 
@@ -109,7 +109,7 @@ function dropBrokenImg(e: Event): void {
                   <div class="t">{{ s.title }}</div>
                   <div class="a">{{ s.artist || '未知歌手' }} · {{ platformName(s.source) }}</div>
                 </div>
-                <span class="dur">{{ fmtDuration(s.duration) }}</span>
+                <span class="dur">{{ fmtDurationMs(s.duration) }}</span>
                 <button class="ly-icon-btn danger" title="移除" aria-label="移除" @click="removeAt(i, $event)">
                   <Icon name="x" :size="13" />
                 </button>

@@ -4,7 +4,6 @@
  * 注册: export-all-data / import-all-data
  */
 
-const { dialog } = require('electron');
 const { handle } = require('./register');
 const prefs = require('../../utils/prefs');
 const { ALLOWED_PREF_KEYS } = require('./prefs');
@@ -21,6 +20,16 @@ const logger = require('../../utils/logger');
 const { BACKUP_SCHEMA_VERSION, migrateBackup } = require('../../utils/dataMigration');
 // 主进程即 UI 线程：文件 IO 必须异步
 const fsa = require('../../utils/fsAsync');
+
+/**
+ * 端口注入：由组装根（main/index.js）提供，避免本模块直取 electron。
+ * @type {{ showSaveDialog?: Function, showOpenDialog?: Function, getUserDataDir?: () => string }}
+ */
+let _ports = {
+  showSaveDialog: null,
+  showOpenDialog: null,
+  getUserDataDir: null,
+};
 
 // 不随备份走的键：凭证级数据（prefs.SECRET_KEYS，落盘是 safeStorage 密文，跨机
 // 根本解不开，留在备份里只是把密钥材料抄进一个用户可能随手分享的文件）
@@ -69,11 +78,18 @@ function pickImportablePrefs(raw) {
   return { kept, droppedDirs };
 }
 
-function register() {
+function register(options = {}) {
+  const opts = options || {};
+  _ports = {
+    showSaveDialog: typeof opts.showSaveDialog === 'function' ? opts.showSaveDialog : null,
+    showOpenDialog: typeof opts.showOpenDialog === 'function' ? opts.showOpenDialog : null,
+    getUserDataDir: typeof opts.getUserDataDir === 'function' ? opts.getUserDataDir : null,
+  };
   // 导出所有数据
   handle('export-all-data', async () => {
     try {
-      const result = await dialog.showSaveDialog({
+      if (!_ports.showSaveDialog) return { success: false, error: 'DIALOG_UNAVAILABLE' };
+      const result = await _ports.showSaveDialog({
         title: '导出揽乐数据',
         defaultPath: `music-downloader-backup-${Date.now()}.json`,
         filters: [{ name: 'JSON', extensions: ['json'] }],
@@ -117,7 +133,7 @@ function register() {
   // 导入数据
   handle('import-all-data', async () => {
     try {
-      const result = await dialog.showOpenDialog({
+      const result = await _ports.showOpenDialog({
         title: '导入揽乐数据',
         filters: [{ name: 'JSON', extensions: ['json'] }],
         properties: ['openFile'],
@@ -295,7 +311,9 @@ function register() {
 async function getAllPrefs() {
   // prefs.js 可能没有 getAll，尝试直接读取
   try {
-    const prefsPath = path.join(require('electron').app.getPath('userData'), 'prefs.json');
+    const userDataDir = _ports.getUserDataDir ? _ports.getUserDataDir() : '';
+    if (!userDataDir) return {};
+    const prefsPath = path.join(userDataDir, 'prefs.json');
     const raw = await fsa.tryReadText(prefsPath);
     if (raw) return JSON.parse(raw);
   } catch (_) {

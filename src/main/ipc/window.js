@@ -8,7 +8,6 @@
  *      desktop-lyric-update / desktop-lyric-sync
  */
 
-const { BrowserWindow, dialog, shell, app } = require('electron');
 const { handle, on } = require('./register');
 const { buildContractArg } = require('../../shared/ipcContract');
 const { defaultDownloadDir } = require('../../shared/downloadDefaults');
@@ -20,6 +19,31 @@ const logger = require('../../utils/logger');
 // 主进程即 UI 线程：文件 IO 必须异步
 const fsa = require('../../utils/fsAsync');
 
+// 端口注入：由外部（main/index.js）提供 electron 能力，未注入时回退到直取 electron
+let _port = {};
+function setWindowPort(port) { _port = port || {}; }
+
+function _BrowserWindow() {
+  const bw = _port.BrowserWindow;
+  if (bw) return bw;
+  return require('electron').BrowserWindow;
+}
+function _dialog() {
+  const d = _port.dialog;
+  if (d && typeof d.showOpenDialog === 'function') return d;
+  return require('electron').dialog;
+}
+function _shell() {
+  const s = _port.shell;
+  if (s && typeof s.showItemInFolder === 'function') return s;
+  return require('electron').shell;
+}
+function _app() {
+  const a = _port.app;
+  if (a && typeof a.getPath === 'function') return a;
+  return require('electron').app;
+}
+
 let miniPlayerWin = null;
 let desktopLyricWin = null;
 
@@ -29,7 +53,7 @@ function createDesktopLyric() {
     desktopLyricWin.focus();
     return;
   }
-  desktopLyricWin = new BrowserWindow({
+  desktopLyricWin = new _BrowserWindow({
     width: 760, height: 120,
     frame: false,
     alwaysOnTop: true,
@@ -76,7 +100,7 @@ function createMiniPlayer() {
   }
   const main = getMainWindow();
   const [mx, my] = main ? main.getPosition() : [100, 100];
-  miniPlayerWin = new BrowserWindow({
+  miniPlayerWin = new _BrowserWindow({
     width: 320, height: 72,
     x: mx, y: my,
     frame: false,
@@ -113,7 +137,12 @@ function syncMiniPlayer(data) {
   }
 }
 
-function register() {
+function register(opts = {}) {
+  const _p = opts.port || {};
+  if (_p.BrowserWindow) _port.BrowserWindow = _p.BrowserWindow;
+  if (_p.dialog) _port.dialog = _p.dialog;
+  if (_p.shell) _port.shell = _p.shell;
+  if (_p.app) _port.app = _p.app;
   on('window-minimize', () => {
     const w = getMainWindow();
     if (w && !w.isDestroyed()) w.minimize();
@@ -184,7 +213,7 @@ function register() {
 
   // 选择下载目录
   handle('select-dir', async () => {
-    const result = await dialog.showOpenDialog(getMainWindow(), {
+    const result = await _dialog().showOpenDialog(getMainWindow(), {
       properties: ['openDirectory'],
     });
     if (result.canceled || !result.filePaths?.length) return null;
@@ -196,7 +225,7 @@ function register() {
 
   // 默认下载目录（UI 展示与真实落盘兜底同源，字面量收表 shared/downloadDefaults）
   handle('get-default-dir', () => {
-    return defaultDownloadDir(app.getPath('music'));
+    return defaultDownloadDir(_app().getPath('music'));
   });
 
   // 打开目录 / 外部链接（渲染层经 musicAPI invoke 调用，需 handle）
@@ -222,7 +251,7 @@ function register() {
     }
     try {
       if (await fsa.exists(resolved)) {
-        shell.showItemInFolder(resolved);
+        _shell().showItemInFolder(resolved);
       }
     } catch (e) {
       logger.warn('[window] open-folder 失败:', e.message);
@@ -231,7 +260,7 @@ function register() {
   };
   const openExternalImpl = (url) => {
     if (typeof url === 'string' && /^https?:\/\//.test(url)) {
-      shell.openExternal(url);
+      _shell().openExternal(url);
     }
     return { ok: true };
   };
@@ -240,18 +269,18 @@ function register() {
 
   // 缓存管理
   handle('get-cache-size', async () => {
-    const size = await playCache.getCacheSize(app.getPath('userData'));
+    const size = await playCache.getCacheSize(_app().getPath('userData'));
     return playCache.formatCacheSize(size);
   });
   handle('clear-play-cache', async () => {
-    await playCache.clearAllCache(app.getPath('userData'));
+    await playCache.clearAllCache(_app().getPath('userData'));
     return { cleared: true };
   });
 
   // 队列完成后动作：只接受枚举白名单，命令全部为常量，无任何用户可控拼接
   handle('system-power', async (_event, action) => {
     if (action === 'quit') {
-      app.quit();
+      _app().quit();
       return { ok: true };
     }
     if (process.platform !== 'win32') return { ok: false, error: '仅 Windows 支持关机/睡眠' };
@@ -268,4 +297,4 @@ function register() {
   });
 }
 
-module.exports = { register, syncMiniPlayer, createMiniPlayer, createDesktopLyric };
+module.exports = { register, setWindowPort, syncMiniPlayer, createMiniPlayer, createDesktopLyric };

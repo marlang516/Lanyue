@@ -193,13 +193,13 @@ function onHeart(): void {
 .track > i b {
   position: absolute; right: -4px; top: 50%; transform: translateY(-50%);
   width: 10px; height: 10px; border-radius: 50%; background: #fff;
-  box-shadow: 0 1px 6px rgba(20, 24, 36, .35);
+  box-shadow: 0 1px 6px rgba(124, 92, 255, .35);
   opacity: 0; transition: opacity var(--dur-1);
 }
 .track:hover > i b { opacity: 1; }
 .track::before {
   content: ""; position: absolute; height: 4px; border-radius: var(--r-full);
-  background: var(--hairline);
+  background: var(--hairline-2);
 }
 .err { font-size: var(--fs-2xs); color: var(--danger); max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 

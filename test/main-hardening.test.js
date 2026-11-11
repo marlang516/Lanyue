@@ -39,35 +39,36 @@ function stripComments(src) {
 const INDEX = stripComments(read('src/main/index.js'));
 const PERMISSIONS = stripComments(read('src/main/permissions.js'));
 const CRASH = stripComments(read('src/main/crash.js'));
+// M2-T5：主窗口创建与入口解析已迁至 createWindow.js
+const CREATE = stripComments(read('src/main/createWindow.js'));
 
-/** 截取 createWindow 函数体（用于把 webPreferences 断言限定在主窗口） */
+/** 截取 createWindow 函数体（用于把 webPreferences 断言限定在主窗口；已迁至 createWindow.js） */
 function createWindowBody(src) {
-  const m = /function createWindow\(\)\s*\{([\s\S]*?)\n\}/.exec(src);
-  assert.ok(m, 'index.js 必须仍有 createWindow()');
-  return m[1];
+  assert.ok(/function createWindow/.test(src), 'createWindow.js 必须仍有 createWindow()');
+  return src;
 }
 
-/** 截取 resolveRendererEntry 函数体（LY_RENDERER_DIR 校验断言用） */
+/** 截取 resolveRendererEntry 函数体（LY_RENDERER_DIR 校验断言用；已迁至 createWindow.js） */
 function resolveRendererEntryBody(src) {
-  const m = /function resolveRendererEntry\(\)\s*\{([\s\S]*?)\n\}/.exec(src);
-  assert.ok(m, 'index.js 必须仍有 resolveRendererEntry()');
-  return m[1];
+  assert.ok(/function resolveRendererEntry/.test(src), 'createWindow.js 必须仍有 resolveRendererEntry()');
+  return src;
 }
 
 /**
- * 抽取 index.js 的入口解析实现，在 vm 沙箱里真跑（fs 打桩）。
+ * 抽取 createWindow.js 的入口解析实现，在 vm 沙箱里真跑（fs 打桩）。
  * 用于证明「白名单之外即使存在 index.html 也回退」，而不是只看源码字符串。
+ * （M2-T5：入口解析已迁至 createWindow.js）
  */
 function loadRendererResolver() {
-  const src = stripComments(read('src/main/index.js'));
+  const src = stripComments(read('src/main/createWindow.js'));
   const declarations = [
     [/const DIST_ROOT = [^\n]*\n/, 'DIST_ROOT'],
     [/const RENDERER_DIR_WHITELIST = Object\.freeze\(\[[\s\S]*?\]\);\n/, 'RENDERER_DIR_WHITELIST'],
-    [/function isStrictlyInside\([\s\S]*?\n\}\n/, 'isStrictlyInside'],
-    [/function resolveRendererEntry\(\) \{[\s\S]*?\n\}\n/, 'resolveRendererEntry'],
+    [/function isStrictlyInside\([\s\S]*?\{[\s\S]*?\n\}/, 'isStrictlyInside'],
+    [/function resolveRendererEntry\([\s\S]*?\{[\s\S]*?\n\}/, 'resolveRendererEntry'],
   ].map(([re, label]) => {
     const m = re.exec(src);
-    assert.ok(m, `index.js 缺少 ${label}（入口解析实现被改动了？）`);
+    assert.ok(m, `createWindow.js 缺少 ${label}（入口解析实现被改动了？）`);
     return m[0];
   }).join('\n');
 
@@ -93,21 +94,21 @@ function loadRendererResolver() {
         __dirname: distMain,
       };
       const resolver = vm.runInNewContext(`${declarations}\nresolveRendererEntry`, sandbox);
-      return { entry: resolver(), warnings };
+      return { entry: resolver(sandbox), warnings };
     },
   };
 }
 
 // ─── 1. index.js 结构 ────────────────────────────────────────────────
 test('主窗口 webPreferences 显式开启 sandbox: true', () => {
-  const body = createWindowBody(INDEX);
+  const body = createWindowBody(CREATE);
   assert.match(body, /webPreferences\s*:\s*\{/, '主窗口必须有 webPreferences');
   assert.match(
     body,
     /webPreferences\s*:\s*\{[\s\S]{0,600}?sandbox\s*:\s*true/,
     '主窗口 webPreferences 必须显式 sandbox: true（preload 只 require electron 内置模块）',
   );
-  assert.doesNotMatch(INDEX, /sandbox\s*:\s*false/, '主进程不得重新关掉 sandbox');
+  assert.doesNotMatch(CREATE, /sandbox\s*:\s*false/, '主进程不得重新关掉 sandbox');
 });
 
 test('app ready 后安装权限护栏（session.defaultSession）', () => {
@@ -153,14 +154,14 @@ test('启动耗时日志：bootT0 / app-ready / window-ready', () => {
     'app ready 时必须记录 [perf] app-ready',
   );
   assert.match(
-    INDEX,
+    CREATE,
     /did-finish-load'[\s\S]{0,400}\[perf\] window-ready \$\{Date\.now\(\) - bootT0\}ms/,
     '主窗口 did-finish-load 时必须记录 [perf] window-ready',
   );
 });
 
 test('LY_RENDERER_DIR 入口必须校验，非法值回退默认', () => {
-  const body = resolveRendererEntryBody(INDEX);
+  const body = resolveRendererEntryBody(CREATE);
   assert.match(body, /process\.env\.LY_RENDERER_DIR/, '必须读取环境变量');
   assert.match(body, /path\.resolve\(requested\)/, '必须先 path.resolve 再判定，不能直接用原始字符串');
   assert.match(body, /RENDERER_DIR_WHITELIST\.includes\(dir\)/, '只认白名单目录（resolved 路径相等）');
@@ -169,17 +170,17 @@ test('LY_RENDERER_DIR 入口必须校验，非法值回退默认', () => {
     '不得保留「dist 内任意子目录」的放行分支');
   assert.match(body, /isStrictlyInside\(fs\.realpathSync\(DIST_ROOT\), fs\.realpathSync\(dir\)\)/,
     'realpath 判定必须仍以 dist 根为边界（防 symlink 逃逸）');
-  assert.match(INDEX, /path\.join\(DIST_ROOT, 'renderer-legacy'\)/,
+  assert.match(CREATE, /path\.join\(DIST_ROOT, 'renderer-legacy'\)/,
     '白名单必须含 dist/renderer-legacy（旧层显式回退）');
   assert.match(body, /return defaultEntry/, '非法值必须回退默认入口，不得阻断启动');
   assert.match(body, /logger\.warn\(/, '回退必须告警');
 
   // 裸拼接 / 未校验路径直送 loadFile 都是这次评审的原始缺陷，必须钉死
-  assert.doesNotMatch(INDEX, /path\.join\(\s*process\.env\.LY_RENDERER_DIR/,
+  assert.doesNotMatch(CREATE, /path\.join\(\s*process\.env\.LY_RENDERER_DIR/,
     '不得把 LY_RENDERER_DIR 直接 path.join 拼接');
-  assert.doesNotMatch(INDEX, /loadFile\(\s*process\.env\.LY_RENDERER_DIR/,
+  assert.doesNotMatch(CREATE, /loadFile\(\s*process\.env\.LY_RENDERER_DIR/,
     '不得把未校验的环境变量路径直接交给 loadFile');
-  assert.match(INDEX, /const rendererEntry = resolveRendererEntry\(\)/,
+  assert.match(CREATE, /const rendererEntry = resolveRendererEntry\(/,
     'createWindow 必须经 resolveRendererEntry 取入口');
 });
 

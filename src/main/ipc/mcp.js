@@ -22,6 +22,18 @@ const { buildConnectSnippet } = require('../mcp/connectSnippet');
 
 const DEFAULT_PORT = 39217;
 
+// 端口注入：由外部（main/index.js）提供 electron 能力，未注入时回退到直取 electron
+let _port = {};
+function setMcpPort(port) { _port = port || {}; }
+
+function _appGetVersion() {
+  const app = _port.app;
+  if (app && typeof app.getVersion === 'function') {
+    try { return app.getVersion(); } catch (_e) { return '0.0.0'; }
+  }
+  try { return require('electron').app.getVersion(); } catch (_e) { return '0.0.0'; }
+}
+
 let _server = null;
 let _rateLimited = 0;
 
@@ -56,9 +68,7 @@ async function _start() {
 
   const handleMessage = createAgentBridge({
     source: 'agent',
-    serverVersion: (() => {
-      try { return require('electron').app.getVersion(); } catch (_e) { return '0.0.0'; }
-    })(),
+    serverVersion: _appGetVersion(),
   });
 
   _server = createMcpServer({
@@ -98,7 +108,9 @@ function _status() {
   };
 }
 
-function register() {
+function register(opts = {}) {
+  const _p = opts.port || {};
+  if (_p.app) _port.app = _p.app;
   handle('mcp-status', () => _status());
 
   handle('mcp-set-config', async (_, cfg) => {

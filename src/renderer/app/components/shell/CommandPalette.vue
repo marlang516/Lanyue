@@ -88,8 +88,8 @@ function onKey(e: KeyboardEvent): void {
 .mask {
   position: fixed; inset: 0; z-index: var(--z-modal);
   background: rgba(12, 16, 28, .34);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
   display: flex; align-items: flex-start; justify-content: center;
   padding-top: 14vh;
 }

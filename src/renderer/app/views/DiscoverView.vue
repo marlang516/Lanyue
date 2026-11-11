@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue';
 import {
-  discover, DISCOVER_SECTIONS, HERO_TAGS, initDiscover, showPlatform, showSection,
+  discover, DISCOVER_SECTIONS, initDiscover, showPlatform, showSection,
   activeSection, sectionState, platformSections, platformLabel, reloadActive,
 } from '../stores/discover';
 import type { DiscoverSectionState, PlaylistSummary } from '../stores/types';
 import type { SongLike } from '../core/song';
-import { ui, openSearch } from '../stores/ui';
+import { ui } from '../stores/ui';
 import { player, currentKey, playFromList } from '../stores/player';
 import { appendToQueue } from '../stores/player';
 import { downloadSongs } from '../stores/search';
@@ -32,13 +32,8 @@ const st = computed<DiscoverSectionState>(() => (sec.value
   : { data: [], loading: false, error: '', loaded: false }));
 
 const peek = ref<{ open: boolean; playlist: PlaylistSummary | null }>({ open: false, playlist: null });
-const heroKw = ref('');
 
 onMounted(initDiscover);
-
-function gotoSearch(kw: string) {
-  openSearch(kw);
-}
 
 function onPlay(i: number) {
   playFromList(st.value.data, i);
@@ -79,31 +74,6 @@ function dropBrokenImg(e: Event): void {
 
 <template>
   <div class="discover">
-    <!-- Hero -->
-    <section class="hero ly-card">
-      <div class="hero-copy">
-        <div class="tag">AURORA MIX · {{ ui.appVersion || 'v2' }}</div>
-        <h1 class="ly-accent-text">聚合发现</h1>
-        <p class="sub">8 音源并行比价，自动锁定每曲最高码率源；从榜单与歌单里挑一首，剩下的交给播放器。</p>
-
-        <form class="hero-search ly-search" @submit.prevent="gotoSearch(heroKw)">
-          <Icon name="search" :size="16" />
-          <input v-model="heroKw" placeholder="搜索歌曲、歌手、专辑…" aria-label="搜索" />
-          <button class="ly-btn ly-btn-sm ly-btn-primary" type="submit">搜索</button>
-        </form>
-
-        <div class="hero-tags">
-          <button v-for="t in HERO_TAGS" :key="t" class="htag" @click="gotoSearch(t)">{{ t }}</button>
-        </div>
-      </div>
-
-      <div class="hero-deco" aria-hidden="true">
-        <div class="ring r1"></div>
-        <div class="ring r2"></div>
-        <div class="ring r3"></div>
-      </div>
-    </section>
-
     <div class="cols">
       <!-- 平台内容 -->
       <section class="feed ly-card">
@@ -131,11 +101,11 @@ function dropBrokenImg(e: Event): void {
         </div>
 
         <header class="sec-head">
-          <div>
+          <div class="sec-title">
             <h2>{{ sec ? sec.title : '推荐' }}</h2>
             <p>{{ platformName(discover.activePlat) }} · {{ st.data.length }} 项</p>
           </div>
-          <span v-if="sec && sec.kind === 'list' && st.data.length" class="ly-tag">前 {{ Math.min(st.data.length, 20) }} 首</span>
+          <span v-if="sec && sec.kind === 'list' && st.data.length" class="ly-tag ly-tag-accent">前 {{ Math.min(st.data.length, 20) }} 首</span>
         </header>
 
         <div class="sec-body">
@@ -165,7 +135,7 @@ function dropBrokenImg(e: Event): void {
 
       <!-- 侧栏：仅在 A 布局显示 -->
       <aside class="side">
-        <div class="now ly-card">
+        <div class="now ly-card ly-aurora-now">
           <div class="disc" :class="{ live: player.playing }">
             <div class="in">
               <div class="art" :class="{ ph: !player.current?.cover }">
@@ -197,78 +167,73 @@ function dropBrokenImg(e: Event): void {
 </template>
 
 <style scoped>
-.discover { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--gap-app); overflow: hidden; }
-.hero {
-  position: relative; flex-shrink: 0;
-  padding: var(--sp-7) var(--sp-8);
-  display: flex; align-items: flex-start; gap: var(--sp-6);
-  overflow: hidden;
-}
-.hero-copy { position: relative; z-index: 2; flex: 1; min-width: 0; }
-.tag { font-size: var(--fs-xs); letter-spacing: .28em; color: var(--au-1); font-weight: var(--fw-bold); }
-h1 { font-size: var(--fs-hero); font-weight: var(--fw-black); margin-top: var(--sp-2); letter-spacing: -.01em; }
-.sub { margin-top: var(--sp-2); color: var(--ink-2); font-size: var(--fs-sm); line-height: 1.7; max-width: 62ch; }
-.hero-search { margin-top: var(--sp-5); max-width: 620px; }
-.hero-tags { margin-top: var(--sp-3); display: flex; flex-wrap: wrap; gap: var(--sp-2); }
-.htag {
-  border: 1px solid var(--hairline); background: var(--glass-3);
-  color: var(--ink-2); font-size: var(--fs-xs); padding: 5px 10px;
-  border-radius: var(--r-full); cursor: pointer;
-  transition: color var(--dur-1), border-color var(--dur-1), background var(--dur-1);
-}
-.htag:hover { color: var(--au-1); border-color: var(--accent-line); background: var(--accent-soft); }
-
-.hero-deco { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
-.ring { position: absolute; border-radius: 50%; border: 1px solid var(--accent-line); opacity: .35; }
-.r1 { width: 320px; height: 320px; right: -80px; top: -150px; }
-.r2 { width: 220px; height: 220px; right: 30px; top: -60px; background: radial-gradient(circle, var(--accent-soft), transparent 70%); }
-.r3 { width: 140px; height: 140px; right: 180px; top: 40px; border-style: dashed; }
+.discover { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 
 .cols { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 300px; gap: var(--gap-app); }
 
 .feed { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: var(--sp-4) var(--sp-6) var(--sp-5); overflow: hidden; }
 
-.plat-tabs { display: flex; gap: var(--sp-1); padding-bottom: var(--sp-3); border-bottom: 1px solid var(--hairline); overflow-x: auto; scrollbar-width: none; }
+.plat-tabs {
+  display: inline-flex; align-self: flex-start; gap: 4px; padding: 4px;
+  background: var(--glass-2); border: 1px solid var(--hairline);
+  border-radius: var(--r-md); box-shadow: inset 0 1px 0 var(--stroke);
+  overflow-x: auto; scrollbar-width: none;
+}
 .plat-tabs::-webkit-scrollbar { display: none; }
 .ptab {
   height: 30px; padding: 0 var(--sp-4); border: 0; border-radius: var(--r-sm);
   background: transparent; color: var(--ink-3); font-size: var(--fs-sm); font-weight: var(--fw-med);
   cursor: pointer; white-space: nowrap;
-  transition: color var(--dur-1), background var(--dur-1);
+  transition: color var(--dur-1) var(--ease), background var(--dur-1) var(--ease), transform var(--dur-0) var(--ease);
 }
-.ptab:hover { color: var(--ink-2); background: var(--glass-3); }
-.ptab.on { color: var(--au-1); background: var(--accent-soft); }
+.ptab:hover { color: var(--ink); background: var(--glass-3); }
+.ptab:active { transform: scale(.97); }
+.ptab.on {
+  color: var(--on-accent); background: var(--au-grad);
+  box-shadow: 0 4px 12px rgba(124, 92, 255, .35);
+}
 
-.chips { display: flex; gap: var(--sp-1); padding: var(--sp-3) 0 0; overflow-x: auto; scrollbar-width: none; }
+.chips { display: flex; align-items: center; gap: var(--sp-1); padding: var(--sp-3) 0 0; overflow-x: auto; scrollbar-width: none; }
 .chips::-webkit-scrollbar { display: none; }
 .chip {
-  height: 26px; padding: 0 var(--sp-3); border: 1px solid transparent; border-radius: var(--r-full);
-  background: transparent; color: var(--ink-3); font-size: var(--fs-xs);
+  height: 28px; padding: 0 var(--sp-3); border: 1px solid transparent; border-radius: var(--r-full);
+  background: transparent; color: var(--ink-3); font-size: var(--fs-xs); font-weight: var(--fw-med);
   cursor: pointer; white-space: nowrap;
-  transition: color var(--dur-1), border-color var(--dur-1), background var(--dur-1);
+  transition: color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease), background var(--dur-1) var(--ease), transform var(--dur-0) var(--ease);
 }
 .chip:hover { color: var(--ink-2); background: var(--glass-3); }
-.chip.on { color: var(--ink); background: var(--glass-2); border-color: var(--hairline); }
-.chip.ghost { width: 26px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.chip:active { transform: scale(.95); }
+.chip.on {
+  color: var(--au-1); background: var(--accent-soft); border-color: var(--accent-line);
+  box-shadow: 0 2px 8px rgba(124, 92, 255, .15);
+}
+.chip.ghost { width: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
 
-.sec-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-4) 0 var(--sp-3); }
-.sec-head h2 { font-size: var(--fs-xl); font-weight: var(--fw-bold); }
-.sec-head p { margin-top: 2px; font-size: var(--fs-xs); color: var(--ink-3); }
+.sec-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-5) 0 var(--sp-3); }
+.sec-title { position: relative; display: flex; align-items: baseline; gap: var(--sp-3); padding-left: 12px; }
+.sec-title::before {
+  content: ""; position: absolute; left: 0; top: 6px; bottom: 6px;
+  width: 3px; border-radius: var(--r-full); background: var(--au-grad);
+}
+.sec-title h2 { font-size: var(--fs-xl); font-weight: var(--fw-bold); letter-spacing: .01em; }
+.sec-title p { font-size: var(--fs-xs); color: var(--ink-3); }
 
 .sec-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: var(--sp-4); padding-bottom: var(--sp-3); }
 .skel { gap: var(--sp-4); }
 .skel > div { border-radius: var(--r-md); }
 
+/* ── 侧栏播放卡片（极光风 Disc 光环）── */
 .side { min-height: 0; display: flex; flex-direction: column; gap: var(--sp-3); overflow-y: auto; }
 .now { padding: var(--sp-5); display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); }
 .disc {
   width: 168px; height: 168px; border-radius: 50%;
-  background: var(--au-grad-3); box-shadow: var(--glow-accent);
+  background: conic-gradient(from 0deg, var(--au-1), var(--au-2) 30%, var(--au-4) 55%, var(--au-3) 80%, var(--au-1));
+  box-shadow: var(--glow-accent);
   display: flex; align-items: center; justify-content: center;
-  animation: spin 22s linear infinite;
+  animation: spin 16s linear infinite;
 }
-.disc.live { animation-duration: 9s; }
+.disc.live { animation-duration: 8s; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .disc .in {
   width: 78%; height: 78%; border-radius: 50%;
@@ -283,6 +248,7 @@ h1 { font-size: var(--fs-hero); font-weight: var(--fw-black); margin-top: var(--
 .now-tx span { display: block; margin-top: 3px; font-size: var(--fs-xs); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .now-meta { width: 100%; display: flex; align-items: center; justify-content: space-between; font-size: var(--fs-xs); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 
+/* ── 底部统计卡片（kc）── */
 .krow { display: flex; gap: var(--sp-2); }
 .kc {
   flex: 1; padding: var(--sp-3) var(--sp-2); text-align: center;
@@ -290,4 +256,18 @@ h1 { font-size: var(--fs-hero); font-weight: var(--fw-black); margin-top: var(--
 }
 .kc b { display: block; font-size: var(--fs-md); font-weight: var(--fw-black); color: var(--au-1); }
 .kc span { font-size: var(--fs-2xs); color: var(--ink-3); letter-spacing: .06em; }
+
+/* ── 搜索列表行 hover 向右位移 + active 内发光（极光风行态）── */
+.ly-row {
+  transition: transform var(--dur-1) var(--ease), background var(--dur-1) var(--ease);
+}
+.ly-row:hover { transform: translateX(4px); background: var(--glass-3); }
+.ly-row.is-active {
+  background: linear-gradient(95deg, rgba(124, 92, 255, .13), rgba(0, 198, 255, .1));
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+/* ── 歌单卡片 hover 升起 ── */
+.ly-card { transition: transform var(--dur-1) var(--ease), box-shadow var(--dur-1) var(--ease); }
+.ly-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-pop); }
 </style>

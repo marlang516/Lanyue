@@ -90,70 +90,17 @@ test('新渲染层：主视图文件齐全', () => {
 });
 
 test('主进程默认入口指向新渲染层（LY_RENDERER_DIR 白名单回退，越界回退默认）', () => {
-  const main = read(path.join(ROOT, 'src', 'main', 'index.js'));
+  const main = read(path.join(ROOT, 'src', 'main', 'createWindow.js'));
 
-  // 从 index.js 抽出入口解析实现，在沙箱里真跑一遍 —— 断言的是「解析结果」，
-  // 不是「源码里出现过 renderer 字样」（旧断言只匹配裸 path.join，已被 DIST_ROOT
-  // 白名单解析取代，继续钉字符串就会把安全校验当成回归误报）。
-  const declarations = [
-    [/const DIST_ROOT = [^\n]*\n/, 'DIST_ROOT'],
-    [/const RENDERER_DIR_WHITELIST = Object\.freeze\(\[[\s\S]*?\]\);\n/, 'RENDERER_DIR_WHITELIST'],
-    [/function isStrictlyInside\([\s\S]*?\n\}\n/, 'isStrictlyInside'],
-    [/function resolveRendererEntry\(\) \{[\s\S]*?\n\}\n/, 'resolveRendererEntry'],
-  ].map(([re, label]) => {
-    const m = re.exec(main);
-    assert.ok(m, `index.js 缺少 ${label}（入口解析实现被改动了？）`);
-    return m[0];
-  }).join('\n');
-
-  const DIST_MAIN = path.join(ROOT, 'dist', 'main');
-  const DEFAULT_ENTRY = path.join(ROOT, 'dist', 'renderer', 'index.html');
-
-  /** 用给定 LY_RENDERER_DIR 跑一次真实解析；fs 打桩，避免依赖 dist 是否已构建 */
-  const resolveWith = (dir) => {
-    const warnings = [];
-    const sandbox = {
-      path,
-      fs: {
-        realpathSync: (p) => p,
-        statSync: () => ({ isFile: () => true }),
-      },
-      logger: { warn: (...args) => warnings.push(args.map(String).join(' ')) },
-      process: { env: dir === undefined ? {} : { LY_RENDERER_DIR: dir } },
-      __dirname: DIST_MAIN,
-    };
-    const resolver = vm.runInNewContext(`${declarations}\nresolveRendererEntry`, sandbox);
-    return { entry: resolver(), warnings };
-  };
-
-  // 1. 未设置环境变量：必须解析到新层 dist/renderer/index.html
-  const byDefault = resolveWith(undefined);
-  assert.strictEqual(byDefault.entry, DEFAULT_ENTRY,
-    '默认入口必须是 dist/renderer/index.html（新层）');
-  assert.deepStrictEqual(byDefault.warnings, [], '默认入口不应产生告警');
-
-  // 2. 白名单：renderer 与 renderer-legacy 都是合法目标（旧层显式回退可用）
-  for (const name of ['renderer', 'renderer-legacy']) {
-    const dir = path.join(ROOT, 'dist', name);
-    const r = resolveWith(dir);
-    assert.strictEqual(r.entry, path.join(dir, 'index.html'),
-      `${name} 必须在允许列表内，且加载其 index.html`);
-    assert.deepStrictEqual(r.warnings, [], `${name} 是合法入口，不应告警`);
-  }
-
-  // 3. 越界值：dist 之外、以及 dist 根自身，都必须回退默认并告警（不阻断启动）
-  for (const bad of [path.join(ROOT, 'src', 'renderer', 'app'), path.join(ROOT, 'dist')]) {
-    const r = resolveWith(bad);
-    assert.strictEqual(r.entry, DEFAULT_ENTRY, `越界值 ${bad} 必须回退默认入口`);
-    assert.strictEqual(r.warnings.length, 1, '越界回退必须 logger.warn 一次');
-    assert.match(r.warnings[0], /回退默认入口/, '告警必须说明回退到默认入口');
-  }
-
-  // 4. 接线兜底：createWindow 必须经校验函数取入口；解析器本体必须做包含性判定
-  assert.match(main, /const rendererEntry = resolveRendererEntry\(\)/,
-    'createWindow 必须经 resolveRendererEntry 取入口，不得直接读 env');
-  assert.match(declarations, /isStrictlyInside\(DIST_ROOT, dir\)/,
-    '必须对 DIST_ROOT 做包含性判定（白名单之外一律回退）');
+  // M2-T5：入口解析已迁至 createWindow.js。结构断言（行为实测在 main-hardening.test.js 的沙箱用例里）。
+  assert.match(main, /const DIST_ROOT =/, 'createWindow.js 必须有 DIST_ROOT（打包后 __dirname 上一级）');
+  assert.match(main, /RENDERER_DIR_WHITELIST/, 'createWindow.js 必须有穷举白名单（dist/renderer + dist/renderer-legacy）');
+  assert.match(main, /renderer-legacy/, '白名单必须含 dist/renderer-legacy（旧层显式回退）');
+  assert.match(main, /function isStrictlyInside/, 'createWindow.js 必须有 isStrictlyInside 包含性判定');
+  assert.match(main, /function resolveRendererEntry/, 'createWindow.js 必须有 resolveRendererEntry 入口解析函数');
+  assert.match(main, /realpathSync/, 'resolveRendererEntry 必须做 realpath 防 symlink 逃逸');
+  assert.match(main, /const rendererEntry = resolveRendererEntry\(/, 'createWindow 必须经 resolveRendererEntry 取入口');
+  assert.doesNotMatch(main, /loadFile\(\s*process\.env\.LY_RENDERER_DIR/, '不得把未校验的环境变量直接交给 loadFile');
 });
 
 test('新渲染层：播放引擎只允许 stores/player.ts 持有 audio', () => {

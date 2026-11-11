@@ -9,10 +9,21 @@ const { handle } = require('../register');
 // 主进程即 UI 线程：文件 IO 必须异步
 const fsa = require('../../../utils/fsAsync');
 
-function register() {
+// 端口注入：由外部（main/index.js）提供 electron 能力，未注入时回退到直取 electron
+let _port = {};
+function setExportPlaylistPort(port) { _port = port || {}; }
+
+function _dialog() {
+  const d = _port.dialog;
+  if (d && typeof d.showSaveDialog === 'function') return d;
+  return require('electron').dialog;
+}
+
+function register(port) {
+  if (port && port.dialog) _port.dialog = port.dialog;
   // ── 导出播放列表 ──────────────────────────────────────────
   handle('export-playlist', async (_, params) => {
-    const { dialog } = require('electron');
+    const dialog = _dialog();
 
     try {
       const { songs, format = 'm3u', name = 'Lanyue' } = params;

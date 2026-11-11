@@ -35,14 +35,65 @@ const items = computed(() => NAV_ITEMS);
 .rail {
   width: var(--rail-w); flex-shrink: 0;
   display: flex; flex-direction: column; align-items: center;
-  padding: var(--sp-4) 0;
-  border-right: 1px solid var(--hairline);
-  background: linear-gradient(180deg, rgba(255, 255, 255, .28), rgba(255, 255, 255, .08));
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  padding: var(--sp-5) var(--sp-2);
+  border-radius: var(--r-xl);
+  background: var(--glass);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--stroke);
+  box-shadow: var(--shadow-card);
   z-index: var(--z-rail);
 }
-[data-theme="dark"] .rail { background: linear-gradient(180deg, rgba(20, 24, 40, .5), rgba(20, 24, 40, .2)); }
+[data-theme="dark"] .rail {
+  background: var(--glass);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, .45);
+}
+
+.mark {
+  width: 42px; height: 42px; border-radius: 14px;
+  background: var(--au-grad-3);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-display);
+  font-weight: var(--fw-black); color: #fff; font-size: 17px;
+  box-shadow: var(--glow-accent);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.rbtn {
+  position: relative;
+  width: 46px; height: 44px; border: 0; border-radius: 15px;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; color: var(--ink-3); cursor: pointer;
+  transition: background var(--dur-1) var(--ease),
+              color var(--dur-1) var(--ease),
+              box-shadow var(--dur-1) var(--ease),
+              transform var(--dur-0) var(--ease);
+}
+.rbtn:hover { color: var(--ink-2); background: var(--glass-3); }
+.rbtn:active { transform: scale(.94); }
+.rbtn.on {
+  color: #fff;
+  background: var(--au-grad);
+  box-shadow: var(--glow-accent);
+}
+<style scoped>
+.rail {
+  width: var(--rail-w); flex-shrink: 0;
+  display: flex; flex-direction: column; align-items: center;
+  padding: var(--sp-5) var(--sp-2);
+  border-radius: var(--r-xl);
+  background: var(--glass);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--stroke);
+  box-shadow: var(--shadow-card);
+  z-index: var(--z-rail);
+}
+[data-theme="dark"] .rail {
+  background: var(--glass);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, .45);
+}
 
 .mark {
   width: 42px; height: 42px; border-radius: 14px;

@@ -9,13 +9,24 @@
  * 落盘走 500ms 防抖；退出路径必须调 flushPlayQueueNow() 立即冲刷，
  * 否则防抖窗口内的最后一次变更会丢（见 index.js 的 window-all-closed）。
  */
-const { app } = require('electron');
 const path = require('path');
 const { atomicWriteJson, safeReadJson } = require('../utils/atomicFile');
 const logger = require('../utils/logger');
 
+// 端口注入：由外部（main/index.js）提供 electron 能力，未注入时回退到直取 electron
+let _port = {};
+function setPlayQueuePort(port) { _port = port || {}; }
+
+function _appGetPath(name) {
+  const app = _port.app;
+  if (app && typeof app.getPath === 'function') {
+    try { return app.getPath(name); } catch (_e) { return ''; }
+  }
+  try { return require('electron').app.getPath(name); } catch (_e) { return ''; }
+}
+
 let playQueuePersistTimer = null;
-const PLAY_QUEUE_FILE = () => path.join(app.getPath('userData'), 'play-queue.json');
+const PLAY_QUEUE_FILE = () => path.join(_appGetPath('userData'), 'play-queue.json');
 
 let _pendingPlayQueueData = null;
 
@@ -75,4 +86,4 @@ async function loadPersistedPlayQueue() {
   }
 }
 
-module.exports = { persistPlayQueue, flushPlayQueueNow, loadPersistedPlayQueue };
+module.exports = { persistPlayQueue, flushPlayQueueNow, loadPersistedPlayQueue, setPlayQueuePort };

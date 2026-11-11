@@ -188,7 +188,7 @@ test('接线：query-history 按 opts.markMissing 判活并把待删清单算好
 
   const contract = read('src/shared/ipcContract.js');
   assert.ok(!/'[a-z-]*(dead|missing|stale|purge|clean-history|check-path)'/.test(contract), '不该为此功能新增通道名');
-  assert.match(contract, /'query-history':\s*\{ invoke: MAIN, args: \[\['opts', t\.obj\(\)\]\] \}/, 'opts 是自由对象，判活开关不必改契约形状');
+  assert.match(contract, /'query-history':\s*\{ invoke: MAIN, args: \[\['opts', t\.shape\(\{ fields: \{[^}]*\}, required: \[\] \}\)\]\] \}/, 'opts 是 shape 自由对象，判活开关不必改契约形状');
 });
 
 test('接线：历史页把判活带进查询、行上如实说，并给出清理入口', () => {

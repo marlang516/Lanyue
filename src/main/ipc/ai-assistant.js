@@ -25,20 +25,32 @@ const { assistantChat } = require('../../api/ai-music');
 const { chatConfigFrom, isConfigToken } = require('../../api/aiProviders');
 const { scrubToolText } = require('../../shared/outboundScrub');
 
+// 端口注入：由外部（main/index.js）提供 electron 能力，未注入时回退到直取 electron
+let _port = {};
+function setAssistantPort(port) { _port = port || {}; }
+
+function _appGetVersion() {
+  const app = _port.app;
+  if (app && typeof app.getVersion === 'function') {
+    try { return app.getVersion(); } catch (_e) { return '0.0.0'; }
+  }
+  try { return require('electron').app.getVersion(); } catch (_e) { return '0.0.0'; }
+}
+
 // 桥是惰性的：第一次工具调用才装配，注册本身不起服务、不读令牌
 let _bridge = null;
 function _handle() {
   if (_bridge) return _bridge;
   _bridge = createAgentBridge({
     source: 'assistant',
-    serverVersion: (() => {
-      try { return require('electron').app.getVersion(); } catch (_e) { return '0.0.0'; }
-    })(),
+    serverVersion: _appGetVersion(),
   });
   return _bridge;
 }
 
-function register() {
+function register(opts = {}) {
+  const _p = opts.port || {};
+  if (_p.app) _port.app = _p.app;
   handle('ai-assistant-tools', () => ({
     tools: toolsFromContract().map(({ name, description, mutating, risk, audience, action }) =>
       ({ name, description, mutating, risk, audience, ...(action ? { action } : {}) })),

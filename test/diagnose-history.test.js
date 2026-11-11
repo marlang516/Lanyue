@@ -133,5 +133,5 @@ test('零新通道：诊断只读既有字段，query-history 契约形状逐字
   const KNOWN = ['queryHistory', 'getHistoryStats', 'addToQueue', 'removeHistory', 'clearHistory', 'openFolder', 'exportPlaylist'];
   assert.deepEqual([...used].filter((k) => !KNOWN.includes(k)), []);
   const contract = read('src/shared/ipcContract.js');
-  assert.match(contract, /'query-history': \{ invoke: MAIN, args: \[\['opts', t\.obj\(\)\]\] \}/);
+  assert.match(contract, /'query-history':\s*\{ invoke: MAIN, args: \[\['opts', t\.shape\(\{ fields: \{[^}]*\}, required: \[\] \}\)\]\] \}/);
 });

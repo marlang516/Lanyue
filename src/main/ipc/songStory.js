@@ -19,6 +19,18 @@ const { assistantChat } = require('../../api/ai-music');
 const { chatConfigFrom, isConfigToken } = require('../../api/aiProviders');
 const { buildStoryMessages, extractStoryText } = require('../../api/services/songStoryService');
 
+// 端口注入：由外部（main/index.js）提供 electron 能力，未注入时回退到直取 electron
+let _port = {};
+function setStoryPort(port) { _port = port || {}; }
+
+function _appGetUserDataDir() {
+  const app = _port.app;
+  if (app && typeof app.getPath === 'function') {
+    try { return app.getPath('userData'); } catch (_e) { return null; }
+  }
+  try { return require('electron').app.getPath('userData'); } catch (_e) { return null; }
+}
+
 const MAX_ENTRIES = 300;
 
 // ── 可注入依赖（单测不触网、不碰真实 userData）──────────────
@@ -32,9 +44,7 @@ function setStoryKeyReader(fn) { _keyReader = typeof fn === 'function' ? fn : nu
 const _mem = new Map(); // key → story（Map 保插入序 = LRU）
 
 function cacheFile() {
-  const dir = _dir || (() => {
-    try { return require('electron').app.getPath('userData'); } catch (_e) { return null; }
-  })();
+  const dir = _dir || _appGetUserDataDir();
   return dir ? path.join(dir, 'song-stories.json') : null;
 }
 
@@ -93,7 +103,9 @@ async function getStory({ title, artist, lang }) {
   }
 }
 
-function register() {
+function register(opts = {}) {
+  const _p = opts.port || {};
+  if (_p.app) _port.app = _p.app;
   handle('get-song-story', (_, title, artist, lang) => getStory({ title, artist, lang }));
 }
 

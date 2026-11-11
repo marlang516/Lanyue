@@ -3,6 +3,9 @@
  *
  * 关键：mainWindow / downloadQueue 是 main/index.js 的 let 变量，
  * createWindow() 之后才赋值。子模块通过 getter 访问，确保拿到最新值。
+ *
+ * M2-T5：getCtx() 彻底清零跨域状态，仅保留 app。跨域能力（队列/播放队列/
+ * 曲库监听等）一律通过构造注入传给各 IPC 模块，不再经 context 中转。
  */
 
 let _ctx = null;
@@ -30,15 +33,7 @@ function init(opts) {
   _getMainWindow    = opts.getMainWindow    || (() => null);
   _getDownloadQueue = opts.getDownloadQueue || (() => []);
   _ctx = {
-    app:           opts.app,
-    // M1.1-C：下载 IPC 域已改为构造注入（ipc/download/queue.js 不再读 context），
-    // 下列 5 项暂留给跨域调用方 subscriptions.js（ADR C8 的清理延后）。
-    persistQueue:  opts.persistQueue,
-    processQueue:  opts.processQueue,
-    requestCancelDownload: opts.requestCancelDownload,
-    setQueuePaused: opts.setQueuePaused,
-    queueIsPaused: opts.queueIsPaused,
-    setLibraryWatchDir: opts.setLibraryWatchDir,
+    app: opts.app,
   };
   return _ctx;
 }

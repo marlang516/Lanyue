@@ -40,8 +40,8 @@ const ICONS: Readonly<Record<ToastType, string>> = {
   max-width: 380px; padding: 11px var(--sp-3) 11px var(--sp-4);
   border-radius: var(--r-md);
   background: var(--glass-3);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
   border: 1px solid var(--stroke);
   box-shadow: var(--shadow-pop);
   color: var(--ink);

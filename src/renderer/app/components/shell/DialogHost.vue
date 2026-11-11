@@ -61,8 +61,8 @@ function onKey(e: KeyboardEvent): void {
 .mask {
   position: fixed; inset: 0; z-index: var(--z-modal);
   background: rgba(12, 16, 28, .4);
-  backdrop-filter: blur(5px);
-  -webkit-backdrop-filter: blur(5px);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
   display: flex; align-items: center; justify-content: center;
   padding: var(--sp-6);
 }

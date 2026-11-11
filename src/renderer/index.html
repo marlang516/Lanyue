@@ -20,22 +20,6 @@
 
      钉在 test/csp-stream-scheme.test.js：改 scheme 名或收紧 CSP 都会红。 -->
 <title>揽乐</title>
-<script>
-  // 全局错误捕获：onclick 调用未定义函数时弹 toast 而不是静默
-  window.addEventListener('error', (e) => {
-    if (typeof showToast === 'function') {
-      showToast('JS 错误: ' + (e.message || e), 'error', 8000);
-    } else {
-      console.error('[global error]', e);
-    }
-  });
-  window.addEventListener('unhandledrejection', (e) => {
-    const msg = e.reason && (e.reason.message || e.reason) || '未知错误';
-    if (typeof showToast === 'function') {
-      showToast('异步错误: ' + msg, 'error', 8000);
-    }
-  });
-</script>
 <link rel="stylesheet" href="styles/base.css">
 <link rel="stylesheet" href="styles/layout.css">
 <link rel="stylesheet" href="styles/content.css">
@@ -1656,6 +1640,8 @@
 <!-- 隐藏 audio -->
 <audio id="audioPlayer"></audio>
 
+<!-- 全局错误捕获（外部模块，移除后 script-src 可收紧为 'self'，P0-2026-11-09） -->
+<script type="module" src="js/errors.js"></script>
 <!-- Vite entry: app.js imports all modules -->
 <script type="module" src="js/app.js"></script>
 </body>

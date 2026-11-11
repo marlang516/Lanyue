@@ -303,7 +303,7 @@ export async function exportActiveM3U(): Promise<void> {
   if (!pl) return;
   const lines = ['#EXTM3U'];
   for (const s of activeSongs.value) {
-    lines.push(`#EXTINF:${s.duration || 0},${s.artist || ''} - ${s.title}`);
+    lines.push(`#EXTINF:${Math.round((Number(s.duration) || 0) / 1000)},${s.artist || ''} - ${s.title}`);
     lines.push(s.filePath || `# source:${s.source} id:${s.id}`);
   }
   const text = lines.join('\n');

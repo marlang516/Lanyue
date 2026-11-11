@@ -103,5 +103,5 @@ test('零新通道：重下只用既有 api 方法，query-history 的参数形�
   const used = new Set([...read('src/renderer/js/views/history.js').matchAll(/api\.([A-Za-z0-9_]+)/g)].map(m => m[1]));
   assert.deepEqual([...used].filter((k) => !KNOWN.includes(k)), []);
   const contract = read('src/shared/ipcContract.js');
-  assert.match(contract, /'query-history': \{ invoke: MAIN, args: \[\['opts', t\.obj\(\)\]\] \}/);
+  assert.match(contract, /'query-history':\s*\{ invoke: MAIN, args: \[\['opts', t\.shape\(\{ fields: \{[^}]*\}, required: \[\] \}\)\]\] \}/);
 });

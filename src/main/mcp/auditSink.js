@@ -16,9 +16,21 @@ let _dirOverride = '';
 let _store = null;
 let _storePath = '';
 
+// 端口注入：由外部（main/index.js）提供 electron 能力，未注入时回退到直取 electron
+let _port = {};
+function setAuditPort(port) { _port = port || {}; }
+
+function _appGetUserDataDir() {
+  const app = _port.app;
+  if (app && typeof app.getPath === 'function') {
+    try { return app.getPath('userData'); } catch (_e) { return ''; }
+  }
+  try { return require('electron').app.getPath('userData'); } catch (_e) { return ''; }
+}
+
 function _userDataDir() {
   if (_dirOverride) return _dirOverride;
-  try { return require('electron').app.getPath('userData'); } catch (_e) { return ''; }
+  return _appGetUserDataDir();
 }
 
 function store() {
@@ -44,4 +56,4 @@ function _setUserDataDirForTest(dir) {
   _storePath = '';
 }
 
-module.exports = { store, record, AUDIT_FILE_NAME, _setUserDataDirForTest };
+module.exports = { store, record, AUDIT_FILE_NAME, _setUserDataDirForTest, setAuditPort };

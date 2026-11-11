@@ -235,7 +235,7 @@ export async function deleteTemplate(id: string): Promise<void> {
 }
 
 export async function activateTemplate(id: string): Promise<void> {
-  const r = await callSafe<MutationResult | null>('setActiveTemplate', [id], null);
+  const r = await callSafe<MutationResult | null>('setActiveDownloadTemplate', [id], null);
   if (r && r.success !== false) {
     settings.activeTemplate = id;
     toast.success('已设为默认模板');

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref } from 'vue';
 import { ui, togglePalette } from '../../stores/ui';
+import { player } from '../../stores/player';
+import { dialogState } from '../../core/dialog';
 import NavRail from './NavRail.vue';
 import TopBar from './TopBar.vue';
 import CommandPalette from './CommandPalette.vue';
@@ -17,9 +19,13 @@ function onGlobalKey(e: KeyboardEvent): void {
     togglePalette();
     return;
   }
-  if (e.key === 'Escape' && ui.paletteOpen) {
-    togglePalette(false);
-  }
+  if (e.key !== 'Escape') return;
+  // ESC 关闭优先级：对话框 > 命令面板 > 大屏歌词（正在播放页）。
+  // 对话框由 DialogHost 自处理，此处不抢；其余按层叠顺序关最上层，
+  // 避免大屏歌词盖住整个窗口后无法用键盘收起（表现为"卡死/播放卡"）。
+  if (dialogState.open) return;
+  if (ui.paletteOpen) { togglePalette(false); return; }
+  if (player.fullscreen) player.fullscreen = false;
 }
 
 onMounted(() => window.addEventListener('keydown', onGlobalKey));
@@ -52,6 +58,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey));
 .app {
   position: relative; z-index: 1;
   height: 100%; display: flex; overflow: hidden;
+  background: var(--bg);
 }
 .work { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .stage {
@@ -63,5 +70,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onGlobalKey));
 .player-dock {
   flex-shrink: 0;
   padding: var(--gap-app);
+  border-top: 1px solid var(--hairline);
+  background: var(--glass);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
 }
 </style>

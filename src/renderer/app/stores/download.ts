@@ -174,7 +174,7 @@ export async function loadHistory(page: number = downloads.history.page): Promis
 }
 
 export async function loadHistoryStats(): Promise<HistoryStats | null> {
-  downloads.stats = await callSafe<HistoryStats | null>('historyStats', [], null);
+  downloads.stats = await callSafe<HistoryStats | null>('getHistoryStats', [], null);
   return downloads.stats;
 }
 
@@ -194,7 +194,7 @@ export async function clearHistory(): Promise<void> {
   await callSafe('clearHistory', [], null);
   downloads.history.items = [];
   downloads.history.total = 0;
-  downloads.stats = await callSafe<HistoryStats | null>('historyStats', [], null);
+  downloads.stats = await callSafe<HistoryStats | null>('getHistoryStats', [], null);
   toast.success('下载历史已清空');
 }
 

@@ -4,14 +4,20 @@ import renderer from 'vite-plugin-electron-renderer';
 import vue from '@vitejs/plugin-vue';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 
 const isDev = process.env.NODE_ENV !== 'production';
 const projectRoot = process.cwd();
 
-// 读取版本号 + git commit hash
-const pkgVersion = execSync('node -p "require(\'./package.json\').version"', { cwd: projectRoot, encoding: 'utf8' }).trim();
+// 读取版本号 + git commit hash（不依赖外部 node/git 命令，避免环境差异）
+const pkg = JSON.parse(readFileSync(path.join(projectRoot, 'package.json'), 'utf-8'));
+const pkgVersion = pkg.version || '1.0.0';
 let gitCommit = '';
-try { gitCommit = execSync('git rev-parse HEAD', { cwd: projectRoot, encoding: 'utf8' }).trim(); } catch (_e) {}
+try {
+  gitCommit = execSync('git rev-parse --short HEAD', { cwd: projectRoot, encoding: 'utf8' }).trim();
+} catch (_e) {
+  gitCommit = '';
+}
 
 export default defineConfig({
   define: {

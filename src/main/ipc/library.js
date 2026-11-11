@@ -12,15 +12,29 @@
 const context = require('../context');
 
 function register(opts = {}) {
-  // 显式注入优先；未注入时从共享上下文/模块默认值回退（保持旧行为）
-  let ctxSetWatch = null;
-  try {
-    const c = context.getCtx();
-    if (c && typeof c.setLibraryWatchDir === 'function') ctxSetWatch = c.setLibraryWatchDir;
-  } catch (_e) { /* context 未初始化（如单测） */ }
+  // 曲库目录监听：必须由调用方显式注入（M2-T5 起 context 不再中转跨域能力）。
+  // 未注入时退化为空实现，避免曲库扫描路径上出现 undefined 调用。
   const setLibraryWatchDir = (typeof opts.setLibraryWatchDir === 'function')
-    ? opts.setLibraryWatchDir : ctxSetWatch;
+    ? opts.setLibraryWatchDir : () => {};
   const safeSend = (typeof opts.safeSend === 'function') ? opts.safeSend : context.safeSend;
+
+  // 端口注入：electron 能力由外部（main/index.js）提供，未注入时回退到直取 electron
+  const _port = opts.port || {};
+  function _shellTrashItem() {
+    const shell = _port.shell;
+    if (shell && typeof shell.trashItem === 'function') return shell.trashItem.bind(shell);
+    return require('electron').shell.trashItem.bind(require('electron').shell);
+  }
+  function _dialog() {
+    const d = _port.dialog;
+    if (d && typeof d.showOpenDialog === 'function') return d;
+    return require('electron').dialog;
+  }
+  function _shell() {
+    const s = _port.shell;
+    if (s && typeof s.showItemInFolder === 'function') return s;
+    return require('electron').shell;
+  }
 
   // 子模块（library/domain 下、library 下）统一导出 register 函数本体
   // （module.exports = register），不是 { register } 对象。直接调用；
@@ -61,7 +75,7 @@ function register(opts = {}) {
     fs: infraFs,
     relink: infraRelink,
     logger: require('../../utils/logger'),
-    trashItem: require('electron').shell.trashItem,
+    trashItem: _shellTrashItem(),
   });
 
   const domainConvert = toRegister(require('./library/domain/convert'))({
@@ -69,8 +83,8 @@ function register(opts = {}) {
     audioConvert: require('../../utils/audioConvert'),
     prefs: infraPrefs,
     approvedDirs: infraApprovedDirs,
-    dialog: require('electron').dialog,
-    shell: require('electron').shell,
+    dialog: _dialog(),
+    shell: _shell(),
     safeSend,
   });
 

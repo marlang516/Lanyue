@@ -6,7 +6,6 @@
  */
 
 const { handle } = require('./register');
-const { app } = require('electron');
 const path = require('path');
 const logger = require('../../utils/logger');
 const aiMusic = require('../../api/ai-music');
@@ -15,6 +14,18 @@ const { defaultDownloadDir, AI_SUBDIR_NAME } = require('../../shared/downloadDef
 // 主进程即 UI 线程：文件 IO 必须异步
 const fsa = require('../../utils/fsAsync');
 const { sidecarPathFor } = require('../../utils/relinkRefs');
+
+// 端口注入：由外部（main/index.js）提供 electron 能力，未注入时回退到直取 electron
+let _port = {};
+function setAiMusicPort(port) { _port = port || {}; }
+
+function _appGetPath(name) {
+  const app = _port.app;
+  if (app && typeof app.getPath === 'function') {
+    try { return app.getPath(name); } catch (_e) { return ''; }
+  }
+  try { return require('electron').app.getPath(name); } catch (_e) { return ''; }
+}
 
 /**
  * 根据歌词内容和歌曲时长，生成带时间轴的 LRC 文件
@@ -113,9 +124,11 @@ function formatTime(seconds) {
   return `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}.${String(ms).padStart(2, '0')}`;
 }
 
-function register() {
+function register(opts = {}) {
+  const _p = opts.port || {};
+  if (_p.app) _port.app = _p.app;
   // 初始化历史存储路径
-  aiMusic.setHistoryPath(app.getPath('userData'));
+  aiMusic.setHistoryPath(_appGetPath('userData'));
   // 「当前用哪家大模型」的唯一出处是 prefs：界面写、主进程读。
   // 出网层（api/ai-music）拿的是读取器而不是快照，用户换厂商不必重启。
   aiMusic.setPrefsGetter((key) => prefs.get(key));
@@ -177,7 +190,7 @@ function register() {
           if (saveDir) {
             logger.warn('[ai-music] 拒绝未批准的 saveDir，回落默认目录:', saveDir);
           }
-          saveDir = path.join(defaultDownloadDir(app.getPath('music')), AI_SUBDIR_NAME);
+          saveDir = path.join(defaultDownloadDir(_appGetPath('music')), AI_SUBDIR_NAME);
         }
         await fsa.ensureDir(saveDir);
 

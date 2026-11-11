@@ -263,8 +263,8 @@ test('normalizeArgs: save-download-template 的 template 走字段级 shape', ()
   assert.match(badType.error, /name/);
 
   // 对照组：其余 obj 通道仍是「只判对象」，多出来的键不拒绝
-  assert.deepStrictEqual(normalizeArgs('add-to-queue', [{ id: 1, extra: true }]),
-    { ok: true, args: [{ id: 1, extra: true }] });
+  assert.deepStrictEqual(normalizeArgs('save-user-playlist', [{ id: 'pl_1', name: 'x', extra: true }]),
+    { ok: true, args: [{ id: 'pl_1', name: 'x', extra: true }] });
 });
 
 // ── 4c. 字段级 shape（批次1新增：mcp-audit / get-download-url-smart / check-local-exists） ──
@@ -290,22 +290,23 @@ test('normalizeArgs: mcp-audit 的 opts 走字段级 shape', () => {
   assert.match(badType.error, /limit/);
 });
 
-test('normalizeArgs: get-download-url-smart 的 options 走 t.obj()（只判对象）', () => {
+test('normalizeArgs: get-download-url-smart 的 options 走字段级 shape', () => {
   // 合法对象原样通过（不复制、不改写）
   const good = { allowToggleSource: true, isRefresh: false };
   const ok = normalizeArgs('get-download-url-smart', [{ id: 1 }, 'lossless', good]);
   assert.strictEqual(ok.ok, true);
   assert.deepStrictEqual(ok.args[2], good);
 
-  // 白名单外字段不拒绝（t.obj() 只判是不是对象）
+  // 白名单外字段：拒绝，且错误带通道名与字段名
   const unknown = normalizeArgs('get-download-url-smart', [{ id: 1 }, 'lossless', { allowToggleSource: true, evil: 1 }]);
-  assert.strictEqual(unknown.ok, true);
-  assert.deepStrictEqual(unknown.args[2], { allowToggleSource: true, evil: 1 });
+  assert.strictEqual(unknown.ok, false);
+  assert.match(unknown.error, /get-download-url-smart/);
+  assert.match(unknown.error, /evil/);
 
-  // 字段类型不符不拒绝（t.obj() 不做字段级校验）
+  // 字段类型不符：拒绝
   const badType = normalizeArgs('get-download-url-smart', [{ id: 1 }, 'lossless', { allowToggleSource: 'yes' }]);
-  assert.strictEqual(badType.ok, true);
-  assert.deepStrictEqual(badType.args[2], { allowToggleSource: 'yes' });
+  assert.strictEqual(badType.ok, false);
+  assert.match(badType.error, /allowToggleSource/);
 
   // 非对象应被拒绝
   const notObj = normalizeArgs('get-download-url-smart', [{ id: 1 }, 'lossless', 'not-object']);
@@ -332,12 +333,15 @@ test('normalizeArgs: check-local-exists 的 payload 走字段级 shape', () => {
 });
 
 // 对照组：其余 obj 通道仍是「只判对象」，多出来的键不拒绝
-// （convert-audio 已在批次 2 升为 shape，不再在此对照组）
+// （add-playlist-to-queue/export-playlist 已在批次 1 升为 shape，不再在此对照组）
 test('normalizeArgs: 其余 obj 通道仍只判对象（批次1对照）', () => {
-  assert.deepStrictEqual(normalizeArgs('add-playlist-to-queue', [{ payload: { a: 1 }, extra: true }]),
-    { ok: true, args: [{ payload: { a: 1 }, extra: true }] });
-  assert.deepStrictEqual(normalizeArgs('export-playlist', [{ params: { x: 1 }, extra: true }]),
-    { ok: true, args: [{ params: { x: 1 }, extra: true }] });
+  // save-user-playlist 仍走 t.obj()：白名单外字段不拒绝
+  const r1 = normalizeArgs('save-user-playlist', [{ id: 'pl_1', name: 'x', extra: true }]);
+  assert.strictEqual(r1.ok, true);
+  assert.deepStrictEqual(r1.args[0], { id: 'pl_1', name: 'x', extra: true });
+  const r2 = normalizeArgs('save-user-playlist', [{ id: 1, extra: true }]);
+  assert.strictEqual(r2.ok, true);
+  assert.deepStrictEqual(r2.args[0], { id: 1, extra: true });
 });
 
 // ── 4d. 字段级 shape（批次2新增：convert-audio / save-user-playlist / aggregate-cross-source） ──
@@ -426,12 +430,14 @@ test('normalizeArgs: aggregate-cross-source 的 opts 走 t.obj()（只判对象�
 });
 
 // 对照组：其余 obj 通道仍只判对象，多出来的键不拒绝
+// （add-playlist-to-queue/export-playlist/query-history 已在批次 1 升为 shape，不再在此对照组）
 test('normalizeArgs: 其余 obj 通道仍只判对象（批次2对照）', () => {
-  assert.deepStrictEqual(normalizeArgs('add-playlist-to-queue', [{ payload: { a: 1 }, extra: true }]),
+  // save-user-playlist 仍走 t.obj()：白名单外字段不拒绝
+  assert.deepStrictEqual(normalizeArgs('save-user-playlist', [{ payload: { a: 1 }, extra: true }]),
     { ok: true, args: [{ payload: { a: 1 }, extra: true }] });
-  assert.deepStrictEqual(normalizeArgs('export-playlist', [{ params: { x: 1 }, extra: true }]),
+  assert.deepStrictEqual(normalizeArgs('save-user-playlist', [{ params: { x: 1 }, extra: true }]),
     { ok: true, args: [{ params: { x: 1 }, extra: true }] });
-  assert.deepStrictEqual(normalizeArgs('query-history', [{ opts: { a: 1 }, extra: true }]),
+  assert.deepStrictEqual(normalizeArgs('save-user-playlist', [{ opts: { a: 1 }, extra: true }]),
     { ok: true, args: [{ opts: { a: 1 }, extra: true }] });
   assert.deepStrictEqual(normalizeArgs('ai-provider-save', [{ patch: { a: 1 }, extra: true }]),
     { ok: true, args: [{ patch: { a: 1 }, extra: true }] });
@@ -474,9 +480,84 @@ test('buildContractArg 序列化结果与 channelsFor 一致（注入即契约�
 });
 
 test('主进程窗口创建处都注入 additionalArguments（漏注入=preload 直接瘫）', () => {
-  const indexSrc = read('src/main/index.js');
+  // M2-T5：主窗口创建已迁至 createWindow.js，main 契约注入也一并迁移
+  const createSrc = read('src/main/createWindow.js');
   const windowSrc = read('src/main/ipc/window.js');
-  assert.ok(/buildContractArg\('main'\)/.test(indexSrc), 'index.js createWindow 未注入 main 契约');
+  assert.ok(/buildContractArg\('main'\)/.test(createSrc), 'createWindow.js createWindow 未注入 main 契约');
   assert.strictEqual((windowSrc.match(/buildContractArg\('secondary'\)/g) || []).length, 2,
     'window.js 迷你播放器与桌面歌词两处都要注入 secondary 契约');
+});
+
+// ── 6. 未映射通道显式豁免白名单（M2-T2） ────────────────────
+// CHANNELS 中存在但不在 METHODS ∪ EVENTS 的通道：渲染层无统一 camelCase
+// 方法名/事件订阅名，现状通过 ipcRenderer.invoke/send/on 字面通道或
+// 二级窗口 miniAPI 直接访问。新增通道若漏声明到 METHODS/EVENTS 且未
+// 加入本白名单，测试失败，逼迫改动者过目契约。
+const UNMAPPED_ALLOWLIST = new Set([
+  // 云同步：渲染层通过 ipcRenderer.invoke 字面通道调用，无 musicAPI 语法糖
+  'cloud-sync-config-get',
+  'cloud-sync-config-set',
+  'cloud-sync-now',
+  // MCP 本地服务：设置页/调试面板直接 invoke，无 musicAPI 语法糖
+  'mcp-status',
+  'mcp-set-config',
+  'mcp-audit',
+  'mcp-audit-clear',
+  'mcp-connect-snippet',
+  // 应用内 AI 助手：助手面板直接 invoke，写操作需 confirmed 门控，不暴露为通用 musicAPI
+  'ai-assistant-tools',
+  'ai-assistant-plan',
+  'ai-assistant-tool-call',
+  // AI 智能歌单：只读生成通道，写库走既有 save-user-playlist，不进 METHODS/MCP 白名单
+  'smart-playlist-generate',
+  // 桌面歌词/迷你播放器控制：二级窗口通过 miniAPI.send 字面通道或主进程内部协调，无主窗口 musicAPI 方法
+  'desktop-lyric-close',
+  'desktop-lyric-lock',
+  'desktop-lyric-set-ignore-mouse',
+  'mini-close',
+  // 桌面歌词数据推送：仅 secondary 窗口 receive，主窗口无对应 onXxx 订阅
+  'desktop-lyric-data',
+  // 主进程 → 渲染层事件：由快捷键/定时器触发，渲染层用 ipcRenderer.on 字面监听，无 EVENTS 语法糖
+  'focus-search',
+  'sleep-timer',
+  // 自动更新事件：渲染层用 ipcRenderer.on 字面监听，无 EVENTS 语法糖
+  'update-available',
+  'update-not-available',
+  'update-download-progress',
+  'update-downloaded',
+  'update-error',
+]);
+
+test('未映射通道必须在显式豁免白名单中（新增通道漏声明即失败）', () => {
+  const mapped = new Set([...Object.values(METHODS), ...Object.values(EVENTS)]);
+  const unmapped = Object.keys(CHANNELS).filter((ch) => !mapped.has(ch));
+
+  // 白名单外不得有未映射通道
+  const unexpected = unmapped.filter((ch) => !UNMAPPED_ALLOWLIST.has(ch));
+  assert.deepStrictEqual(
+    unexpected,
+    [],
+    `发现未在 METHODS/EVENTS 且不在 UNMAPPED_ALLOWLIST 的通道: ${unexpected.join(', ')}\n` +
+      '请在 src/shared/ipcContract.js 中补充 METHODS/EVENTS 映射，或在 test/ipc-contract.test.js 的 UNMAPPED_ALLOWLIST 中显式豁免并注明原因。'
+  );
+
+  // 白名单内不得有已映射通道（防止白名单腐化）
+  const stale = [...UNMAPPED_ALLOWLIST].filter((ch) => mapped.has(ch));
+  assert.deepStrictEqual(
+    stale,
+    [],
+    `UNMAPPED_ALLOWLIST 中存在已映射到 METHODS/EVENTS 的通道（应移出白名单）: ${stale.join(', ')}`
+  );
+
+  // 白名单内通道必须真实存在于契约
+  const phantom = [...UNMAPPED_ALLOWLIST].filter((ch) => !CHANNELS[ch]);
+  assert.deepStrictEqual(
+    phantom,
+    [],
+    `UNMAPPED_ALLOWLIST 中存在契约里不存在的通道: ${phantom.join(', ')}`
+  );
+
+  // 数量钉死：与 M1-BASELINE 实测一致，意外增删即失败
+  assert.strictEqual(unmapped.length, 24, `未映射通道数量应为 24，实际 ${unmapped.length}: ${unmapped.join(', ')}`);
+  assert.strictEqual(UNMAPPED_ALLOWLIST.size, 24);
 });

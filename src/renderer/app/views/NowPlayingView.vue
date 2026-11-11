@@ -16,6 +16,14 @@ const progressPct = computed(() => pct(player.progress, player.duration));
 function close() {
   player.fullscreen = false;
 }
+function onRootClick(e: MouseEvent) {
+  const t = e.target;
+  if (!(t instanceof HTMLElement)) return;
+  // 只在点到背景遮罩层时收起；点封面/歌词/控制条不触发，避免误关
+  if (t.classList.contains('now') || t.classList.contains('bg') || t.classList.contains('veil')) {
+    close();
+  }
+}
 function onScrub(e: MouseEvent) {
   const el = e.currentTarget;
   if (!(el instanceof HTMLElement)) return;
@@ -39,7 +47,7 @@ async function onDownload() {
 <template>
   <Teleport to="body">
     <Transition name="np">
-      <div v-if="player.fullscreen" class="now">
+      <div v-if="player.fullscreen" class="now" @click="onRootClick">
         <div class="bg" :style="player.current?.cover ? { backgroundImage: `url(${player.current.cover})` } : {}"></div>
         <div class="veil"></div>
 

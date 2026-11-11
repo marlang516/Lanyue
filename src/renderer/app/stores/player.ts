@@ -244,7 +244,7 @@ export async function playSong(song: unknown): Promise<void> {
   player.current = s;
   player.error = '';
   player.progress = 0;
-  player.duration = s.duration || 0;
+  player.duration = (Number(s.duration) || 0) / 1000;
   player.loading = true;
   // 歌词异步加载：不阻塞出声，到达后歌词面板/桌面歌词自动刷新
   void loadLyricsFor(s);
@@ -260,7 +260,7 @@ export async function playSong(song: unknown): Promise<void> {
       addRecent(s);
     } catch (e) {
       player.loading = false;
-      player.error = errorMessage(e) || '本地文件播放失败';
+      if (!isBenignPlayError(e)) player.error = errorMessage(e) || '本地文件播放失败';
     }
     return;
   }
@@ -293,7 +293,7 @@ export async function playSong(song: unknown): Promise<void> {
     await a.play();
     addRecent(s);
   } catch (e) {
-    if (reqId === _reqSeq) player.error = errorMessage(e) || '播放异常';
+    if (reqId === _reqSeq && !isBenignPlayError(e)) player.error = errorMessage(e) || '播放异常';
   } finally {
     if (reqId === _reqSeq) player.loading = false;
   }
@@ -308,13 +308,25 @@ function errorMessage(e: unknown): string {
   return '';
 }
 
+/**
+ * play() 被 pause()/换源打断时 Chromium 抛 AbortError，message 形如
+ * "The play() request was interrupted by a call to pause()"。这是取流/缓冲
+ * 期间的正常竞态（如加载时按暂停、快速切歌），不是真正的播放失败，
+ * 不应写进 player.error 显示给用户。
+ */
+function isBenignPlayError(e: unknown): boolean {
+  if (e instanceof DOMException && e.name === 'AbortError') return true;
+  const msg = errorMessage(e);
+  return !!msg && /play\(\) request was interrupted|interrupted by a call to pause|AbortError/i.test(msg);
+}
+
 export function togglePlay(): void {
   const a = ensureAudio();
   if (!a.src) {
     if (player.current) void playSong(player.current);
     return;
   }
-  if (a.paused) a.play().catch(() => { player.error = '恢复播放失败'; });
+  if (a.paused) a.play().catch((e) => { if (!isBenignPlayError(e)) player.error = '恢复播放失败'; });
   else a.pause();
 }
 
@@ -439,7 +451,7 @@ export async function restoreQueue(): Promise<void> {
   const cur = player.queue[player.queueIdx];
   if (cur) {
     player.current = cur;
-    player.duration = cur.duration || 0;
+    player.duration = (Number(cur.duration) || 0) / 1000;
     player.progress = 0;
     void loadLyricsFor(cur);
   }

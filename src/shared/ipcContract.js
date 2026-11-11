@@ -96,9 +96,10 @@ const CHANNELS = {
 
   // ── 下载（invoke） ────────────────────────────────
   // id/source 的最终合法性判定仍留在 handler（safeId/safeToken，错误文案是产品约定）
+  // id/source 跨平台可能是 string/number，故保持 t.any()；最终合法性由 handler 判。
   'get-download-url':       { invoke: MAIN, args: [['id', t.any()], ['source', t.any()], ['quality', t.enum(['lossless', 'hq', 'standard'], 'standard')]] },
-  'get-download-url-smart': { invoke: MAIN, args: [['song', t.any()], ['quality', t.str(16)], ['options', t.obj()]] },
-  'add-to-queue':           { invoke: MAIN, args: [['song', t.obj()]] },
+  'get-download-url-smart': { invoke: MAIN, args: [['song', t.any()], ['quality', t.str(16)], ['options', t.shape({ fields: { allowToggleSource: t.bool(), isRefresh: t.bool() }, required: [] })]] },
+  'add-to-queue':           { invoke: MAIN, args: [['song', t.shape({ fields: { id: t.any(), source: t.str(32), title: t.str(500), artist: t.str(500), album: t.str(500), cover: t.str(4000), duration: t.int(0, 86400000), quality: t.str(16), saveDir: t.str(1024), forceRedownload: t.bool(), numId: t.any(), albumMid: t.str(64), filePath: t.str(1024), url: t.str(4000) }, required: [] })]] },
   'cancel-download':        { invoke: MAIN, args: [['taskId', t.any()]] },
   'retry-download':         { invoke: MAIN, args: [['taskId', t.any()]] },
   'remove-queue-item':      { invoke: MAIN, args: [['taskId', t.any()]] },
@@ -106,13 +107,13 @@ const CHANNELS = {
   'set-queue-paused':       { invoke: MAIN, args: [['paused', t.bool()]] },
   'clear-finished-queue':   { invoke: MAIN },
   'clear-all-queue':        { invoke: MAIN },
-  'add-playlist-to-queue':  { invoke: MAIN, args: [['payload', t.obj()]] },
-  'export-playlist':        { invoke: MAIN, args: [['params', t.obj()]] },
+  'add-playlist-to-queue':  { invoke: MAIN, args: [['payload', t.shape({ fields: { songs: t.arr(5000) }, required: [] })]] },
+  'export-playlist':        { invoke: MAIN, args: [['params', t.shape({ fields: { songs: t.arr(10000), format: t.enum(['m3u', 'pls'], 'm3u'), name: t.str(200) }, required: [] })]] },
   'system-power':           { invoke: MAIN, args: [['action', t.enum(['shutdown', 'sleep', 'quit'], 'quit')]] },
   'probe-audio':            { invoke: MAIN, args: [['filePath', t.str(1000)]] },
   // D-35：refresh 是同源重取标识（可选）。主进程据此在 403 时重新取流；
   // 这里的 source 必须是**实际出流的源**，不由渲染层决定重取走哪个源。
-  'proxy-play':             { invoke: MAIN, args: [['url', t.str(4000)], ['referer', t.str(4000)], ['refresh', t.obj()]] },
+  'proxy-play':             { invoke: MAIN, args: [['url', t.str(4000)], ['referer', t.str(4000)], ['refresh', t.shape({ fields: {}, required: [] })]] },
   'get-download-templates': { invoke: MAIN },
   // template 会被整体持久化、并 merge 进既有记录，故用字段级 shape 收口：
   // 出现白名单外字段 / 字段类型不符 → 进 handler 前就拒绝（其余 obj 通道语义不变）。
@@ -135,7 +136,7 @@ const CHANNELS = {
   'subscribe-list':      { invoke: MAIN },
   'subscribe-add':       { invoke: MAIN, args: [['type', t.str(16)], ['platform', t.str(32)], ['targetId', t.str(128)], ['name', t.str(200)]] },
   'subscribe-remove':    { invoke: MAIN, args: [['key', t.str(200)]] },
-  'subscribe-update':    { invoke: MAIN, args: [['key', t.str(200)], ['patch', t.obj()]] },
+  'subscribe-update':    { invoke: MAIN, args: [['key', t.str(200)], ['patch', t.shape({ fields: {}, required: [] })]] },
   'subscribe-check':     { invoke: MAIN },
   'subscribe-mark-seen': { invoke: MAIN, args: [['key', t.str(200)]] },
 
@@ -143,7 +144,7 @@ const CHANNELS = {
   'get-cookies':        { invoke: MAIN },
   'save-cookie':        { invoke: MAIN, args: [['platform', t.str(32)], ['cookie', t.str(65536)]] },
   'clear-cookie':       { invoke: MAIN, args: [['platform', t.str(32)]] },
-  'verify-cookie':      { invoke: MAIN, args: [['platform', t.str(32)], ['cookie', t.any()]] },
+  'verify-cookie':      { invoke: MAIN, args: [['platform', t.str(32)], ['cookie', t.str(65536)]] },
   'open-login-window':  { invoke: MAIN, args: [['platform', t.str(32)]] },
 
   // ── 本地音乐库（invoke） ──────────────────────────
@@ -153,12 +154,12 @@ const CHANNELS = {
   'read-local-metadata':  { invoke: MAIN, args: [['filePath', t.str(1024)]] },
   'read-local-lrc':       { invoke: MAIN, args: [['filePath', t.str(1024)]] },
   'write-local-lrc':      { invoke: MAIN, args: [['filePath', t.str(1024)], ['lrc', t.str(2000000)]] },
-  'update-id3-tags':      { invoke: MAIN, args: [['filePath', t.str(1024)], ['tags', t.any()]] },
+  'update-id3-tags':      { invoke: MAIN, args: [['filePath', t.str(1024)], ['tags', t.shape({ fields: {}, required: [] })]] },
   'update-id3-cover':     { invoke: MAIN, args: [['filePath', t.str(1024)], ['imageBase64', t.str(25000000)]] },
   'fetch-online-cover':   { invoke: MAIN, args: [['title', t.str(200)], ['artist', t.str(200)]] },
   'batch-fetch-lyrics':   { invoke: MAIN, args: [['songs', t.arr(5000)]] },
   'check-local-exists':   { invoke: MAIN, args: [['payload', t.shape({ fields: { saveDir: t.str(1024), items: t.arr(10000) }, required: [] })]] },
-  'convert-audio':        { invoke: MAIN, args: [['params', t.obj()]] },
+  'convert-audio':        { invoke: MAIN, args: [['params', t.shape({ fields: {}, required: [] })]] },
   'cancel-convert-audio': { invoke: MAIN },
   'delete-file':          { invoke: MAIN, args: [['filePath', t.str(1024)]] },
   'rename-file':          { invoke: MAIN, args: [['oldPath', t.str(1024)], ['newPath', t.str(1024)]] },
@@ -184,22 +185,22 @@ const CHANNELS = {
   'load-play-queue': { invoke: MAIN },
 
   // ── 历史（invoke） ────────────────────────────────
-  'query-history': { invoke: MAIN, args: [['opts', t.obj()]] },
+  'query-history': { invoke: MAIN, args: [['opts', t.shape({ fields: { markMissing: t.bool(), limit: t.int(1, 10000), offset: t.int(0, 100000), keyword: t.str(200) }, required: [] })]] },
   'history-stats': { invoke: MAIN },
   'clear-history': { invoke: MAIN },
   'remove-history': { invoke: MAIN, args: [['entries', t.arr(1000)]] },
 
   // ── AI（invoke） ──────────────────────────────────
-  'ai-generate-music':   { invoke: MAIN, args: [['params', t.obj()]] },
+  'ai-generate-music':   { invoke: MAIN, args: [['params', t.shape({ fields: {}, required: [] })]] },
   'ai-cancel-generation': { invoke: MAIN, args: [['requestId', t.str(64)]] },
-  'ai-generate-lyrics':  { invoke: MAIN, args: [['params', t.obj()]] },
-  'ai-translate-lyrics': { invoke: MAIN, args: [['params', t.obj()]] },
+  'ai-generate-lyrics':  { invoke: MAIN, args: [['params', t.shape({ fields: {}, required: [] })]] },
+  'ai-translate-lyrics': { invoke: MAIN, args: [['params', t.shape({ fields: {}, required: [] })]] },
   'ai-history':          { invoke: MAIN },
-  'ai-add-history':      { invoke: MAIN, args: [['item', t.obj()]] },
+  'ai-add-history':      { invoke: MAIN, args: [['item', t.shape({ fields: {}, required: [] })]] },
   'ai-clear-history':    { invoke: MAIN },
   // 大模型厂商配置：名单与判据的家在 src/api/aiProviders.js，界面经这两条通道取，不在渲染层镜像
   'ai-provider-config':  { invoke: MAIN },
-  'ai-provider-save':    { invoke: MAIN, args: [['patch', t.obj()]] },
+  'ai-provider-save':    { invoke: MAIN, args: [['patch', t.shape({ fields: {}, required: [] })]] },
 
   // ── 用户歌单（invoke） ────────────────────────────
   'get-user-playlists':        { invoke: MAIN },
@@ -210,7 +211,7 @@ const CHANNELS = {
   'toggle-favorite':           { invoke: MAIN, args: [['source', t.str(32)], ['songId', t.any()], ['song', t.any()]] },
 
   // 3-B 跨源聚合：合并多份来源的曲目并标记跨源同曲（只读聚合层，不新增/修改数据）
-  'aggregate-cross-source':   { invoke: MAIN, args: [['opts', t.obj()]] },
+  'aggregate-cross-source':   { invoke: MAIN, args: [['opts', t.shape({ fields: {}, required: [] })]] },
 
   // 3-A 电台：取刚播完那首的同歌手候选曲目（只读，无副作用）
 
@@ -218,12 +219,12 @@ const CHANNELS = {
   'export-all-data':    { invoke: MAIN },
   'import-all-data':    { invoke: MAIN },
   'cloud-sync-config-get': { invoke: MAIN },
-  'cloud-sync-config-set': { invoke: MAIN, args: [['cfg', t.any()]] },
+  'cloud-sync-config-set': { invoke: MAIN, args: [['cfg', t.shape({ fields: {}, required: [] })]] },
   'cloud-sync-now':     { invoke: MAIN },
 
   // ── MCP 本地服务（invoke）─────────────────────────
   'mcp-status':     { invoke: MAIN },
-  'mcp-set-config': { invoke: MAIN, args: [['cfg', t.any()]] },
+  'mcp-set-config': { invoke: MAIN, args: [['cfg', t.shape({ fields: {}, required: [] })]] },
   'mcp-audit':      { invoke: MAIN, args: [['opts', t.shape({ fields: { limit: t.int(50, 1000) }, required: [] })]] },
   'mcp-audit-clear': { invoke: MAIN },
   'mcp-connect-snippet': { invoke: MAIN },
@@ -236,7 +237,7 @@ const CHANNELS = {
   // 所以生产路径碰不到这根栅栏；碰到时说明有人绕过渲染层直接拼 invoke）。
   'ai-assistant-tools': { invoke: MAIN },
   'ai-assistant-plan': { invoke: MAIN, args: [['messages', t.arr(24)], ['context', t.str(1600)]] },
-  'ai-assistant-tool-call': { invoke: MAIN, args: [['name', t.str(64)], ['args', t.obj()], ['confirmed', t.bool()], ['scope', t.enum(['single', 'batch'], 'single')], ['runId', t.str(32)]] },
+  'ai-assistant-tool-call': { invoke: MAIN, args: [['name', t.str(64)], ['args', t.shape({ fields: {}, required: [] })], ['confirmed', t.bool()], ['scope', t.enum(['single', 'batch'], 'single')], ['runId', t.str(32)]] },
 
   // ── 歌曲讲解（invoke，候选方向 1：背景卡片）────────
   // 只读 + 缓存：同一首歌第二次点不再出网（计费调用不因重复点击重复扣费）。
@@ -502,13 +503,17 @@ function coerceShape(spec, v) {
   if (v === undefined || v === null) return undefined;
   if (typeof v !== 'object' || Array.isArray(v)) return { __err: '应为对象' };
   const fields = spec.fields || {};
+  // 空 fields 表示「开放对象」：等价于 t.obj()，只判「是不是对象」，不拒绝未知字段。
+  // 用于 ai-assistant-tool-call.args / subscribe-update.patch 等自由形状参数。
+  const open = Object.keys(fields).length === 0;
   for (const key of Object.keys(v)) {
-    if (!Object.prototype.hasOwnProperty.call(fields, key)) {
+    if (!open && !Object.prototype.hasOwnProperty.call(fields, key)) {
       return { __err: `未知字段 ${key}` };
     }
     const val = v[key];
     if (val === undefined) continue;   // 视为未提供，交给 handler 的既有判空
-    if (!shapeFieldMatches(fields[key], val)) {
+    const fieldSpec = fields[key];
+    if (fieldSpec && !shapeFieldMatches(fieldSpec, val)) {
       return { __err: `字段 ${key} 类型不符` };
     }
   }

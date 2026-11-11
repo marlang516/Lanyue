@@ -1,12 +1,10 @@
 // 启动耗时基准：模块加载即开始计时，[perf] 日志全部相对它计算
 const bootT0 = Date.now();
 
-const { app, BrowserWindow, Notification, protocol, session } = require('electron');
+const { app, BrowserWindow, Notification, protocol, session, dialog, shell } = require('electron');
 const { handle: ipcHandle, on: ipcOn, assertContractCoverage } = require('./ipc/register');
-const { buildContractArg } = require('../shared/ipcContract');
 const { defaultDownloadDir } = require('../shared/downloadDefaults');
 const path = require('path');
-const fs = require('fs');
 const { setCookieStore } = require('../api');
 const logger = require('../utils/logger');
 const { installRejectionGuard } = require('../utils/rejectionGuard');
@@ -26,6 +24,9 @@ const prefs = require('../utils/prefs');
 const { getPolicyFactsForQueue } = require('./qualityPolicyFacts');
 // 主进程即 UI 线程：文件 IO 走异步封装（见 utils/fsAsync.js）
 const fsa = require('../utils/fsAsync');
+// 窗口创建（含渲染层入口白名单校验 / 导航拦截）已抽到 main/createWindow.js
+const { createWindow } = require('./createWindow');
+// ─── IPC 域模块（装配在 ipc/index.js 的 registerAllIpcHandlers 里完成）───
 const ipcWindow  = require('./ipc/window');
 const ipcSearch  = require('./ipc/search');
 const ipcDownload= require('./ipc/download');
@@ -46,6 +47,7 @@ const ipcMcp = require('./ipc/mcp');
 const ipcAssistant = require('./ipc/ai-assistant');
 const ipcSmartPlaylist = require('./ipc/smart-playlist');
 const ipcPlaylistAudit = require('./ipc/playlistAudit');
+const { registerAllIpcHandlers: registerAllIpc } = require('./ipc');
 const subscriptions = require('./subscriptions');
 const { createSubscriptions } = require('./subscriptions');
 const clipboardWatch = require('./clipboardWatch');
@@ -78,6 +80,22 @@ app.on('session-created', (s) => installPermissionGuards(s, logger));
 // 「为什么需要它、为什么按栈帧分流」见 utils/rejectionGuard.js 顶部说明。
 installRejectionGuard({ logger });
 
+// ─── 同步未捕获异常兜底（uncaughtException）─────────────
+// rejectionGuard 只兜 unhandledRejection（异步）。启动期 / 运行期任何同步 throw
+// 走 Node 默认行为：把栈打到 stderr 后退出。问题在于：(1) 文件日志是异步缓冲的，
+// 进程退出前最后一批可能来不及落盘；(2) 启动脚本（启动.bat）用 `start` 分离
+// 进程，stderr 直接被丢弃。两者叠加 → 用户只看到「主进程起不来」，main.log 里
+// 却只有一行「日志落盘已启用」、零错误线索（历史 2026-11-10 05:27–05:37 即此症
+// 状）。这里在退出前先把错误同步落盘，再 exit(1) 干净退出——干净退出会释放单实
+// 例锁，避免残留僵尸占锁导致后续每次启动都被 app.quit() 秒拒的死循环。
+process.on('uncaughtException', (err) => {
+  try {
+    logger.error('[main][uncaughtException] 同步异常，进程即将退出:\n' + (err && err.stack ? err.stack : String(err)));
+  } catch (_e) { /* 记录通道自身失败不能阻断退出 */ }
+  try { logger.flushSyncOnExit(); } catch (_e) { /* 同上 */ }
+  process.exit(1);
+});
+
 // 在 app ready 之前声明：Electron 要求特权 scheme 只能在 ready 前注册。
 // 少了 standard，Chromium 不会按媒体语义对这个 scheme 发 Range 请求，
 // 流式播放就退化成"只能从头顺播"，seek 依旧不可用 —— 这正是根因 1。
@@ -98,7 +116,7 @@ let mainWindow;
 
 // ── 下载队列引擎（Sprint C：已从本文件抽到 main/downloadQueue.js）──
 // 队列状态 / 持久化 / 并发调度 / 单曲处理（取流→落盘→ID3→歌词→历史→通知）
-// 全部归 downloadQueue.js；本文件只负责组装依赖并接进 context。
+// 全部归 downloadQueue.js；本文件只负责组装依赖。
 let downloadQueueEngine = null;
 /** 队列引用：引擎创建后与其内部数组同一引用，供 context / IPC 消费 */
 let downloadQueue = [];
@@ -146,212 +164,24 @@ if (!app.requestSingleInstanceLock()) {
 
 // ── 下载队列：状态 / 持久化 / 调度已抽到 main/downloadQueue.js ──
 // 本文件只保留「引擎装配」；播放队列持久化已抽到 main/playQueue.js。
-const { persistPlayQueue, flushPlayQueueNow, loadPersistedPlayQueue } = require('./playQueue');
+const { persistPlayQueue, flushPlayQueueNow, loadPersistedPlayQueue, setPlayQueuePort } = require('./playQueue');
 
-// ─── 渲染层入口解析（LY_RENDERER_DIR 越界校验）────────────────────
-// dist 根：打包后 __dirname 是 <app>/dist/main，上一级即 <app>/dist。
-const DIST_ROOT = path.resolve(__dirname, '..');
-// 唯一允许的渲染层目录（迁移期双轨）：默认新层 dist/renderer；显式回退 dist/renderer-legacy。
-// 注意这是**穷举白名单**：dist 下其他子目录即使有 index.html 也不放行。
-const RENDERER_DIR_WHITELIST = Object.freeze([
-  path.join(DIST_ROOT, 'renderer'),
-  path.join(DIST_ROOT, 'renderer-legacy'),
-]);
+// 端口注入到 playQueue（app.getPath('userData')）
+setPlayQueuePort({ app });
 
-/**
- * target 是否严格位于 root 之下（root 自身不算）。
- * @param {string} root
- * @param {string} target
- * @returns {boolean}
- */
-function isStrictlyInside(root, target) {
-  const rel = path.relative(root, target);
-  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
-}
-
-/**
- * 解析主窗口入口（默认 dist/renderer/index.html）。
- *
- * 为什么必须校验：主窗口挂着全量特权 IPC 桥，LY_RENDERER_DIR 若被指向任意
- * 本机目录（比如临时目录里的钓鱼 HTML），等于把攻击者页面直接放进特权窗口——
- * 页面脚本可以调用 preload 暴露的全部通道（写文件、读 Cookie、发起下载…）。
- * 因此只允许**白名单目录**：dist/renderer（默认）、dist/renderer-legacy（旧层回退），
- * 不是「dist 根下任意子目录」——即便其他目录也塞了 index.html 一律拒绝。
- * 另外真实路径（realpath）必须仍在 dist 根内（防 symlink 逃逸），入口文件必须存在；
- * 非法值回退默认入口并告警，不阻断启动。
- *
- * @returns {string} 可交给 loadFile 的绝对路径 */
-function resolveRendererEntry() {
-  const defaultEntry = path.join(DIST_ROOT, 'renderer', 'index.html');
-  const requested = process.env.LY_RENDERER_DIR;
-  if (!requested) return defaultEntry;
-
-  let dir;
-  try {
-    dir = path.resolve(requested);
-  } catch (_e) {
-    logger.warn('[main] LY_RENDERER_DIR 无法解析，回退默认入口');
-    return defaultEntry;
-  }
-
-  // 只认两个白名单目录（不是「dist 内任意子目录」）：resolved 路径必须与白名单项完全相等。
-  // 包含性检查仍保留作纵深防御——白名单由 DIST_ROOT 拼出，正常情况下恒为 true。
-  let allowed = RENDERER_DIR_WHITELIST.includes(dir) && isStrictlyInside(DIST_ROOT, dir);
-
-  // 防 symlink 逃逸：白名单目录若被替换成指向外部的链接，按字符串的判定看不出。
-  if (allowed) {
-    try {
-      allowed = isStrictlyInside(fs.realpathSync(DIST_ROOT), fs.realpathSync(dir));
-    } catch (_e) {
-      // 目录不存在：下方入口文件存在性检查会统一回退
-      allowed = false;
-    }
-  }
-
-  let entryExists = false;
-  if (allowed) {
-    try {
-      entryExists = fs.statSync(path.join(dir, 'index.html')).isFile();
-    } catch (_e) {
-      entryExists = false;
-    }
-  }
-
-  if (!allowed || !entryExists) {
-    logger.warn('[main] LY_RENDERER_DIR 越界或缺少 index.html，回退默认入口:', dir);
-    return defaultEntry;
-  }
-  return path.join(dir, 'index.html');
-}
-
-function createWindow() {
-  mainWindow = new BrowserWindow({
-    width: 1100,
-    height: 720,
-    minWidth: 900,
-    minHeight: 600,
-    frame: false,
-    backgroundColor: '#1a1a2e',
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      // 渲染层与 preload 均运行在 Chromium OS 沙箱内：preload 不能 require electron
-      // 内置模块，IPC 契约经 argv 注入（见下方 additionalArguments），无需放宽。
-      sandbox: true,
-      webSecurity: true, // 启用安全策略，CORS 通过 session.defaultSession.webRequest 头部处理
-      preload: path.join(__dirname, '../preload/preload.js'),
-      // sandbox preload 不能 require 应用文件：IPC 契约经 argv 序列化注入
-      additionalArguments: [buildContractArg('main')],
-    },
-    titleBarStyle: 'hidden',
-    icon: path.join(__dirname, '../../assets/icon.png'),
+/** 创建主窗口：把窗口级依赖显式交给 createWindow，返回值即模块级 mainWindow */
+function openMainWindow() {
+  mainWindow = createWindow({
+    app,
+    BrowserWindow,
+    logger,
+    safeSend,
+    getDownloadQueue: () => downloadQueue,
+    getDownloadQueueEngine: () => downloadQueueEngine,
+    trayMod,
+    bootT0,
   });
-
-  // 默认入口是重写后的新渲染层（dist/renderer）。LY_RENDERER_DIR 只是显式回退
-  // 开关（例如指向 dist/renderer-legacy），且必须先过 resolveRendererEntry 的
-  // 包内校验 —— 否则任意本机 HTML 都能被加载进这个持有全量 IPC 桥的窗口。
-  const rendererEntry = resolveRendererEntry();
-  logger.log('[main] 渲染层入口:', rendererEntry);
-  mainWindow.loadFile(rendererEntry).then(() => {
-    logger.log('[main] loadFile done');
-  }).catch(err => {
-    logger.warn('[main] loadFile failed:', err);
-    // 开发模式下可能 dist/renderer 还没构建好
-    const devUrl = process.env.VITE_DEV_SERVER_URL;
-    if (devUrl) {
-      logger.log('[main] trying dev server URL:', devUrl);
-      mainWindow.loadURL(devUrl).catch(e => logger.warn('[main] loadURL also failed:', e));
-    }
-  });
-
-  // 渲染层就绪后补发一次队列快照：新界面首次打开下载页即可看到重启前遗留的
-  // pending/downloading 任务。旧层只靠增量事件，重启后会漏展示（本改动对旧层
-  // 只是一次幂等整表刷新，行为无变化）。
-  mainWindow.webContents.on('did-finish-load', () => {
-    // 首屏就绪耗时：从模块加载到渲染层 load 完成（与 [perf] app-ready 同一基准）。
-    logger.log(`[perf] window-ready ${Date.now() - bootT0}ms`);
-    try {
-      safeSend('queue-updated', downloadQueue);
-      safeSend('queue-paused-changed', downloadQueueEngine ? downloadQueueEngine.isPaused() : false);
-    } catch (e) {
-      logger.warn('[main] 队列快照补发失败:', e.message);
-    }
-  });
-
-  // 关闭开发者工具自动开启（按需通过菜单 → 视图 → 开发者工具 手动打开）
-  // 导航防护：主窗口只加载本地内容，任何远程/file 导航一律拒绝
-  // （渲染层一旦有脚本注入，window.open / location 跳转可把窗口导向
-  // 钓鱼页或本地文件协议，此处统一拦截）
-  const denyNav = (url) => {
-    logger.warn('[main] 拒绝主窗口导航:', url);
-  };
-  mainWindow.webContents.on('will-navigate', (event, url) => {
-    const u = (() => { try { return new URL(url); } catch (_) { return null; } })();
-    if (!u) { denyNav(url); event.preventDefault(); return; }
-    // M1: file: 导航只放行应用自身包内文件 —— 原先任意本机 HTML 都能载入
-    // 这个挂着全量特权 IPC 的窗口（与下载目录写入组合即完整攻击链）
-    const { fileURLToPath } = require('url');
-    const isLocal = (() => {
-      if (u.protocol !== 'file:') return false;
-      try {
-        const fp = fileURLToPath(u);
-        const rel = path.relative(path.resolve(app.getAppPath()), path.resolve(fp));
-        return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
-      } catch (_) { return false; }
-    })();
-    // 同源 http(s) 导航放行（dev 模式下 vite 服务器整页刷新）。
-    // 不能直接比 u.origin === current.origin：file: 页的 origin 恒为
-    // 字符串 'null'，会把所有 file: 导航误判成同源。
-    const cur = (() => {
-      try { return new URL(mainWindow.webContents.getURL()); } catch (_) { return null; }
-    })();
-    const sameHttpOrigin = !!cur
-      && (cur.protocol === 'http:' || cur.protocol === 'https:')
-      && u.protocol === cur.protocol && u.host === cur.host;
-    if (!isLocal && !sameHttpOrigin) {
-      denyNav(url);
-      event.preventDefault();
-    }
-  });
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    denyNav(url);
-    return { action: 'deny' };
-  });
-
-  // 拦截 F12 / Ctrl+Shift+I / Ctrl+Shift+J / Ctrl+U 防止误开
-  const blockList = new Set(['F12']);
-  mainWindow.webContents.on('before-input-event', (event, input) => {
-    if (input.type !== 'keyDown') return;
-    if (blockList.has(input.key)) {
-      event.preventDefault();
-      return;
-    }
-    if (input.control && input.shift && ['I', 'i', 'J', 'j', 'C', 'c'].includes(input.key)) {
-      event.preventDefault();
-      return;
-    }
-    if (input.control && ['U', 'u'].includes(input.key)) {
-      event.preventDefault();
-      return;
-    }
-    // Ctrl+R 刷新页面（保留）
-    if (input.key === 'r' && (input.control || input.meta)) {
-      event.preventDefault();
-      mainWindow.webContents.reload();
-    }
-  });
-
-  // 窗口关闭时最小化到托盘（不是真的关闭）
-  mainWindow.on('close', (event) => {
-    if (!trayMod.isQuittingApp()) {
-      event.preventDefault();
-      mainWindow.hide();
-      const t = trayMod.getTray();
-      if (t) {
-        t.displayBalloon({ title: '揽乐', content: '已最小化到托盘，点击恢复' });
-      }
-    }
-  });
+  return mainWindow;
 }
 
 // ─── 系统托盘已抽到 main/tray.js（createTray / updateTrayMenu / toggleMainWindow）───
@@ -363,6 +193,7 @@ module.exports = { updateTrayMenu: trayMod.updateTrayMenu };
 // ─── 应用菜单已抽到 main/appMenu.js（buildAppMenu）─────────────────
 
 app.whenReady().then(async () => {
+  try {
   // 启动耗时：模块加载到 app ready（[perf] window-ready 在同一基准上收尾）
   logger.log(`[perf] app-ready ${Date.now() - bootT0}ms`);
 
@@ -422,7 +253,6 @@ app.whenReady().then(async () => {
       n.show();
     },
     showInFolder(filePath) {
-      const { shell } = require('electron');
       shell.showItemInFolder(filePath);
     },
   };
@@ -445,9 +275,18 @@ app.whenReady().then(async () => {
   // 让共享引用指向引擎内部数组（context / IPC 用的是同一个数组）
   downloadQueue = downloadQueueEngine.getQueue();
 
-  // 确保默认下载目录存在（如果有用户自定义的 saveDir 则用之，否则用系统默认）
+  // 确保默认下载目录存在（如果有用户自定义的 saveDir 则用之，否则用系统默认）。
+  // saveDir 可能指向不可用路径（盘符缺失 / 权限受限 / 网络盘离线），mkdir 失败
+  // 不应阻断主进程启动——回落系统音乐目录，让窗口先起来，具体下载失败再单独报。
   const defaultDir = prefs.get('saveDir') || defaultDownloadDir(app.getPath('music'));
-  await fsa.ensureDir(defaultDir); // mkdir recursive 本身幂等，无需先探测
+  try {
+    await fsa.ensureDir(defaultDir); // mkdir recursive 本身幂等，无需先探测
+  } catch (e) {
+    logger.warn('[main] 默认下载目录不可用，回落系统音乐目录:', e.message);
+    try { await fsa.ensureDir(defaultDownloadDir(app.getPath('music'))); } catch (_e2) {
+      /* 回落也失败就跳过：下载时会再报错，启动不被一个目录拖死 */
+    }
+  }
 
   // 初始化 play_cache 目录 + 清理上次进程遗留的陈旧临时文件
   // 不 await：清理是尽力而为，不该拖慢启动
@@ -483,8 +322,27 @@ app.whenReady().then(async () => {
     logger.warn('[PlayQueue] 恢复播放队列失败:', e.message);
   }
 
-  // 注册所有 IPC handler（按职责拆分到 src/main/ipc 下各模块）
-  registerAllIpcHandlers();
+  // 本地曲库目录监听：变动防抖后推送 local-library-changed，渲染层重走增量扫描。
+  // watcher 留在本文件（模块级 let）：退出时需要 stop()，setLibraryWatchDir
+  // 闭包也引用它，经 deps 传进 IPC 组装根即可。
+  libraryWatcher = createLibraryWatcher({
+    emit: () => safeSend('local-library-changed', {}),
+    logger,
+  });
+
+  // 注册所有 IPC handler（按职责拆分到 src/main/ipc 下各模块，装配根在 ipc/index.js）
+  registerAllIpc({
+    app, dialog, shell, BrowserWindow,
+    ipcWindow, ipcSearch, ipcDownload, ipcCookie, ipcLibrary, ipcPrefs, ipcCheckLocal,
+    ipcHistory, ipcAiMusic, ipcSongStory, ipcTasteProfile, ipcProvider, ipcPlaylist,
+    ipcDownloadTemplates, ipcCloudSync, ipcSubscriptions, ipcMcp, ipcAssistant,
+    ipcSmartPlaylist, ipcPlaylistAudit, createSubscriptions,
+    downloadQueueEngine, libraryWatcher, downloadProgressPort,
+    safeSend, persistPlayQueue, loadPersistedPlayQueue,
+    api, history, logger, prefs, trayMod, globalShortcuts,
+    ipcHandle, ipcOn, initContext,
+    mainWindowGetter: () => mainWindow,
+  });
 
   // P0-1（2026-10-13 复审）：恢复出来的 pending 任务必须自己开跑。
   // 放在 registerAllIpcHandlers() 之后：调度过程中会用到的上下文（取流、
@@ -538,7 +396,7 @@ app.whenReady().then(async () => {
     getMainWindow: () => mainWindow,
     toggleMainWindow: trayMod.toggleMainWindow,
   });
-  createWindow();
+  openMainWindow();
   trayMod.createTray();
   // 任务栏进度/托盘提示的落地目标（context.safeSend 在队列事件时驱动刷新）
   taskbarProgress.init({
@@ -546,6 +404,13 @@ app.whenReady().then(async () => {
     getTray: () => trayMod.getTray(),
   });
   globalShortcuts.registerGlobalShortcuts();
+  } catch (e) {
+    // 启动期任何异常都要留痕并干净退出：落盘后 exit 释放单实例锁，
+    // 避免半初始化僵尸占锁，让后续启动每次都被秒拒（「主进程起不来」死循环）。
+    logger.error('[main] 启动流程异常，进程即将退出:\n' + (e && e.stack ? e.stack : String(e)));
+    try { logger.flushSyncOnExit(); } catch (_e) { /* 记录失败不阻断退出 */ }
+    app.exit(1);
+  }
 });
 
 app.on('window-all-closed', () => {
@@ -566,144 +431,17 @@ app.on('window-all-closed', () => {
   try { logger.flushSyncOnExit(); } catch (_e) { /* 退出路径不再抛 */ }
   if (process.platform !== 'darwin') app.quit();
 });
-app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) openMainWindow(); });
 
-// ─── IPC 处理（按职责拆到 ipc 下的各模块）────────────────────────────────────
-function registerAllIpcHandlers() {
-  // 必须先 init context，再 register（其他域 handler 仍通过共享上下文拿状态；
-  // 下载队列域自 M1.1-C 起改为显式注入，见下方 ipcDownload 的注册调用。
-  // 关键：传 getter 而不是值，否则 mainWindow / downloadQueue 在 createWindow 之后
-  // 才赋值时，子模块里永远是 undefined。
-  initContext({
-    getMainWindow:    () => mainWindow,
-    app,
-    getDownloadQueue: () => downloadQueue,
-    persistQueue:     () => downloadQueueEngine.persistQueue(),
-    persistPlayQueue,
-    loadPersistedPlayQueue,
-    processQueue:     () => downloadQueueEngine.processQueue(),
-    requestCancelDownload: (taskId) => downloadQueueEngine.requestCancel(taskId),
-    setQueuePaused:   (v) => downloadQueueEngine.setPaused(v),
-    queueIsPaused:    () => downloadQueueEngine.isPaused(),
-    setLibraryWatchDir: (dir) => { if (libraryWatcher) libraryWatcher.setDir(dir); },
-  });
+// ─── 下载队列调度（Sprint C：已抽到 main/downloadQueue.js）───────────────────
+// processQueue / processOneSong / sanitizeFilename 的完整实现见
+// src/main/downloadQueue.js（引擎在 bootstrap 处装配）。
 
-  // 本地曲库目录监听：变动防抖后推送 local-library-changed，渲染层重走增量扫描
-  libraryWatcher = createLibraryWatcher({
-    emit: () => safeSend('local-library-changed', {}),
-    logger,
-  });
-  try { libraryWatcher.setDir(prefs.get('localDirPath')); } catch (_e) { /* 无历史目录则不监听 */ }
-
-  ipcWindow.register();
-  const searchDomain = require('./ipc/search/domain');
-  const { createInfra: createSearchInfra } = require('./ipc/search/infra');
-  ipcSearch.register({ domain: searchDomain, infra: createSearchInfra() });
-  // M1.1-C：队列域能力在装配层一次性读取，handler 内不再 require context。
-  // 引用全部是「延迟求值闭包」：此时引擎已创建，但队列内容仍按调用时取。
-  ipcDownload.register({
-    queue: {
-      getQueue: () => downloadQueueEngine.getQueue(),
-      persistQueue: () => downloadQueueEngine.persistQueue(),
-      processQueue: () => downloadQueueEngine.processQueue(),
-      requestCancel: (taskId) => downloadQueueEngine.requestCancel(taskId),
-      setPaused: (v) => downloadQueueEngine.setPaused(v),
-      isPaused: () => downloadQueueEngine.isPaused(),
-      progress: downloadProgressPort,
-    },
-  });
-  const playlistDomain = require('./ipc/playlist/domain');
-  const { createInfra: createPlaylistInfra } = require('./ipc/playlist/infra');
-  ipcPlaylist.register({ domain: playlistDomain, infra: createPlaylistInfra() });
-  ipcCookie.register();
-  ipcLibrary.register();
-  ipcPrefs.register();
-  ipcCheckLocal.register();
-  ipcHistory.register();
-  ipcAiMusic.register();
-  // 歌曲讲解（候选方向 1）：播放页「讲讲这首歌」
-  ipcSongStory.register();
-  // 厂商配置：AI 创作页与助手页那张厂商下拉的数据源
-  ipcProvider.register();
-  // 默认下载目录的解析留在组装根：downloadTemplates 不再 require('electron')
-  ipcDownloadTemplates.register({ getMusicDir: () => app.getPath('music') });
-  ipcCloudSync.register();
-  // 订阅域：构造注入 domain/infra，保证 IPC 通道与行为与旧实现完全一致。
-  const subsDomain = require('./ipc/subscriptions/domain').createDomain({
-    getPlugin: platform => api.registry.get(platform),
-  });
-  const subsInfra = require('./ipc/subscriptions/infra').createInfra({
-    queue: {
-      getQueue: () => downloadQueueEngine.getQueue(),
-      persistQueue: () => downloadQueueEngine.persistQueue(),
-      processQueue: () => downloadQueueEngine.processQueue(),
-      // 订阅自动下载查重：显式注入，避免 infra/queue.js 依赖隐式全局
-      findDownloadedAsync: (id, source) => history.findDownloadedAsync(id, source),
-    },
-  });
-  ipcSubscriptions.register({
-    subscriptions: createSubscriptions({
-      domain: subsDomain,
-      infra: subsInfra,
-      safeSend,
-      getQueue: () => downloadQueueEngine.getQueue(),
-    }),
-  });
-  ipcMcp.register();
-  // MCP 依赖各 ipc 模块已把 handler 挂进注册表，必须在全部 register 之后自启
-  ipcMcp.startIfEnabled().catch(e => logger.warn('[mcp] 自启失败:', e));
-
-  // 助手与外部 Agent 共用同一张工具表与同一条桥，所以排在 MCP 之后（口径一致，非依赖）
-  ipcAssistant.register();
-
-  // 智能歌单只读曲库、只出一次网，写库仍走 save-user-playlist，所以排在助手之后即可
-  ipcSmartPlaylist.register();
-
-  // 品味解读（候选方向 2）：设置页「品味画像」，读 playStats 出网一次
-  ipcTasteProfile.register();
-
-  // 歌单语义运维（候选方向 3）：给已有歌单做体检，只读，写库仍走既有通道
-  ipcPlaylistAudit.register();
-
-  // ── 播放队列持久化 IPC ─────────────────────────────
-  ipcHandle('save-play-queue', (_, data) => {
-    persistPlayQueue(data);
-    return { ok: true };
-  });
-  ipcHandle('load-play-queue', () => {
-    return loadPersistedPlayQueue() || { queue: [] };
-  });
-
-  // ── 系统托盘 IPC ───────────────────────────────────
-  ipcOn('tray-update-play-state', (_, playState) => {
-    trayMod.updateTrayMenu(playState);
-  });
-
-  // ── 全局快捷键开关（设置页实时切换）─────────────────
-  ipcOn('set-global-shortcuts', (_, enabled) => {
-    globalShortcuts.updateGlobalShortcutsEnabled(!!enabled);
-    logger.log(`[shortcuts] 全局媒体键: ${enabled ? '已启用' : '已停用'}`);
-  });
-
-  // ── 版本查询 IPC ───────────────────────────────────
-  ipcHandle('get-version', () => {
-    const pkg = require('../../package.json');
-    const version = pkg.version || '1.0.0';
-    const commit = process.env.npm_config_git_commit || '';
-    return commit ? `${version} (${commit.slice(0, 7)})` : version;
-  });
-}
+// ⚠️ 此处下方的旧本地音乐库 IPC（scan-local-library / read-local-metadata /
+//   read-local-lrc / update-id3-tags / update-id3-cover）+ LRC 解码函数
+//   已在 P2-1 拆分到 src/main/ipc/library.js
+// 此处不再重复定义，避免 IPC handler channel 重复注册
 
 // ⚠️ 新增 IPC 请写进 src/main/ipc 下的模块，并通过 register.js 的 handle/on 注册：
 // 通道与参数规格统一声明在 src/shared/ipcContract.js（契约未声明会启动即抛，
 // test/ipc-contract.test.js 常驻对账，勿再裸用 ipcMain）
-
-// ─── 下载队列调度（Sprint C：已抽到 main/downloadQueue.js）───────────────────
-// processQueue / processOneSong / sanitizeFilename 的完整实现见
-// src/main/downloadQueue.js（引擎在 bootstrap 处装配并接进 context）。
-// 这样「下载」这条核心链路可被独立阅读与测试，不再与窗口/托盘/生命周期混居。
-
-// ⚠️ 此处下方的旧本地音乐库 IPC（scan-local-library / read-local-metadata /
-//   read-local-lrc / update-id3-tags / update-id3-cover）+ LRC 解码函数
-// 已在 P2-1 拆分到 src/main/ipc/library.js
-// 此处不再重复定义，避免 IPC handler channel 重复注册

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed } from 'vue';
+
 /**
  * Icon —— 内联 SVG 图标库（不引入第三方图标包）
  * 统一 24×24 viewBox、1.8 描边、currentColor；填充型图标单独标 fill。
@@ -88,8 +90,8 @@ const PATHS: Readonly<Record<string, IconPath>> = {
   keyboard: ['M3 6h18v12H3z', 'M7 10h.01M11 10h.01M15 10h.01M7 14h2M12 14h5'],
 };
 
-const path = PATHS[props.name];
-const isFill = ['play', 'pause', 'prev', 'next'].includes(props.name);
+const path = computed<IconPath | undefined>(() => PATHS[props.name]);
+const isFill = computed<boolean>(() => ['play', 'pause', 'prev', 'next'].includes(props.name));
 </script>
 
 <template>
