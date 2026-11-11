@@ -93,6 +93,7 @@
     "tmp": "^0.2.7",
     "js-yaml": "^4.3.2",
     "ip-address": "^10.3.1",
-    "esbuild": "0.25.10"
+    "esbuild": "0.25.10",
+    "follow-redirects": "^1.16.3"
   }
 }
