@@ -4,6 +4,10 @@
  * 优先取流结果自带的 referer（B 站直链会带），其余按平台查表。
  * kugou / kuwo / migu / soda / 5sing 的 CDN 不要求 Referer，返回空串。
  * 渲染层 utils.playReferer 与主进程换源预检都走这里，避免两份表各改各的。
+ *
+ * 用 .mjs：旧渲染层由 Vite 以 ESM 导入，而本仓库 package.json 没有
+ * "type": "module"。写成 .js 的 export 会被 Node 当 CJS 解析失败；
+ * 写成 module.exports 又不会被 Rollup 看成具名导出，打包直接中断。
  */
 
 const PLAY_REFERERS = {
@@ -31,8 +35,4 @@ function probeHeaders(result) {
   return referer ? { Referer: referer } : {};
 }
 
-module.exports = {
-  PLAY_REFERERS,
-  playReferer,
-  probeHeaders,
-};
+export { PLAY_REFERERS, playReferer, probeHeaders };

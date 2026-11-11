@@ -101,6 +101,12 @@ test('真实仓库：postbuild 之后主进程相对 require 都能落到 dist',
     runPostbuild({ root: ROOT, dist });
     const copiedQueue = path.join(dist, 'main', 'downloadQueue', 'statemachine.js');
     assert.equal(fs.existsSync(copiedQueue), true, 'dist/main/downloadQueue/ 缺失');
+    assert.equal(
+      fs.existsSync(path.join(dist, 'shared', 'playReferer.mjs')),
+      true,
+      '渲染层与主进程共用的 .mjs 必须进 dist，否则打包后 require 找不到'
+    );
+    assert.equal(fs.existsSync(path.join(dist, 'shared', 'altSource.mjs')), true);
 
     const missing = [];
     const mainOut = path.join(dist, 'main');

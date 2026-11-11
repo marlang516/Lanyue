@@ -17,7 +17,7 @@ const {
   applyAltSourceToQueue,
   clearAltSourceInQueue,
   slimAltSource,
-} = require('../src/shared/altSource');
+} = require('../src/shared/altSource.mjs');
 
 test('assignAltSource：写成 {source, id} 字符串，坏输入不动原对象', () => {
   const song = { id: '1', source: 'netease' };

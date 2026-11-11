@@ -45,7 +45,11 @@ function copyDir(srcDir, destDir) {
     const destPath = path.join(destDir, entry.name);
     if (entry.isDirectory()) {
       copyDir(srcPath, destPath);
-    } else if (entry.name.endsWith('.js') || entry.name.endsWith('.json')) {
+    } else if (
+      entry.name.endsWith('.js') ||
+      entry.name.endsWith('.mjs') ||
+      entry.name.endsWith('.json')
+    ) {
       fs.copyFileSync(srcPath, destPath);
     }
   }

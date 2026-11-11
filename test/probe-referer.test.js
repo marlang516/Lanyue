@@ -12,7 +12,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { playReferer, probeHeaders } = require('../src/shared/playReferer');
+const { playReferer, probeHeaders } = require('../src/shared/playReferer.mjs');
 
 test('playReferer：结果自带 referer 优先，否则按平台表，未知平台为空', () => {
   assert.strictEqual(playReferer('qq', { referer: 'https://cdn.example/' }), 'https://cdn.example/');

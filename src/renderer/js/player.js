@@ -24,7 +24,7 @@ import { getLyricOverride } from './lyricEditor.js';
 import { createResumeSeeker } from './player/resumeSeek.js';
 import { createProgressWriter } from './player/progressStore.js';
 import { rememberAltSource } from './altSource.js';
-import { slimAltSource } from '../../shared/altSource.js';
+import { slimAltSource } from '../../shared/altSource.mjs';
 
 const audio = document.getElementById('audioPlayer');
 
