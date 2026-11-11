@@ -711,7 +711,7 @@ test('toast.* 词条不许是半句话（值不得以冒号收尾 —— 拼接�
  * 每次收编顺带把该文件的词条接上（ORPHANS 同步变小）。
  */
 const LEDGER = {
-  'src/renderer/index.html': 2,
+
   'src/renderer/js/abClip.js': 4,
   'src/renderer/js/abLoop.js': 2,
   'src/renderer/js/afterQueueDone.js': 3,
