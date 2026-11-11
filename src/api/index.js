@@ -158,6 +158,7 @@ const { findMatchedCandidates } = require('../utils/matchMusic');
 const { createResolveTrackService } = require('./services/resolveTrackService');
 const { crossSourceEnabled } = require('./services/fallbackPolicy');
 const request = require('./request');
+const { probeHeaders } = require('../shared/playReferer');
 
 const resolveTrack = createResolveTrackService({
   getUrl: (id, source, quality) => gateway.getUrl(source, id, quality),
@@ -165,8 +166,10 @@ const resolveTrack = createResolveTrackService({
   hasCookie: (platformId) => !!getCookie(platformId),
   findCandidates: findMatchedCandidates,
   sourceHealth,
-  // 候选直链预检：HEAD 被拒自动退化为 Range GET（见 request.testAudioLink）
-  probeUrl: (url) => request.testAudioLink(url, { timeout: 6000 }),
+  // 候选直链预检：HEAD 被拒自动退化为 Range GET（见 request.testAudioLink）。
+  // 第二参是取流结果。不带 Referer 时部分 CDN 回 200 + text/*，预检会把能播的
+  // 候选当成死链丢掉。403 仍按不定证据接受，这里只补头。
+  probeUrl: (url, result) => request.testAudioLink(url, { timeout: 6000, headers: probeHeaders(result) }),
   // 换源禁用平台清单：懒加载 prefs —— 本模块被大量测试 require，
   // 不在模块初始化期拖入 prefs 的磁盘路径依赖；未 init 时 get 自然落空按无禁用。
   getDisabledPlatforms: () => require('../utils/prefs').get('fallbackDisabledPlatforms'),

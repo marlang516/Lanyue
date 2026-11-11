@@ -17,6 +17,7 @@ import { updateProgress, onAudioEnded } from './player.js';
 import { syncToMiniPlayer, syncToDesktopLyric, syncToTray } from './player-sync.js';
 // t 要在本文件里直接取 toast.* 词条：动态文案的家是语言包，不是调用点
 import { t } from './i18n.js';
+import { forgetAltSource } from './altSource.js';
 
 // 25s 加载超时守卫状态
 let _loadWatchSince = 0;
@@ -42,7 +43,8 @@ export function setupAudioEvents(_audio) {
     if (!cur || !_audio.error) return;
     // S1-G3：流坏了 ⇒ 换源记忆（_altSource）当天作废；不清会反复直试坏源。
     // 清掉后下次回到全候选序（含本源回试）。本地行无此键，delete 无害。
-    if (cur._altSource) delete cur._altSource;
+    forgetAltSource(cur);
+    if (typeof window.saveSessionSnapshot === 'function') window.saveSessionSnapshot();
     // 连续失败熔断：循环模式下 nextSong 是无限循环，一次失败会被放大成
     // toast 糊满整屏（截图实证）。到线就停在这里，并把计数让给用户的手动操作。
     const guard = _playFailGuard.fail();
