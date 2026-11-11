@@ -7,7 +7,7 @@ import { t } from '../i18n.js';
 import { askConfirm } from '../confirmDialog.js';
 import { logger } from '../logger.js';
 import { loadAndPlay } from '../player.js';
-import { fileUrlFromPath } from '../../shared/fileUrl.mjs';
+import { fileUrlFromPath } from '../../../shared/fileUrl.mjs';
 import { showContextMenu } from '../contextMenu.js';
 import { applyQueueFilter } from '../queueFilter.js';
 import {

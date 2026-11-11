@@ -11,7 +11,7 @@ import { logger } from '../logger.js';
 //（插件不 polyfill，进 bundle 是裸 require，contextIsolation 下加载即崩），
 // 用纯 JS 的 pathLite —— 见 pathLite.js 头注。
 import * as path from '../pathLite.js';
-import { fileUrlFromPath } from '../../shared/fileUrl.mjs';
+import { fileUrlFromPath } from '../../../shared/fileUrl.mjs';
 
 import { VirtualScroller } from '../virtualList.js';
 
