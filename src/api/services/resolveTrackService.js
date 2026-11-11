@@ -222,7 +222,12 @@ function createResolveTrackService({
       if (isTrackSuccess(r) && verify) {
         let reject = null;
         try {
-          reject = await verify(r);
+          // 取流结果经常不带 source。预检要用它补 Referer，这里补上正在试的平台，
+          // 已有的 source / referer 不动。
+          const forProbe = (r && typeof r === 'object')
+            ? { ...r, source: r.source || source }
+            : r;
+          reject = await verify(forProbe);
         } catch (_e) { /* 探测自身故障按不定证据处理，不阻断换源 */ }
         if (reject) {
           logger.log(`[ResolveTrack] ${source} ${reject.reason}，跳过: ${r.url}`);

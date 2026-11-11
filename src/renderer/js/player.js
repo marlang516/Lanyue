@@ -23,6 +23,8 @@ import {
 import { getLyricOverride } from './lyricEditor.js';
 import { createResumeSeeker } from './player/resumeSeek.js';
 import { createProgressWriter } from './player/progressStore.js';
+import { rememberAltSource } from './altSource.js';
+import { slimAltSource } from '../../shared/altSource.js';
 
 const audio = document.getElementById('audioPlayer');
 
@@ -189,6 +191,7 @@ function _slimSessionSong(s) {
   return {
     id: s.id, source: s.source, title: s.title || '', artist: s.artist || '',
     album: s.album || '', duration: s.duration || 0, filePath: s.filePath || undefined,
+    _altSource: slimAltSource(s),
   };
 }
 
@@ -210,7 +213,10 @@ function saveSessionSnapshot() {
   const idx = getState('playIdx');
   if (!Array.isArray(queue) || !queue.length || !song) return;
   // 签名去重：状态没变不写盘（timeupdate 级高频调用零成本跳过）
-  const sig = `${queue.length}:${idx}:${song.source}:${song.id}:${audio.paused ? 1 : 0}`;
+  const alt = song._altSource;
+  const altSig = alt && alt.source && alt.id != null ? `${alt.source}:${alt.id}` : '';
+  // 换源记忆不在歌 id 里。不放进签名的话，只改 _altSource 的那次快照会因签名没变被跳过。
+  const sig = `${queue.length}:${idx}:${song.source}:${song.id}:${altSig}:${audio.paused ? 1 : 0}`;
   if (sig === _sessionSig) return;
   _sessionSig = sig;
   const slimQueue = queue.map(_slimSessionSong).filter(Boolean);
@@ -502,7 +508,7 @@ async function playSongByIdx(idx, song) {
   } else if (hit) {
     ++_playRequestId; // 命中预取：作废仍在飞的旧取流
     song._playedQuality = hit.quality;
-    if (hit.altSource) song._altSource = hit.altSource;
+    if (hit.altSource) rememberAltSource(song, hit.altSource);
     setState('currentPlaying', song);
     await loadAndPlay(song, hit.fileUrl, true);
     return;
@@ -521,7 +527,7 @@ async function playSongByIdx(idx, song) {
     const notice = buildFallbackNotice(result, song.source);
     if (notice) { showToast(notice, 'info', 3000); triggerSourceScan(); }
     if (result.matchedSong) {
-      song._altSource = { source: result.matchedSong.source, id: String(result.matchedSong.id) };
+      rememberAltSource(song, result.matchedSong);
       updatePlayerCard(song); // 音质等徽标随实际取流结果刷新
     }
     // 005 判据②：在线取流全败，主进程回退到本地同曲文件——file:// 不过

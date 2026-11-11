@@ -1,3 +1,5 @@
+import { playReferer as playRefererOf } from '../../shared/playReferer.js';
+
 /**
  * MusicDL 通用工具函数
  *
@@ -63,17 +65,11 @@ function escAttr(s) {
 }
 
 /**
- * 取流播放所需 Referer 的唯一判定入口（审计：此前 5 个文件各复制一份三元链）。
- * 优先主进程取流结果自带的 referer（如 B 站），其余按播放源查表；
- * kugou/kuwo/migu/soda/5sing 的 CDN 实测无 Referer 也可播，返回空串。
+ * 取流播放所需 Referer。表和判据在 shared/playReferer.js，主进程换源预检共用。
+ * 这里留一层同名函数，是因为 HTML onclick 与既有调用点认的是 window.playReferer。
  */
-const PLAY_REFERERS = {
-  bilibili: 'https://www.bilibili.com/',
-  qq: 'https://y.qq.com/',
-  netease: 'https://music.163.com/',
-};
 function playReferer(source, result) {
-  return (result && result.referer) || PLAY_REFERERS[source] || '';
+  return playRefererOf(source, result);
 }
 
 // ── 时间格式化 ────────────────────────────────────────

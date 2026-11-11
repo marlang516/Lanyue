@@ -65,7 +65,7 @@ function buildEngine(overrides = {}) {
     getDefaultDownloadDir: overrides.getDefaultDownloadDir,
     // 注入替身（避免真实网络/落盘）
     history: { add: (rec) => { historyAdds.push(rec); } },
-    fsa: { statOrNull: overrides.statOrNull || (async () => ({ size: 1234 })) },
+    fsa: overrides.fsa || { statOrNull: overrides.statOrNull || (async () => ({ size: 1234 })) },
     downloader: {
       downloadFileWithRetry: overrides.downloadFileWithRetry
         || (async (url, savePath) => { downloaded.push({ url, savePath }); }),
@@ -990,6 +990,70 @@ test('路径模板: 活动模板的子目录真实建出来（漏 mkdir 就是 E
     assert.ok(fs.existsSync(path.join(dir, '周杰伦', '叶惠美')),
       '子目录必须被 mkdir 真建出来 —— 规划了目录却不建，下载直接 ENOENT');
     assert.strictEqual(engine.getQueue()[0].status, 'done');
+  } finally { restore(); }
+});
+
+test('同名不同曲：两首在途任务的落盘路径必须分开，且后缀稳定', async () => {
+  const dir = tmpDir();
+  const { engine, downloaded, restore } = buildEngine({
+    dir,
+    prefs: { concurrency: 2, saveDir: dir, namingTemplate: '{artist} - {title}' },
+  });
+  try {
+    engine.getQueue().push(
+      { id: '1', source: 'netease', title: '晴天', artist: '周杰伦', taskId: 'a', status: 'pending' },
+      { id: '9', source: 'qq', title: '晴天', artist: '周杰伦', taskId: 'b', status: 'pending' },
+    );
+    await engine.processQueue();
+    await waitFor(() => engine.getQueue().every((s) => s.status === 'done'));
+    const paths = downloaded.map((d) => d.savePath).sort();
+    assert.strictEqual(paths.length, 2);
+    assert.notStrictEqual(paths[0], paths[1], '共用 savePath 就会共用 .tmp，后写完的 rename 覆盖另一首');
+    assert.ok(paths.some((p) => p.endsWith('周杰伦 - 晴天 (netease-1).mp3')));
+    assert.ok(paths.some((p) => p.endsWith('周杰伦 - 晴天 (qq-9).mp3')));
+  } finally { restore(); }
+});
+
+test('已有同名文件且不是强制重下：新任务让开，不覆盖那份文件', async () => {
+  const dir = tmpDir();
+  const existing = path.join(dir, '周杰伦 - 晴天.mp3');
+  const { engine, downloaded, restore } = buildEngine({
+    dir,
+    prefs: { concurrency: 1, saveDir: dir, namingTemplate: '{artist} - {title}' },
+    fsa: {
+      statOrNull: async () => ({ size: 10 }),
+      exists: async (p) => p === existing,
+    },
+  });
+  try {
+    engine.getQueue().push({
+      id: '9', source: 'qq', title: '晴天', artist: '周杰伦', taskId: 'b', status: 'pending',
+    });
+    await engine.processQueue();
+    await waitFor(() => engine.getQueue()[0].status === 'done');
+    assert.strictEqual(downloaded[0].savePath, path.join(dir, '周杰伦 - 晴天 (qq-9).mp3'));
+  } finally { restore(); }
+});
+
+test('强制重下且没有另一首同名任务：仍写回原文件名', async () => {
+  const dir = tmpDir();
+  const existing = path.join(dir, '周杰伦 - 晴天.mp3');
+  const { engine, downloaded, restore } = buildEngine({
+    dir,
+    prefs: { concurrency: 1, saveDir: dir, namingTemplate: '{artist} - {title}' },
+    fsa: {
+      statOrNull: async () => ({ size: 10 }),
+      exists: async (p) => p === existing,
+    },
+  });
+  try {
+    engine.getQueue().push({
+      id: '1', source: 'netease', title: '晴天', artist: '周杰伦', taskId: 'a',
+      status: 'pending', forceRedownload: true,
+    });
+    await engine.processQueue();
+    await waitFor(() => engine.getQueue()[0].status === 'done');
+    assert.strictEqual(downloaded[0].savePath, existing);
   } finally { restore(); }
 });
 

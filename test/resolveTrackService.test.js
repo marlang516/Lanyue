@@ -553,6 +553,51 @@ function makeProbe(map = {}) {
   return fn;
 }
 
+test('探测：第二参带上 source 与 referer，调用方才能补探测头', async () => {
+  const seen = [];
+  const probe = async (url, result) => {
+    seen.push({ url, source: result && result.source, referer: result && result.referer });
+    return { ok: true };
+  };
+  const { svc } = build(
+    {
+      'netease:1': { error: 'vip', code: 'VIP_REQUIRED' },
+      'qq:q1': okResult({ url: 'https://cdn/q1.mp3', referer: 'https://y.qq.com/' }),
+    },
+    {
+      findCandidates: async () => [{ id: 'q1', source: 'qq', title: 't' }],
+      probeUrl: probe,
+    },
+  );
+  const r = await svc.resolve(SONG, 'standard');
+  assert.strictEqual(r.url, 'https://cdn/q1.mp3');
+  assert.deepStrictEqual(seen, [{
+    url: 'https://cdn/q1.mp3',
+    source: 'qq',
+    referer: 'https://y.qq.com/',
+  }]);
+});
+
+test('探测：候选取流结果没有 source 时，用正在试的平台补上', async () => {
+  const seen = [];
+  const probe = async (_url, result) => {
+    seen.push(result && result.source);
+    return { ok: true };
+  };
+  const { svc } = build(
+    {
+      'netease:1': { error: 'vip', code: 'VIP_REQUIRED' },
+      'kuwo:w1': okResult({ url: 'https://cdn/w1.mp3' }),
+    },
+    {
+      findCandidates: async () => [{ id: 'w1', source: 'kuwo', title: 't' }],
+      probeUrl: probe,
+    },
+  );
+  await svc.resolve(SONG, 'standard');
+  assert.deepStrictEqual(seen, ['kuwo']);
+});
+
 test('探测：候选取流成功后以直链调用 probeUrl', async () => {
   const probe = makeProbe();
   const { svc } = build(

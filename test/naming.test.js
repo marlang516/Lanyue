@@ -12,6 +12,7 @@ const assert = require('node:assert');
 
 const {
   renderFileName,
+  allocateDownloadFileName,
   previewTemplate,
   unknownPlaceholders,
   TEMPLATE_VARS,
@@ -199,6 +200,32 @@ test('naming: 扩展名被清洗且为空时回退 mp3', () => {
 });
 
 // ── 预览 ──────────────────────────────────────────
+
+test('naming: 没人占用时保持原文件名（重下同一首仍覆盖原路径）', () => {
+  const song = { source: 'netease', id: '1' };
+  assert.strictEqual(
+    allocateDownloadFileName('周杰伦 - 晴天.mp3', song, {}),
+    '周杰伦 - 晴天.mp3',
+  );
+  assert.strictEqual(
+    allocateDownloadFileName('周杰伦 - 晴天.mp3', song, { fileExists: true, replacingOwnFile: true }),
+    '周杰伦 - 晴天.mp3',
+  );
+});
+
+test('naming: 另一首同名歌或已有文件时插入稳定的 source-id 后缀', () => {
+  const a = allocateDownloadFileName('周杰伦 - 晴天.mp3', { source: 'netease', id: '1' }, { sameName: true });
+  const b = allocateDownloadFileName('周杰伦 - 晴天.mp3', { source: 'qq', id: '9' }, { sameName: true });
+  assert.strictEqual(a, '周杰伦 - 晴天 (netease-1).mp3');
+  assert.strictEqual(b, '周杰伦 - 晴天 (qq-9).mp3');
+  assert.notStrictEqual(a, b);
+  assert.strictEqual(
+    allocateDownloadFileName('周杰伦 - 晴天.mp3', { source: 'qq', id: '9' }, { fileExists: true }),
+    '周杰伦 - 晴天 (qq-9).mp3',
+  );
+  // 同一输入再算一次必须相同，两首并发任务才能各自避开对方的 .tmp
+  assert.strictEqual(a, allocateDownloadFileName('周杰伦 - 晴天.mp3', { source: 'netease', id: '1' }, { sameName: true }));
+});
 
 test('naming: previewTemplate 输出稳定（不依赖当前时间）', () => {
   const once = previewTemplate('{title} - {date} [{bitrate}] {year}');
