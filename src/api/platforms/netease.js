@@ -11,6 +11,9 @@ const logger = require('../../utils/logger');
 const { asSong } = require('../songShape');
 const { AppError } = require('../../shared/errors');
 
+/** 单曲搜索每页条数。aggregateLimit 必须与它相同，否则合并前会丢掉本页多取回的歌。 */
+const SEARCH_PAGE_SIZE = 30;
+
 /**
  * 搜索歌曲
  * @param {string} keyword
@@ -22,8 +25,8 @@ async function neteaseSearch(keyword, page = 1, cookie = '') {
   if (!keyword || typeof keyword !== 'string') return [];
   const res = await ncm.search({
     keywords: keyword,
-    limit: 30,
-    offset: (page - 1) * 30,
+    limit: SEARCH_PAGE_SIZE,
+    offset: (page - 1) * SEARCH_PAGE_SIZE,
     ...(cookie ? { cookie } : {}),
   });
   const songs = res?.body?.result?.songs || [];
@@ -346,9 +349,8 @@ module.exports = {
     // 歌单：/playlist?id=123（当作专辑处理——上层逐首入队）
     { type: 'playlist', re: /music\.163\.com\/playlist(?:\?id=|\/)(\d{4,15})/, extract: m => m[1] },
   ],
-  // aggregateLimit 10：首位源（原先由数组下标 i===0/1 隐式决定的 10 条，
-  // 改为显式声明，避免插入新平台时静默改变聚合条数）
-  policies: { order: 10, fallbackSource: true, probeable: true, aggregateLimit: 10 },
+  // aggregateLimit = 单曲搜索页大小。小于页大小会把已经取回的歌丢掉。
+  policies: { order: 10, fallbackSource: true, probeable: true, aggregateLimit: SEARCH_PAGE_SIZE },
 
   // ── 实现（方法存在 = 能力存在）──────────────────────────────
   search: neteaseSearch,

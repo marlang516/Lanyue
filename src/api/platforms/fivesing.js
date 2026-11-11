@@ -44,6 +44,14 @@ const API_HOST = 'http://mobileapi.5sing.kugou.com';
 const REFERER = 'https://5sing.kugou.com/';
 const HEADERS = { Referer: REFERER };
 
+/**
+ * 搜索接口不接受 pageSize，服务端默认每页 10
+ * （2026-11 搜「周杰伦」：totalCount=5047，totalPages=505）。
+ * aggregateLimit 必须等于这个页大小，否则本页多取回的歌会被丢掉，
+ * 并且「满页」判断会失真，翻页按钮跟着错。
+ */
+const SEARCH_PAGE_SIZE = 10;
+
 /** 音质档位：sq 无损 / hq 320k / lq 128k（三档对应三个不同文件） */
 const QUALITY_ORDER = ['sq', 'hq', 'lq'];
 const QUALITY_BR = { sq: null, hq: 320000, lq: 128000 };
@@ -253,7 +261,7 @@ module.exports = {
     ],
   },
   linkPatterns: [],
-  policies: { order: 70, fallbackSource: true, probeable: true, aggregateLimit: 5 },
+  policies: { order: 70, fallbackSource: true, probeable: true, aggregateLimit: SEARCH_PAGE_SIZE },
 
   // ── 实现（方法存在 = 能力存在）──────────────────────────────
   search: fivesingSearch,

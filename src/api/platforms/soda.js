@@ -402,7 +402,8 @@ module.exports = {
     originSuffixes: ['.douyinvod.com', '.douyinpic.com'],
   },
   linkPatterns: [],
-  policies: { order: 80, fallbackSource: true, probeable: true, aggregateLimit: 5 },
+  // aggregateLimit = PAGE_SIZE。小于搜索页大小会把已经取回的歌丢掉。
+  policies: { order: 80, fallbackSource: true, probeable: true, aggregateLimit: PAGE_SIZE },
 
   // ── 实现（方法存在 = 能力存在）──────────────────────────────
   search: sodaSearch,

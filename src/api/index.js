@@ -16,6 +16,7 @@
 
 const { defaultRegistry, loadPlatformPlugins } = require('./pluginRegistry');
 const { createPlatformGateway } = require('./gateway');
+const { planAggregateSearch, clipAggregateSongs, aggregateHasMore } = require('./services/aggregateSearch');
 const recommendations = require('./recommendations');
 const logger = require('../utils/logger');
 const { normalizeQQCookie, detectQQCookieType, extractQQUin, extractQQMusickey } = require('../utils/cookie');
@@ -81,22 +82,29 @@ async function searchMusic(keyword, source, page = 1, opts) {
   // M11: gateway.search 内部 safeRun 已吞异常并回退 []，永不 throw——
   // 原先这里的 try/catch 与 errors 收集是死代码，删除后行为不变
   if (source === 'all') {
-    // all: 并行搜索所有平台，按 manifest 的 policies.aggregateLimit 截断，
-    // 再走跨源同曲合并（006）：同曲多源成块、代表优先（已登录源 > 时长已知），
-    // 时长对不上的同歌名标「版别」。只标记不删除——同名不同曲的误判代价
-    // 是用户找不到想要的版本，删错一条比多看一条糟。
+    // all: 并行搜索所有平台的「请求的那一页」。
+    // aggregateLimit 等于该源搜索页大小（见各平台 manifest）：再往下截
+    // 会把已经取回的歌丢掉。limit<=0 的源不参与（用户脚本用 0 退出）。
+    // 跨源同曲合并（006）只标记不删除——同名不同曲的误判代价是用户找不到想要的版本。
     const allPlugins = _registry.getAll();
-    const results = await gateway.fanOut(allPlugins.map(p => p.id), (id) => gateway.search(id, keyword, 1));
+    const plan = planAggregateSearch(allPlugins, page);
+    const active = plan.slots.filter((s) => s.limit > 0);
+    const results = await gateway.fanOut(
+      active.map((s) => s.id),
+      (id) => gateway.search(id, keyword, plan.page),
+    );
     const failed = [];
     const groups = results.map((r, i) => {
+      const slot = active[i];
       if (!r.ok) {
-        failed.push(allPlugins[i].id);
-        return { source: allPlugins[i].id, songs: [] };
+        failed.push(slot.id);
+        return { source: slot.id, songs: [], limit: slot.limit };
       }
-      // 聚合条数由 manifest 的 policies.aggregateLimit 显式声明。
-      // 原先是按数组下标硬编码 10/10/5 —— 在中间插入新平台会静默改变
-      // 后面所有平台的聚合条数，且没有任何测试盯着。
-      return { source: allPlugins[i].id, songs: (r.value || []).slice(0, allPlugins[i]._policies.aggregateLimit) };
+      return {
+        source: slot.id,
+        songs: clipAggregateSongs(r.value, slot.limit),
+        limit: slot.limit,
+      };
     });
     const merged = crossSourceAggregate.aggregateAcrossSources(groups);
     crossSourceAggregate.markVariants(merged.songs);
@@ -104,11 +112,20 @@ async function searchMusic(keyword, source, page = 1, opts) {
       merged.songs,
       (opts && opts.loggedIn) || []
     );
-    return { songs, source: 'all', error: null, stats: merged.stats, failed };
+    return {
+      songs,
+      source: 'all',
+      error: null,
+      stats: merged.stats,
+      failed,
+      hasMore: aggregateHasMore(groups),
+    };
   }
   if (!_registry.has(source)) return { songs: [], source, error: `未知平台: ${source}` };
+  const plugin = _registry.get(source);
   const songs = await gateway.search(source, keyword, page);
-  return { songs, source, error: null };
+  const limit = plugin && plugin._policies ? plugin._policies.aggregateLimit : 0;
+  return { songs, source, error: null, hasMore: aggregateHasMore([{ songs, limit }]) };
 }
 
 // ─── 专辑搜索（插件架构版）─────────────────────────────────

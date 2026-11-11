@@ -12,6 +12,9 @@ const logger = require('../../utils/logger');
 const { asSong } = require('../songShape');
 const { decodeKrc } = require('../../utils/krcCodec');
 
+/** 单曲搜索每页条数。aggregateLimit 必须与它相同，否则合并前会丢掉本页多取回的歌。 */
+const SEARCH_PAGE_SIZE = 30;
+
 // 编码/解码三种音质的 hash 到 id
 const HASH_SEP = '::';
 
@@ -46,7 +49,7 @@ function getMid() {
  */
 async function kugouSearch(keyword, page = 1) {
   if (!keyword || typeof keyword !== 'string') return [];
-  const url = `https://songsearch.kugou.com/song_search_v2?keyword=${encodeURIComponent(keyword)}&page=${Number(page) || 1}&pagesize=30&platform=WebFilter`;
+  const url = `https://songsearch.kugou.com/song_search_v2?keyword=${encodeURIComponent(keyword)}&page=${Number(page) || 1}&pagesize=${SEARCH_PAGE_SIZE}&platform=WebFilter`;
   const result = await request(url, { timeout: 10000 });
   const songs = result?.data?.lists || [];
   return songs.map((s) => asSong({
@@ -600,7 +603,7 @@ module.exports = {
     // 专辑：/album/xxx.html（slug 型 id，保持原样）
     { type: 'album', re: /kugou\.com\/album\/([a-z0-9_-]{6,40})\.html/, extract: m => m[1] },
   ],
-  policies: { order: 40, fallbackSource: true, probeable: true, aggregateLimit: 5 },
+  policies: { order: 40, fallbackSource: true, probeable: true, aggregateLimit: SEARCH_PAGE_SIZE },
 
   // ── 实现（方法存在 = 能力存在）──────────────────────────────
   search: kugouSearch,

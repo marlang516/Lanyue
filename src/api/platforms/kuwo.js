@@ -17,6 +17,9 @@ const { USER_AGENT } = require('../../utils/userAgent');
 
 const HEADERS = { 'User-Agent': USER_AGENT };
 
+/** 单曲搜索每页条数（rn）。aggregateLimit 必须与它相同，否则合并前会丢掉本页多取回的歌。 */
+const SEARCH_PAGE_SIZE = 30;
+
 /** MUSIC_228908 → 228908 */
 function normalizeId(rid) {
   return String(rid || '').replace(/^MUSIC_/i, '');
@@ -41,7 +44,7 @@ async function kuwoSearch(keyword, page = 1) {
   const params = new URLSearchParams({
     vipver: '1', client: 'kt', ft: 'music', cluster: '0', strategy: '2012',
     encoding: 'utf8', rformat: 'json', mobi: '1', issubtitle: '1',
-    show_copyright_off: '1', pn: String(Math.max(0, page - 1)), rn: '30', all: keyword,
+    show_copyright_off: '1', pn: String(Math.max(0, page - 1)), rn: String(SEARCH_PAGE_SIZE), all: keyword,
   });
   const res = await request(`http://www.kuwo.cn/search/searchMusicBykeyWord?${params}`, {
     headers: HEADERS,
@@ -193,7 +196,7 @@ module.exports = {
     ],
   },
   linkPatterns: [],
-  policies: { order: 50, fallbackSource: true, probeable: true, aggregateLimit: 5 },
+  policies: { order: 50, fallbackSource: true, probeable: true, aggregateLimit: SEARCH_PAGE_SIZE },
 
   // ── 实现（方法存在 = 能力存在）──────────────────────────────
   search: kuwoSearch,
