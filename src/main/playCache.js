@@ -21,6 +21,7 @@ const path = require('path');
 const crypto = require('crypto');
 const logger = require('../utils/logger');
 const fsa = require('../utils/fsAsync');
+const { fileUrlFromPath } = require('../shared/fileUrl.mjs');
 
 const PLAY_CACHE = new Map();     // url -> { filePath, expireAt }
 const _inflightPlays = new Map(); // url -> Promise：同 URL 并发去重，防双流写同一缓存文件
@@ -237,7 +238,7 @@ async function proxyPlay(url, referer, userDataPath) {
 
   const cached = PLAY_CACHE.get(url);
   if (cached && cached.expireAt > Date.now() && await fsa.exists(cached.filePath)) {
-    return { fileUrl: 'file://' + cached.filePath.replace(/\\/g, '/'), cached: true };
+    return { fileUrl: fileUrlFromPath(cached.filePath), cached: true };
   }
   if (cached) { await safeUnlink(cached.filePath); PLAY_CACHE.delete(url); }
 
@@ -252,7 +253,7 @@ async function proxyPlay(url, referer, userDataPath) {
 
     if (PLAY_CACHE.size > PLAY_CACHE_MAX) await cleanupExpired();
 
-    return { fileUrl: 'file://' + filePath.replace(/\\/g, '/') };
+    return { fileUrl: fileUrlFromPath(filePath) };
   })();
   _inflightPlays.set(url, download);
   try {

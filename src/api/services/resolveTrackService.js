@@ -51,6 +51,7 @@ const FALLBACK_HTTP_RE = /HTTP\s*(403|404|410)/i;
  * status 的平台是零回归。
  */
 const { FALLBACK_HTTP_STATUSES } = require('./streamFailure');
+const { fileUrlFromPath } = require('../../shared/fileUrl.mjs');
 
 /**
  * 判定一次失败的取流结果是否值得跨源重试。
@@ -351,7 +352,7 @@ function createResolveTrackService({
       logger.log(`[ResolveTrack] 本地回退: "${song.title}" ${song.source} → ${match.filePath}`);
       notifyToggled(song.source, 'local', match);
       return normalizeTrackResult({
-        url: 'file://' + match.filePath,
+        url: fileUrlFromPath(match.filePath),
         source: 'local',
         ext: match.ext || 'mp3',
         degradedLocal: true,
