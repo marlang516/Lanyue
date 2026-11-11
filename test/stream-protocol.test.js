@@ -164,7 +164,9 @@ test('上游 4xx/5xx 如实透传状态码，不伪装成音频', () => {
 
 test('MAX_BYTES 作用在单次响应上，不在整首歌上（流式后没有整首上限的语义）', () => {
   assert.equal(MAX_BYTES, 200 * 1024 * 1024);
-  assert.match(SRC, /received\s*>\s*MAX_BYTES[\s\S]*?res\.destroy\(\)/,
+  assert.match(SRC, /createUpstreamBody\(res,\s*MAX_BYTES\)/,
+    '播放路径必须把单次响应上限交给泵');
+  assert.match(SRC, /received\s*>\s*maxBytes[\s\S]*?res\.destroy\(\)/,
     '超限要断流而不是继续拉');
 });
 
