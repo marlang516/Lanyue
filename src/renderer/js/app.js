@@ -17,6 +17,7 @@ import './state.js';
 import './toast.js';
 import './utils.js';
 import { buildFallbackNotice, triggerSourceScan } from './fallbackNotice.js';
+import { rememberAltSource } from './altSource.js';
 import { pickQueueCopyRows, queueCopyToastText } from './queueCopy.js';
 import { toTrackLines } from './songListText.js';
 import { listAccessHint, term } from './listAccess.js';
@@ -667,9 +668,7 @@ async function playPlaylistModalSong(idx) {
     }
     const notice = buildFallbackNotice(result, song.source);
     if (notice) { showToast(notice, 'info', 3000); triggerSourceScan(); }
-    if (result.matchedSong) {
-      song._altSource = { source: result.matchedSong.source, id: String(result.matchedSong.id) };
-    }
+    if (result.matchedSong) rememberAltSource(song, result.matchedSong);
     song._playedQuality = quality;
     const playSource = result.source || song.source;
     const referer = playReferer(playSource, result);

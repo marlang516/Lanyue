@@ -188,6 +188,32 @@ function renderFileName(template, song, ext, opts) {
   return (base || '未知') + '.' + (ext || 'mp3').replace(/[^a-zA-Z0-9]/g, '').substring(0, 10);
 }
 
+/**
+ * 另一首不同的歌已经占用这个文件名时，在扩展名前插入稳定后缀。
+ *
+ * 默认模板是 `{artist} - {title}`。两首在途任务算出同一个名字就会共用
+ * `savePath + '.tmp'`，后完成的 rename 覆盖另一首。后缀用 source-id：
+ * 两边各自计算、结果不同，也不随谁先 stat 到文件而变。
+ * 强制重下自己的那份文件（fileExists 且 replacingOwnFile）保持原名。
+ *
+ * @param {string} fileName 已经清洗过的文件名（含扩展名）
+ * @param {{source?: string, id?: string|number}} song
+ * @param {{sameName?: boolean, fileExists?: boolean, replacingOwnFile?: boolean}} [claim]
+ * @returns {string}
+ */
+function allocateDownloadFileName(fileName, song, claim = {}) {
+  const c = claim || {};
+  const blockedFile = !!c.fileExists && !c.replacingOwnFile;
+  if (!c.sameName && !blockedFile) return fileName;
+  const tag = String(`${song && song.source ? song.source : 'src'}-${song && song.id != null ? song.id : 'x'}`)
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .slice(0, 60);
+  const name = String(fileName || '未知.mp3');
+  const dot = name.lastIndexOf('.');
+  if (dot <= 0) return `${name} (${tag})`;
+  return `${name.slice(0, dot)} (${tag})${name.slice(dot)}`;
+}
+
 // 目录段边界：两种分隔符都算（模板可能是 Windows 写法也可能是 POSIX 写法）
 const DIR_SEP_RE = /[\u002f\u005c]+/;
 // Windows 目录名不许以点或空格收尾；「以点结尾」顺带把 '.' 与 '..' 变成空段
@@ -298,6 +324,7 @@ function unknownPlaceholders(template) {
 
 module.exports = {
   renderFileName,
+  allocateDownloadFileName,
   renderPathSegments,
   previewTemplate,
   previewPathPattern,

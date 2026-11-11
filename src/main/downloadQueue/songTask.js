@@ -45,7 +45,7 @@
 const path = require('path');
 const fs = require('fs');
 
-const { renderFileName, DEFAULT_TEMPLATE } = require('../../utils/naming');
+const { renderFileName, allocateDownloadFileName, DEFAULT_TEMPLATE } = require('../../utils/naming');
 const { planDownloadDir, activePathTemplate } = require('../../utils/downloadPath');
 const { MUSIC_DIR_NAME } = require('../../shared/downloadDefaults');
 const diskSpace = require('../diskSpace');
@@ -321,7 +321,29 @@ function createSongTask({
       dirPlan.reason = 'outside-save-dir';
     }
     // 在同一个对象上改写而不是另起 finalDir：savePath / mkdir / statfs 三处同源。
-    const savePath = path.join(dirPlan.dir, sanitizeFilename(renderFileName(namingTemplate, song, ext)));
+    // 默认模板只有歌手和歌名。另一首不同的歌算出同一个名字时，两份任务会共用
+    // 同一个 .tmp；磁盘上已经有这份文件时，后一次下载也会把它覆盖掉。
+    // 后缀按 source-id 稳定计算，不依赖谁先创建文件。强制重下自己的文件仍用原名。
+    const fileName = sanitizeFilename(renderFileName(namingTemplate, song, ext));
+    const sameName = getQueue().some((other) => {
+      if (!other || other === song) return false;
+      if (String(other.source || '') === String(song.source || '') && String(other.id) === String(song.id)) {
+        return false;
+      }
+      if (other.savePath && path.basename(other.savePath) === fileName) return true;
+      return sanitizeFilename(renderFileName(namingTemplate, other, ext)) === fileName;
+    });
+    const basePath = path.join(dirPlan.dir, fileName);
+    let fileExists = false;
+    if (!song.forceRedownload && fsa && typeof fsa.exists === 'function') {
+      try { fileExists = await fsa.exists(basePath); } catch (_e) { fileExists = false; }
+    }
+    const finalName = sanitizeFilename(allocateDownloadFileName(fileName, song, {
+      sameName,
+      fileExists,
+      replacingOwnFile: !!song.forceRedownload,
+    }));
+    const savePath = path.join(dirPlan.dir, finalName);
     await fs.promises.mkdir(dirPlan.dir, { recursive: true }).catch(e => {
       logger.warn('[processOneSong] 创建下载目录失败:', dirPlan.dir, e.message);
     });

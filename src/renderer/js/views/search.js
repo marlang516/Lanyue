@@ -12,6 +12,7 @@ import { openSongRowMenu } from '../songMenu.js';
 import { nextSortMode, sortLabel, sortPairs } from '../searchSort.js';
 import { markTerm } from '../highlight.js';
 import { buildFallbackNotice, triggerSourceScan } from '../fallbackNotice.js';
+import { rememberAltSource } from '../altSource.js';
 import { dismissedKeySet, filterDismissedPairs, onDismissChanged } from '../dismissed.js';
 import { skeletonHtml, SKEL_ROWS } from '../skeleton.js';
 import { t } from '../i18n.js';
@@ -816,9 +817,7 @@ async function playSong(idx, queueOverride = null) {
     s._playedQuality = quality;
     const notice = buildFallbackNotice(result, s.source);
     if (notice) { showToast(notice, 'info', 3000); triggerSourceScan(); }
-    if (result.matchedSong) {
-      s._altSource = { source: result.matchedSong.source, id: String(result.matchedSong.id) };
-    }
+    if (result.matchedSong) rememberAltSource(s, result.matchedSong);
     const playSource = result.source || s.source;
     const referer = playReferer(playSource, result);
     const proxied = await api.proxyPlay(result.url, referer, {

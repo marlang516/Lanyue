@@ -13,6 +13,7 @@ import { logger } from '../../logger.js';
 import { loadAndPlay } from '../../player.js';
 import { resolveQuality } from '../../quality.js';
 import { buildFallbackNotice, triggerSourceScan } from '../../fallbackNotice.js';
+import { rememberAltSource } from '../../altSource.js';
 import { planSelEnqueue, enqueueSkipSuffix } from '../../plSelBatch.js';
 import { sourceErrorText } from '../../sourceError.js';
 import { plState } from './state.js';
@@ -39,9 +40,7 @@ async function _playFrom(list, idx) {
     song._playedQuality = quality;
     const notice = buildFallbackNotice(result, song.source);
     if (notice) { showToast(notice, 'info', 3000); triggerSourceScan(); }
-    if (result.matchedSong) {
-      song._altSource = { source: result.matchedSong.source, id: String(result.matchedSong.id) };
-    }
+    if (result.matchedSong) rememberAltSource(song, result.matchedSong);
     const playSource = result.source || song.source;
     const referer = playReferer(playSource, result);
     const proxied = await api.proxyPlay(result.url, referer, {
