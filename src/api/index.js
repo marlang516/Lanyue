@@ -158,7 +158,7 @@ const { findMatchedCandidates } = require('../utils/matchMusic');
 const { createResolveTrackService } = require('./services/resolveTrackService');
 const { crossSourceEnabled } = require('./services/fallbackPolicy');
 const request = require('./request');
-const { probeHeaders } = require('../shared/playReferer');
+const { probeHeaders } = require('../shared/playReferer.mjs');
 
 const resolveTrack = createResolveTrackService({
   getUrl: (id, source, quality) => gateway.getUrl(source, id, quality),

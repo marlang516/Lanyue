@@ -1,4 +1,4 @@
-import { playReferer as playRefererOf } from '../../shared/playReferer.js';
+import { playReferer as playRefererOf } from '../../shared/playReferer.mjs';
 
 /**
  * MusicDL 通用工具函数
@@ -65,7 +65,7 @@ function escAttr(s) {
 }
 
 /**
- * 取流播放所需 Referer。表和判据在 shared/playReferer.js，主进程换源预检共用。
+ * 取流播放所需 Referer。表和判据在 shared/playReferer.mjs，主进程换源预检共用。
  * 这里留一层同名函数，是因为 HTML onclick 与既有调用点认的是 window.playReferer。
  */
 function playReferer(source, result) {

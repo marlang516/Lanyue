@@ -4,6 +4,9 @@
  * 播放队列只在 setState('playQueue' | 'playIdx' | …) 时落盘。原地改
  * song._altSource 不会通知订阅者，退出前若没有下一次队列变更，记忆就丢了。
  * 这里回答两件事：写成什么样，以及队列里是否已经有这首歌（有才需要 flush）。
+ *
+ * 用 .mjs 的理由与 playReferer.mjs 相同：渲染层 Vite 要具名导出，
+ * 主进程与单测用 require() 加载，.js 里的 export 在本仓库会被当成 CJS。
  */
 
 function validAlt(matched) {
@@ -67,7 +70,7 @@ function slimAltSource(song) {
   return { source: String(alt.source), id: String(alt.id) };
 }
 
-module.exports = {
+export {
   assignAltSource,
   applyAltSourceToQueue,
   clearAltSourceInQueue,

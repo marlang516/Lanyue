@@ -1,10 +1,10 @@
 /**
  * 换源记忆的渲染层入口：写入后，若这首歌已经在播放队列里，立刻通知保存。
- * 判据在 shared/altSource.js，这里只接 state。
+ * 判据在 shared/altSource.mjs，这里只接 state。
  */
 
 import { getState, notify } from './state.js';
-import { applyAltSourceToQueue, clearAltSourceInQueue } from '../../shared/altSource.js';
+import { applyAltSourceToQueue, clearAltSourceInQueue } from '../../shared/altSource.mjs';
 
 export function rememberAltSource(song, matched) {
   if (applyAltSourceToQueue(getState('playQueue'), song, matched)) notify('playQueue');
