@@ -11,6 +11,7 @@
  */
 import { reactive, computed, watch } from 'vue';
 import type { ComputedRef } from 'vue';
+import { fileUrlFromPath } from '../../../shared/fileUrl.mjs';
 import { call, callSafe } from '../core/bridge';
 import { normalizeSong, songKey } from '../core/song';
 import type { Song } from '../core/song';
@@ -251,10 +252,10 @@ export async function playSong(song: unknown): Promise<void> {
 
   const a = ensureAudio();
 
-  // 本地文件直出：与旧层一致（file:// + 绝对路径），不走取流/代理
+  // 本地文件直出：不走取流/代理。# 与 ? 必须编码，否则 URL 片段会截断文件名。
   if (s.filePath) {
     try {
-      a.src = 'file://' + s.filePath;
+      a.src = fileUrlFromPath(s.filePath);
       await a.play();
       player.loading = false;
       addRecent(s);

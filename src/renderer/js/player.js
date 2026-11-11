@@ -25,6 +25,7 @@ import { createResumeSeeker } from './player/resumeSeek.js';
 import { createProgressWriter } from './player/progressStore.js';
 import { rememberAltSource } from './altSource.js';
 import { slimAltSource } from '../../shared/altSource.mjs';
+import { fileUrlFromPath } from '../../shared/fileUrl.mjs';
 
 const audio = document.getElementById('audioPlayer');
 
@@ -273,7 +274,7 @@ export async function loadAndPlay(song, prefetchedUrl, isNetworkSong = false) {
   // 007 会话快照：换歌即存（崩溃/重启后 boot-restore 恢复队列现场）
   saveSessionSnapshot();
 
-  const localUrl = prefetchedUrl || (song.filePath ? 'file://' + song.filePath : null);
+  const localUrl = prefetchedUrl || (song.filePath ? fileUrlFromPath(song.filePath) : null);
 
   // ── 本地歌曲分支（仅当明确是本地歌曲或没有预获取URL时）─────────
   if (!isNetworkSong && localUrl && localUrl.startsWith('file://')) {

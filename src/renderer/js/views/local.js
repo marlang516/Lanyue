@@ -11,6 +11,7 @@ import { logger } from '../logger.js';
 //（插件不 polyfill，进 bundle 是裸 require，contextIsolation 下加载即崩），
 // 用纯 JS 的 pathLite —— 见 pathLite.js 头注。
 import * as path from '../pathLite.js';
+import { fileUrlFromPath } from '../../shared/fileUrl.mjs';
 
 import { VirtualScroller } from '../virtualList.js';
 
@@ -536,7 +537,7 @@ async function playLocalSong(idx) {
     setState('_currentLocalFilePath', s.filePath);
     // audio error / 25s 加载超时守卫依赖 currentPlaying 真值，缺失会静默卡死
     setState('currentPlaying', s);
-    await loadAndPlay(s, 'file://' + s.filePath);
+    await loadAndPlay(s, fileUrlFromPath(s.filePath));
     renderLocalSongs();
   } catch (e) {
     logger.error(`[playLocalSong] error:`, e);
