@@ -1,7 +1,8 @@
 /**
  * stores/lyrics.ts —— 歌词获取与解析
  *
- * 不依赖 player（避免 store 循环）：组件用 progress 自行求当前行。
+ * 不依赖 player（避免 store 循环）：全屏页用播放时钟自行求当前行。
+ * 行号二分在 core/lyricMotion.js，桌面歌词同步与全屏交接共用一份。
  * LRC 支持一行多个时间标签、[offset:] 元信息与毫秒/厘秒两种小数位。
  */
 import { reactive, computed } from 'vue';
@@ -84,19 +85,11 @@ export function parseLrc(text: unknown): LyricLine[] {
     .sort((a, b) => a.t - b.t);
 }
 
-/** 当前播放位置对应的歌词行（-1 表示还没到第一句） */
-export function activeLineIndex(items: readonly LyricLine[] | null | undefined, seconds: number): number {
-  if (!Array.isArray(items) || !items.length) return -1;
-  let lo = 0;
-  let hi = items.length - 1;
-  let ans = -1;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    if (items[mid].t <= seconds) { ans = mid; lo = mid + 1; }
-    else hi = mid - 1;
-  }
-  return ans;
-}
+/**
+ * 当前播放位置对应的歌词行（-1 表示还没到第一句）。
+ * 实现在 core/lyricMotion.js：全屏交接和桌面歌词同步必须共用这一份二分。
+ */
+export { activeLineIndex } from '../core/lyricMotion.js';
 
 export async function loadOffset(): Promise<void> {
   const v = await getPref('lyricOffsetMs', 0);
