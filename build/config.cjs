@@ -177,6 +177,20 @@ module.exports = {
   // 「Invalid configuration object」打包失败。Name/Categories 由 productName 与 category 自动生成。
   linux: {
     icon: 'assets',
+    // 可执行名默认取 package.json 的 name（linuxPackager.js:16 →
+    // sanitizedName.toLowerCase()），实测打出的是 music-downloader，与品牌
+    // Lanyue 不一致；.desktop 的 Icon 字段也取这个名字，必须显式钉住。
+    executableName: 'lanyue',
+    // 产物名不用 ${name}：deb 的默认模板是 ${name}_${version}_${arch}.${ext}，
+    // ${name} 取 package.json 的 name —— 实测未设时打出
+    // music-downloader_1.1.2_amd64.deb，而 AppImage 却叫 Lanyue-1.1.2.AppImage，
+    // 同一平台两个产物品牌不一致。故显式钉住（Debian 控制文件里的包名另见下方 deb 块）。
+    artifactName: 'Lanyue-${version}-${arch}.${ext}',
+    // 与 package.json 的 desktopName（lanyue.desktop）配对：Electron 在 Linux
+    // 上用 desktopName 当 app_id / WM_CLASS，.desktop 的 StartupWMClass 必须
+    // 与之相同，否则桌面环境无法把运行中的窗口关联到菜单条目（图标错乱/重复）。
+    // 不开这项时 electron-builder 会直接 warn（实测 2026-11-12）。
+    syncDesktopName: true,
     target: [
       { target: 'AppImage', arch: ['x64'] },
       { target: 'deb', arch: ['x64'] },
@@ -184,15 +198,33 @@ module.exports = {
     category: 'AudioVideo',
   },
 
+  // deb 专属选项必须在**根级** deb 块，不能写进 linux：
+  // FpmTarget 构造函数是 deepAssign({}, platformSpecificBuildOptions, config[this.name])，
+  // this.name === 'deb' 且 config 是根配置 ⇒ 只认根级 deb。
+  // 而 linux 的 schema 里没有 packageName 键，写错层级会让**所有平台**的打包
+  // 直接「Invalid configuration object」（2026-11-12 实测踩过）。
+  deb: {
+    // Debian 控制文件的包名，默认取 appInfo.linuxPackageName（= package.json 的
+    // name，即 music-downloader）。必须全小写：Debian 包名只允许小写字母/数字/+/-/.，
+    // 大写会被 dpkg 拒绝。
+    packageName: 'lanyue',
+  },
+
   // ── macOS ──────────────────────────────────────────
   mac: {
     icon: 'assets/icon.png',
     target: [
       { target: 'dmg', arch: ['x64', 'arm64'] },
+      // zip 不可删：electron-updater 的 MacUpdater 只认 zip
+      // （MacUpdater.js:81 findFile(files,"zip",…)，取不到就报错），
+      // 只发 dmg 等于 macOS 自动更新直接失效。
       { target: 'zip', arch: ['x64', 'arm64'] },
     ],
     category: 'public.app-category.music',
-    artifactName: '${name}-${version}-${os}-${arch}.${ext}',
+    // 不用 ${name}：它取 package.json 的 name（music-downloader），会打出
+    // 旧品牌产物名。与 nsis.artifactName 同一口径，显式写 Lanyue。
+    // 含 ${arch} 是硬要求：x64 与 arm64 两个包否则同名互相覆盖。
+    artifactName: 'Lanyue-${version}-${os}-${arch}.${ext}',
   },
 
   // ── 自动更新（GitHub Releases）─────────────────────
@@ -205,9 +237,17 @@ module.exports = {
   },
 
   // ── 额外资源 ───────────────────────────────────────
-  // 只带运行期真正执行的 Python 脚本（write_tags.py 标签写入；convert_audio.py
-  // 应急转码兜底），17 个开发期 js 脚本不再随包分发（2026-09 审计产物卫生项）
+  // 只带运行期真正执行的 Python 脚本：write_tags.py（非 MP3 格式的标签写入，
+  // 见 src/utils/downloader.js 的 embedTagsWithPython）。
+  //
+  // ⚠️ 不得用 `*.py` 通配（2026-11-12 实测修正）：scripts/ 下另两个 .py
+  // 都是开发期工具，src/ 里零引用，通配会把它们一起发给最终用户 ——
+  //   add-try-catch.py  给 JS 源码批量加 try/catch 的 codemod
+  //   convert_audio.py  旧转码兜底；转码链路早已直接走 ffmpeg
+  //                     （src/utils/audioConvert.js），这个脚本没人调
+  // 旧注释曾声称 convert_audio.py 是「应急转码兜底」，与代码事实不符。
+  // 17 个开发期 js 脚本同样不随包分发（2026-09 审计产物卫生项）。
   extraResources: [
-    { from: 'scripts/', to: 'scripts/', filter: ['*.py'] },
+    { from: 'scripts/', to: 'scripts/', filter: ['write_tags.py'] },
   ],
 };

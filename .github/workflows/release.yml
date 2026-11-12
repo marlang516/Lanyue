@@ -14,8 +14,15 @@
 #    （详见 SECURITY.md 第四节）。等证书到位后，在这里加 CSC_LINK/CSC_KEY_PASSWORD
 #    即可自动生效，届时 verifyUpdateCodeSignature 才真正有约束力。
 #    因此产物与已发布版本都会触发 SmartScreen 提示，这是**已知代价**而非疏漏。
-# 5. **不发布 macOS/Linux**：仓库脚本目前只对 Windows 有实证（asar 冒烟、native
-#    模块、python 辅助脚本都按 Windows 验证过）。宁可少发，不要发没验证过的产物。
+# 5. **不发布 macOS/Linux**：封装工具只有 Linux/macOS 版。实测（2026-11-12）
+#    在 Windows 宿主上打 AppImage 必然失败 —— app-builder-lib 的
+#    toolsets/linux.js 在非 Linux 宿主上一律取 `darwin` 工具目录，而工具包
+#    只带 darwin/linux 版 mksquashfs ⇒ `spawn …/darwin/mksquashfs ENOENT`；
+#    deb 需要宿主自备 fpm；dmg 依赖 macOS 的 hdiutil。打包阶段本身是通的
+#    （linux-unpacked + asar 冒烟 18/18 通过），但运行期从未在非 Windows 上
+#    验证过：Linux 凭证存储依赖系统密钥环，标签写入依赖用户自备 python+mutagen。
+#    宁可少发，不要发没验证过的产物。要验证时手动跑 cross-platform-build.yml
+#    （只打包、不发布），实测边界见 docs/RELEASING.md「跨平台产物」一节。
 
 name: Release
 

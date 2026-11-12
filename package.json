@@ -43,7 +43,11 @@
     "migu",
     "webdav"
   ],
-  "author": "揽乐",
+  "author": {
+    "name": "揽乐",
+    "email": "maliang04110233@gmail.com"
+  },
+  "desktopName": "lanyue.desktop",
   "license": "MIT",
   "engines": {
     "node": ">=22.0.0"
