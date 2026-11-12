@@ -201,7 +201,7 @@ test('守卫自检：staleRepoPattern 真的能匹配', () => {
 test('守卫：build/config.cjs 的 publish 指向真实仓库', () => {
   const cfg = read('build/config.cjs');
   assert.match(cfg, /repo:\s*['"]Lanyue['"]/, 'publish.repo 应为 Lanyue');
-  assert.match(cfg, /owner:\s*['"]maliang04110233-dot['"]/, 'publish.owner 缺失');
+  assert.match(cfg, /owner:\s*['"]marlang516['"]/, 'publish.owner 缺失');
   assert.ok(
     !staleRepoPattern.test(stripComments(cfg)),
     'publish.repo 仍是旧仓库名 ' + STALE_REPOS.join(' / '),

@@ -243,7 +243,7 @@ module.exports = {
   // ── 自动更新（GitHub Releases）─────────────────────
   publish: {
     provider: 'github',
-    owner: 'maliang04110233-dot',
+    owner: 'marlang516',
     repo: 'Lanyue',
     private: false,
     releaseType: 'release',

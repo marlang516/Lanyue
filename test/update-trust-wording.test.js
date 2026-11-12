@@ -136,5 +136,5 @@ test('事实钉：「GitHub 仓库」快捷链接指向本仓，不是 github.co
 
 test('否定对照：只写 github.com 首页确实过不了上面那条判据', () => {
   const fake = '<button onclick="api.openExternal(\'https://github.com\')">GitHub 仓库</button>';
-  assert.equal(fake.includes("api.openExternal('https://github.com/maliang04110233-dot/Lanyue')"), false);
+  assert.equal(fake.includes("api.openExternal('https://github.com/marlang516/Lanyue')"), false);
 });

@@ -53,9 +53,9 @@ test('getReleasesPageUrl：从 app-update.yml 一路派生（就是打包产物�
   // 逐字对齐 release/win-unpacked/resources/app-update.yml：无引号、无注释、provider 在前。
   // 注：parseGithubFeed 的值正则不吃行尾注释，这是既有口径，手动下载入口不打算改它——
   // electron-builder 生成的就是干净两行，加容错等于给"手工改过的 yml"开需求。
-  const yml = 'provider: github\nowner: maliang04110233-dot\nrepo: Lanyue\n';
+  const yml = 'provider: github\nowner: marlang516\nrepo: Lanyue\n';
   assert.strictEqual(um.buildReleasesPageUrl(um.parseGithubFeed(yml)),
-    'https://github.com/maliang04110233-dot/Lanyue/releases/latest');
+    'https://github.com/marlang516/Lanyue/releases/latest');
   // 带引号的写法解析器也吃（历史上手改过），派生结果一致
   assert.strictEqual(
     um.buildReleasesPageUrl(um.parseGithubFeed("provider: github\nowner: 'a'\nrepo: \"b\"\n")),
@@ -81,7 +81,7 @@ test('守卫：仓库名字面量只许活在 build/config.cjs 的 publish 段',
   // repo: 'X'，以及写死的 owner/releases 下载页地址。
   const FEED_SHAPES = [
     /repo\s*:\s*['"]?(?:Lanyue|MM-Music-Destop)['"]?/g,
-    /github\.com\/maliang04110233-dot\/(?:Lanyue|MM-Music-Destop)/g,
+    /github\.com\/(?:maliang04110233-dot|marlang516)\/(?:Lanyue|MM-Music-Destop)/g,
   ];
   const offenders = [];
   const walk = (absDir, relDir) => {
