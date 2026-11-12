@@ -250,6 +250,35 @@ test('排行: 接口抛错返回空数组（首页不该因为排行挂掉而崩
 });
 
 // ══════════════════════════════════════════════════════════
+// 4.5 search 封面：pic 可能是绝对 URL（L4 回归）
+//
+// ranking 已有 startsWith('http') 守卫，search 没有 —— 上游一旦回
+// 绝对 URL（现网两种形态混用），'https:' + pic 拼出 https:http://…，
+// 封面必裂。三种形态都要产出可用的绝对 URL。
+// ══════════════════════════════════════════════════════════
+
+test('搜索: pic 为绝对 URL 时原样保留，协议相对 // 才补 https:', async () => {
+  reset([{
+    marker: 'web-interface/search/type',
+    response: {
+      data: {
+        result: [
+          { bvid: 'BV1cc', title: '晴天', author: 'UP甲', pic: 'http://i1.hdslb.com/c.jpg', duration: '4:29' },
+          { bvid: 'BV1dd', title: '稻香', author: 'UP乙', pic: '//i0.hdslb.com/d.jpg', duration: '3:43' },
+          { bvid: 'BV1ee', title: '叶惠美', author: 'UP丙', pic: 'https://i2.hdslb.com/e.jpg', duration: '3:00' },
+        ],
+      },
+    },
+  }]);
+  const out = await bili.search('周杰伦', 1, 'SESSDATA=x');
+  assert.strictEqual(out.length, 3);
+  assert.strictEqual(out[0].cover, 'http://i1.hdslb.com/c.jpg',
+    '绝对 URL 再补 https: 会拼出 https:http://…，封面必裂');
+  assert.strictEqual(out[1].cover, 'https://i0.hdslb.com/d.jpg', '协议相对的 pic 必须补 https:');
+  assert.strictEqual(out[2].cover, 'https://i2.hdslb.com/e.jpg', 'https 绝对 URL 原样保留');
+});
+
+// ══════════════════════════════════════════════════════════
 // 5. Cookie 校验与详情
 // ══════════════════════════════════════════════════════════
 

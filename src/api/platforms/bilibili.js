@@ -229,7 +229,7 @@ async function bilibiliSearch(keyword, page = 1, cookie = '') {
     title: (v.title || '').replace(/<[^>]+>/g, ''),
     artist: v.author || v.uploader || '',
     album: '哔哩哔哩',
-    cover: v.pic ? ('https:' + v.pic) : '',
+    cover: v.pic ? (v.pic.startsWith('http') ? v.pic : 'https:' + v.pic) : '',
     // parseDuration 解析的是 "mm:ss"（秒），折算成约定的毫秒
     duration: parseDuration(v.duration) * 1000,
     source: 'bilibili',

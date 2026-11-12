@@ -79,6 +79,8 @@ function sanitizeRestoredTask(raw) {
  * @param {() => void} deps.trimDone 队列 done 淘汰策略（queueStore.trimDoneTasks）
  * @param {() => (string|null)} deps.userDataDir 用户数据目录（惰性，app ready 后才有值）
  * @param {(song:Object, to:string, reason?:string) => void} deps.transition 状态迁移出口（主文件 applyStatus）
+ * @param {(rows:Object[]) => void} [deps.onTrim] 淘汰真的删了条目时的补推出口（只推 UI，
+ *   不得回触 persistQueue —— 否则防抖自激）。缺省不推（单测/无 UI 场景）。
  * @param {Object} [deps.logger] 日志器（默认 utils/logger）
  * @returns {{
  *   persistQueue: (opts?: {immediate?: boolean}) => void,
@@ -91,6 +93,7 @@ function createPersistence({
   trimDone,
   userDataDir,
   transition,
+  onTrim = null,
   logger = defaultLogger,
 } = {}) {
   let queuePersistTimer = null;
@@ -100,8 +103,12 @@ function createPersistence({
   /** 立即整写队列文件（trim + 原子写）；异常吞掉并记日志 */
   function writeQueueNow() {
     try {
+      const before = getQueue().length;
       trimDone();
       atomicWriteJson(QUEUE_FILE(), getQueue());
+      // 淘汰原地 splice 了活数组：不补推快照，UI 会停在淘汰前的条数，
+      // 与磁盘脱节（重启后任务「凭空消失」）。只在真删了条目时推。
+      if (getQueue().length !== before && typeof onTrim === 'function') onTrim(getQueue());
     } catch (e) {
       logger.warn('队列持久化失败:', e.message);
     }

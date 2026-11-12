@@ -379,8 +379,24 @@ function _downloadFileInner(url, savePath, onProgress, extraHeaders = {}, redire
         cleanupTmp();   // 重定向前清理 .tmp
         const nextUrl = new URL(res.headers.location, url).toString(); // 支持相对路径
         const { assertPublicHttpUrl } = require('./urlGuard');
+        // req 的 'close' 会移除 token 注册（且在本回调之后才触发），DNS 等待期
+        // 用哨兵占位：cancelDownload 能命中，旧 req 的 close 清理因身份检查不会误删；
+        // await 之后先查取消标记再决定是否递归
+        const cancelToken = options.token ? String(options.token) : null;
+        const redirectGuard = { _cancelled: false, destroy() {} };
+        if (cancelToken) _inflightReqs.set(cancelToken, redirectGuard);
+        const dropGuardEntry = () => {
+          if (cancelToken && _inflightReqs.get(cancelToken) === redirectGuard) _inflightReqs.delete(cancelToken);
+        };
         return assertPublicHttpUrl(nextUrl).then(check => {
+          if (redirectGuard._cancelled || req._cancelled) {
+            const e = new Error('下载已取消');
+            e.cancelled = true;
+            reject(e);
+            return;
+          }
           if (!check.ok) {
+            dropGuardEntry();
             reject(new Error('重定向目标被 SSRF 防护拒绝: ' + nextUrl));
             return;
           }
@@ -392,7 +408,7 @@ function _downloadFileInner(url, savePath, onProgress, extraHeaders = {}, redire
             redirectCount + 1,
             options
           ).then(resolve).catch(reject);
-        }).catch(e => reject(e));
+        }).catch(e => { dropGuardEntry(); reject(e); });
       }
 
       // 200 = 全量下载；206 = 服务器支持 Range 续传（此前 206 会落到下方的

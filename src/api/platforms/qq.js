@@ -147,17 +147,19 @@ async function qqGetSingerAlbums(singerMid, pageNo = 1, pageSize = 20) {
   try {
     const result = await safeQQApi('singer/album', { singermid: singerMid, pageNo, pageSize });
     // 返回结构: { list, id, singermid, name, total, pageNo, pageSize }
+    // list 项字段（2026-11-12 实测）: albumid / album_mid / album_name / pub_time /
+    // singer_name / latest_song —— 与 qqSearchAlbum 的 singer/album 映射同源。
     const list = result?.list || [];
     return {
       albums: list.map(a => ({
-        id: String(a.album_id || ''),
+        id: String(a.albumid || ''),
         mid: a.album_mid || '',
         title: a.album_name || '',
         artist: result?.name || '',
         cover: a.album_mid
           ? `https://y.qq.com/music/photo_new/T002R300x300M000${a.album_mid}.jpg`
           : '',
-        publishTime: a.publish_date || '',
+        publishTime: a.pub_time || '',
         source: 'qq',
       })),
       total: result?.total || list.length,

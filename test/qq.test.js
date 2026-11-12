@@ -245,9 +245,12 @@ test('getSingerAlbums: 歌手名与总数取自顶层字段（SDK 已解包 data
   const origApi = qqMusic.api;
   qqMusic.api = async (route) => {
     if (route === 'singer/album') {
+      // 字段形态以 2026-11-12 实测为准（singermid=0025NhlN2yWrP4）：
+      // albumid / album_mid / album_name / pub_time / singer_name / latest_song。
+      // 旧 fixture 写的 album_id / publish_date 在真实响应里不存在。
       return {
         list: [
-          { album_id: 1, album_mid: 'M001', album_name: '叶惠美', publish_date: '2003-07-31' },
+          { albumid: 87495226, album_mid: 'M001', album_name: '叶惠美', pub_time: '2003-07-31', albumtype: '录音室专辑', singer_name: '周杰伦', latest_song: { song_count: 11 } },
         ],
         id: 4558, singermid: 'SINGERMID', name: '周杰伦',
         total: 50, pageNo: 1, pageSize: 20,
@@ -262,6 +265,10 @@ test('getSingerAlbums: 歌手名与总数取自顶层字段（SDK 已解包 data
     assert.strictEqual(r.albums.length, 1);
     assert.strictEqual(r.albums[0].artist, '周杰伦', '专辑 artist 应取顶层 name');
     assert.strictEqual(r.albums[0].title, '叶惠美');
+    assert.strictEqual(r.albums[0].id, '87495226',
+      '真实字段是 albumid —— 读 album_id 会让 id 恒空，专辑详情/下载定位全断');
+    assert.strictEqual(r.albums[0].publishTime, '2003-07-31',
+      '真实字段是 pub_time —— 读 publish_date 会让发布时间恒空');
   } finally {
     qqMusic.api = origApi;
   }

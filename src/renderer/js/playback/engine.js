@@ -278,18 +278,6 @@ export function createPlaybackEngine({
       boundElements.add(el);
     }
   }
-  function unbindInstanceEvents() {
-    for (const el of boundElements) {
-      el.removeEventListener('playing', onPlaying);
-      el.removeEventListener('play', onPlaying);
-      el.removeEventListener('pause', onPause);
-      el.removeEventListener('ended', onEnded);
-      el.removeEventListener('error', onError);
-      el.removeEventListener('timeupdate', onTimeUpdate);
-      el.removeEventListener('loadedmetadata', onLoadedMetadata);
-    }
-    boundElements.clear();
-  }
   bindInstanceEvents();
 
   // ── 驱动面 ────────────────────────────────────────────

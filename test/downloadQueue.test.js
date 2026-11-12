@@ -735,6 +735,63 @@ test('平台钳制：perSourceConcurrency 越界（0/负数/非数字）回落�
   }
 });
 
+test('平台钳制：重试退避中的任务（pending+_processing）也占同源码额度（L1）', async () => {
+  // 退避窗口里协程仍在途，但 status 已回 pending —— 只数 downloading 的话，
+  // 同源码第二个任务会趁虚而入，cap=1 形同虚设（风控自卫失效）。
+  const started = [];
+  const { engine, restore } = buildEngine({
+    prefs: { concurrency: 3, perSourceConcurrency: 1 },
+    downloadFileWithRetry: async (url, savePath, onProgress, headers, options = {}) => {
+      started.push(options.token);
+      if (options.token === 'task-kugou-1' && started.filter(t => t === 'task-kugou-1').length === 1) {
+        throw new Error('HTTP 403 Forbidden');
+      }
+    },
+  });
+  try {
+    const q = engine.getQueue();
+    q.push(dlItem('1', 'kugou'), dlItem('2', 'kugou'));
+    await engine.processQueue();
+    // task1 首次下载 403 ⇒ 进入 500ms 退避：status=pending 但 _processing=true
+    await waitFor(() => q[0].status === 'pending' && q[0]._processing === true, { timeout: 2000 });
+    // 模拟退避窗口内的一次调度触发（100ms 重排 / 新入队都走这个入口）
+    await engine.processQueue();
+    await new Promise((r) => setTimeout(r, 80));
+    assert.strictEqual(started.filter(t => t === 'task-kugou-2').length, 0,
+      '退避中的协程仍在途，同源码 cap=1 不得放行第二个任务');
+    // 退避结束后 task1 重试成功；task2 只应在 task1 终态后启动
+    await waitFor(() => q.every(s => s.status === 'done'), { timeout: 3000 });
+    assert.strictEqual(started.filter(t => t === 'task-kugou-2').length, 1);
+  } finally { restore(); }
+});
+
+test('done 淘汰：trim 之后必须补推队列快照，UI 与磁盘不得脱节（L3）', async () => {
+  // trimDone 原地 splice 活数组，若不补推快照，UI 停在淘汰前的条数，
+  // 磁盘 queue.json 却已少了几条 —— 重启后用户看到任务「凭空消失」。
+  const snapshots = [];
+  const { engine, dir, restore } = buildEngine({
+    progress: {
+      emitQueueUpdated: (rows) => snapshots.push(rows.slice()),
+      emitProgress: () => {},
+      emitError: () => {},
+    },
+  });
+  try {
+    const cap = engine.MAX_DONE_RETAINED;
+    const q = engine.getQueue();
+    for (let i = 0; i < cap + 1; i++) {
+      q.push({ id: String(i), source: 'netease', title: 't', artist: 'a', taskId: 'done-' + i, status: 'done' });
+    }
+    engine.persistQueue({ immediate: true });
+    assert.strictEqual(q.length, cap, '淘汰本身仍须发生');
+    const last = snapshots[snapshots.length - 1];
+    assert.ok(last, 'trim 发生后必须补推 queue-updated，否则 UI 与磁盘脱节');
+    assert.strictEqual(last.length, cap, '补推的快照必须是淘汰后的队列');
+    const onDisk = JSON.parse(fs.readFileSync(path.join(dir, 'queue.json'), 'utf8'));
+    assert.strictEqual(onDisk.length, cap, '磁盘与 UI 必须一致');
+  } finally { restore(); }
+});
+
 // ══════════════════════════════════════════════════════════
 // 终态立即落盘（不等 500ms 防抖）
 //

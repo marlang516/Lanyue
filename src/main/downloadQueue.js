@@ -40,7 +40,7 @@ const statemachine = require('./downloadQueue/statemachine');
 // ADR 0003 §5 步骤 1：零状态纯函数/端口已外移到 downloadQueue/ 子模块。
 // 本文件只做 re-export（见文件末尾 module.exports），导出成员与形状保持不变。
 const { sanitizeFilename } = require('./downloadQueue/naming');
-const { noopNotifyPort } = require('./downloadQueue/ports');
+const { noopNotifyPort, guardPort } = require('./downloadQueue/ports');
 
 const {
   createPersistence,
@@ -173,6 +173,9 @@ function createDownloadQueueEngine({
     trimDone: store.trimDoneTasks,
     userDataDir,
     transition: applyStatus,
+    // 淘汰后的补推只走 UI 端口，不回触 notifyQueueChanged（那会再排一次落盘，
+    // 防抖自激）。端口抛错由 guardPort 兜住，不得影响写盘。
+    onTrim: (rows) => guardPort(() => progress.emitQueueUpdated(rows), 'emitQueueUpdated'),
     logger,
   });
   const { persistQueue, loadPersistedQueue } = persistence;
