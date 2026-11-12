@@ -582,3 +582,57 @@ test('getUrl：playInfo 判付费 ⇒ 只说清要付费，不谎称"已自动�
   assert.doesNotMatch(String(r.error), /其他源|已自动尝试/,
     '跨源换源默认已关闭（fallbackPolicy.crossSourceEnabled），这句话是假的');
 });
+
+// ══════════════════════════════════════════════════════════
+// 8. getUrl 扩展名必须跟随**实际选中的 hash**（H3）
+//
+// 缺陷形态（修复前）：ext 由「请求的音质」查表得出，而 hash 选择会在
+// 缺档时静默回落 —— 请求 lossless 但没有 SQFileHash 时，实际拿标准档
+// mp3 的 fileHash 出流，ext 却仍是 flac ⇒ 落盘 .flac 里装着 mp3，
+// 播放器按 flac 解码直接失败，且历史库认为「无损已下载」。
+// 判据：ext 与真正发给 playInfo 的 hash 档位一致。
+// ══════════════════════════════════════════════════════════
+
+/** playInfo 桩：按 URL 里的 hash 决定给不给直链 */
+function playInfoStub(okHashes) {
+  resetStub((url) => {
+    const u = String(url);
+    if (u.includes('getSongInfo.php')) {
+      const m = /hash=([^&]+)/.exec(u);
+      return m && okHashes.includes(m[1]) ? { url: `https://cdn.example/${m[1]}.bin` } : {};
+    }
+    return {}; // trackercdn 备选一律不给，逼出降级链
+  });
+}
+
+test('getUrl: 请求 lossless 但缺 SQ hash → 用标准 hash 出流，ext 必须是 mp3 而非 flac', async () => {
+  playInfoStub(['FILEHASH']);
+  const r = await kugou.getUrl(encodeKugouId('FILEHASH', '', ''), 'lossless');
+  assert.ok(r.url, '应能拿到直链');
+  const used = /hash=([^&]+)/.exec(calls.find(c => c.url.includes('getSongInfo.php')).url)[1];
+  assert.strictEqual(used, 'FILEHASH', '缺 SQ 时应回落标准 hash');
+  assert.strictEqual(r.ext, 'mp3', '实际出流是标准档 mp3，ext 不得谎报 flac');
+});
+
+test('getUrl: 请求 hq 但缺 HQ hash → 用标准 hash 出流，ext 为 mp3', async () => {
+  playInfoStub(['FILEHASH']);
+  const r = await kugou.getUrl(encodeKugouId('FILEHASH', '', ''), 'hq');
+  assert.ok(r.url);
+  assert.strictEqual(r.ext, 'mp3');
+});
+
+test('getUrl: lossless 且 SQ hash 在 → 用 SQ hash，ext=flac（正确路径不回归）', async () => {
+  playInfoStub(['SQHASH']);
+  const r = await kugou.getUrl(encodeKugouId('FILEHASH', 'SQHASH', 'HQHASH'), 'lossless');
+  assert.ok(r.url);
+  const used = /hash=([^&]+)/.exec(calls.find(c => c.url.includes('getSongInfo.php')).url)[1];
+  assert.strictEqual(used, 'SQHASH');
+  assert.strictEqual(r.ext, 'flac');
+});
+
+test('getUrl: 降级链 lossless→hq→standard 全程 ext 跟随最终出流档位', async () => {
+  playInfoStub(['FILEHASH']); // SQ/HQ 都拿不到，只有标准档有
+  const r = await kugou.getUrl(encodeKugouId('FILEHASH', 'SQHASH', 'HQHASH'), 'lossless');
+  assert.ok(r.url, '降级链应最终拿到标准档直链');
+  assert.strictEqual(r.ext, 'mp3', '降到标准档后 ext 必须是 mp3');
+});

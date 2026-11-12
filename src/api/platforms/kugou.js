@@ -73,14 +73,15 @@ async function kugouSearch(keyword, page = 1) {
 async function kugouGetUrl(id, quality = 'standard') {
   const { fileHash, sqHash, hqHash } = decodeKugouId(id);
 
+  // H3：ext 必须跟随**实际选中的 hash 档位**，不能按请求音质查表 ——
+  // 请求 lossless 但缺 SQFileHash 时会静默回落标准档 fileHash（mp3），
+  // 若仍报 flac，落盘文件扩展名与内容不符，播放器按 flac 解码直接失败。
   let hash = fileHash;
-  if (quality === 'lossless' && sqHash) hash = sqHash;
-  else if (quality === 'hq' && hqHash) hash = hqHash;
+  let ext = 'mp3';
+  if (quality === 'lossless' && sqHash) { hash = sqHash; ext = 'flac'; }
+  else if (quality === 'hq' && hqHash) { hash = hqHash; }
 
   if (!hash) return { error: '缺少歌曲 hash', fatal: true };
-
-  const extMap = { lossless: 'flac', hq: 'mp3', standard: 'mp3' };
-  const ext = extMap[quality] || 'mp3';
 
   try {
     // 主链路：m.kugou.com 移动端 playInfo（免费曲直接返回 sharefs URL，
