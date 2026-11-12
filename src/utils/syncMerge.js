@@ -13,7 +13,11 @@
  *   - 历史记录 按 id+source 去重，finishedAt 新者胜；输出 finishedAt 倒序。
  *
  * songKey 与 main/ipc/playlist.js 保持同一规则：只按 id 会跨平台撞车。
+ * 本地歌旧形状 id（=路径）在合并前先升为哈希 id（shared/localTrackId.mjs），
+ * 同一文件的新旧形状条目按 songKey 并集时自然收敛为一条。
  */
+
+const { migrateLocalSongIds } = require('../shared/localTrackId.mjs');
 
 function songKey(s) {
   return String(s && s.id) + ':' + String((s && s.source) || '');
@@ -63,10 +67,10 @@ function repairIds(list, prefix) {
 }
 
 function mergePlaylists(local, remote) {
-  const out = repairIds(local, 'pl').filter(p => p.id != null).map(p => ({ ...p }));
+  const out = repairIds(migrateLocalSongIds(local).playlists, 'pl').filter(p => p.id != null).map(p => ({ ...p }));
   const byId = new Map(out.map(p => [String(p.id), p]));
 
-  for (const r of repairIds(remote, 'pl')) {
+  for (const r of repairIds(migrateLocalSongIds(remote).playlists, 'pl')) {
     if (!r || r.id == null) continue;
     const key = String(r.id);
     const l = byId.get(key);

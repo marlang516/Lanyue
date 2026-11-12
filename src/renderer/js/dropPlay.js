@@ -12,6 +12,7 @@
  */
 
 import { AUDIO_EXT_RE, splitTitleArtist } from './m3uToPlaylist.js';
+import { migrateLocalSong } from '../../shared/localTrackId.mjs';
 
 export const MAX_DROP_FILES = 50;
 
@@ -55,17 +56,20 @@ export function filterDropRows(queue) {
 
 /**
  * 纯函数：恢复持久化队列前消毒 {queue, playIdx}。
- * 无拖放行时原样返回同一对象（player-sync 行为零变化）；有则滤行，
- * 并把 playIdx 重映射到原当前行的新位置（原行被滤则回 0）。
+ * 无拖放行且无旧形状本地行（id=路径）时原样返回同一对象（player-sync
+ * 行为零变化）；有则滤行/迁移，并把 playIdx 重映射到原当前行的新位置
+ * （原行被滤则回 0）。
  */
 export function sanitizeSavedQueue(saved) {
   if (!saved || !Array.isArray(saved.queue) || !saved.queue.length) return saved;
-  const q = filterDropRows(saved.queue);
-  if (q.length === saved.queue.length) return saved;
+  const filtered = filterDropRows(saved.queue);
+  const q = filtered.map(migrateLocalSong);
+  const migrated = q.some((s, i) => s !== filtered[i]);
+  if (filtered.length === saved.queue.length && !migrated) return saved;
   let playIdx = 0;
   const pi = saved.playIdx;
   if (typeof pi === 'number' && pi >= 0 && pi < saved.queue.length) {
-    const idx = q.indexOf(saved.queue[pi]);
+    const idx = filtered.indexOf(saved.queue[pi]);
     if (idx >= 0) playIdx = idx;
   }
   return { ...saved, queue: q, playIdx };

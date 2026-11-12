@@ -4,13 +4,14 @@
  * 的 m3u 导入是「解析→在线搜索→入队下载」；但本地播放器导出的 m3u
  * 大多数的歌本就躺在曲库里，再造一遍下载是浪费。本模块走第二条路：
  * 路径优先、曲名+歌手兜底，两级匹配本地曲库；命中歌折叠成
- * source:'local' + id=filePath（与收藏红心、播放器 file:// 分支同键形，
- * 导入即可播），整单走既有 api.saveUserPlaylist 通道，零新 IPC。
+ * source:'local' + id=localTrackId(filePath)（与收藏红心、播放器 file://
+ * 分支同键形，导入即可播），整单走既有 api.saveUserPlaylist 通道，零新 IPC。
  * 未匹配行只在描述/播报里报数，不静默丢。
  */
 
 import { errBrief } from './errBrief.js';
 import { logger } from './logger.js';
+import { localTrackId } from '../../shared/localTrackId.mjs';
 
 export const AUDIO_EXT_RE = /\.(flac|mp3|m4a|wav|ogg|ape|wma|aac|opus)$/i;
 
@@ -67,7 +68,7 @@ export function parseM3uEntries(text, max = 500) {
 /**
  * 纯函数：m3u 条目 × 曲库 → { matched, unmatched }。
  * 路径命中（大小写/分隔符归一）优先，曲名+歌手相等兜底（任一方缺歌手不卡）；
- * matched 为曲库原歌的折叠副本（source:'local'、id=filePath，播放/红心键形统一）。
+ * matched 为曲库原歌的折叠副本（source:'local'、id=路径哈希，播放/红心键形统一）。
  */
 export function matchEntriesToLibrary(entries, songs) {
   const matched = [];
@@ -87,7 +88,7 @@ export function matchEntriesToLibrary(entries, songs) {
         && String(s.title || '').toLowerCase() === et
         && (!ea || !s.artist || String(s.artist).toLowerCase() === ea)) || null;
     }
-    if (hit) matched.push({ ...hit, source: 'local', id: hit.filePath });
+    if (hit) matched.push({ ...hit, source: 'local', id: localTrackId(hit.filePath) });
     else unmatched.push(e.title);
   }
   return { matched, unmatched };

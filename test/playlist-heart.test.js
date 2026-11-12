@@ -8,6 +8,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { readPlaylistView } = require('./helpers/playlistViewSource.js');
+const { localTrackId } = require('../src/shared/localTrackId.mjs');
 
 const PL_JS = readPlaylistView();
 
@@ -57,7 +58,7 @@ test('详情行红心登记链：heartBtnHtml 渲染即登记，按 HTML 里的�
   assert.strictEqual(calls[0][2].title, '夜的第七章');
 });
 
-test('本地收藏曲在收藏详情的红心：键为 filePath:local，切换触发本地重过滤钩子', async () => {
+test('本地收藏曲在收藏详情的红心：键为 路径哈希:local，切换触发本地重过滤钩子', async () => {
   const mod = await fresh();
   let hookCalls = 0;
   global.window.onLocalFavToggle = () => { hookCalls++; };
@@ -65,10 +66,10 @@ test('本地收藏曲在收藏详情的红心：键为 filePath:local，切换�
   stubEnv(calls);
   const key = keyOf(mod.heartBtnHtml(
     mod.localFavSong({ title: 'A', filePath: 'D:\\song\\b.mp3' }), 'action-btn'));
-  assert.strictEqual(key, 'D:\\song\\b.mp3:local');
+  assert.strictEqual(key, localTrackId('D:\\song\\b.mp3') + ':local');
   await mod.toggleFavoriteByKey(key);
   assert.strictEqual(calls.length, 1);
-  assert.deepStrictEqual(calls[0].slice(0, 2), ['local', 'D:\\song\\b.mp3']);
+  assert.deepStrictEqual(calls[0].slice(0, 2), ['local', localTrackId('D:\\song\\b.mp3')]);
   assert.strictEqual(hookCalls, 1, '本地源收藏切换应触发 onLocalFavToggle');
   delete global.window.onLocalFavToggle;
 });

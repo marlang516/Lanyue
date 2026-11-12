@@ -17,6 +17,7 @@ const { handle } = require('./register');
 // 顶层静态 require：路径写错会在加载期直接抛 MODULE_NOT_FOUND，
 // 不会再被 catch 吞成「再导出从未生效」的静默失败。
 const playlistDomain = require('./playlist/domain');
+const { migrateLocalSongIds, localTrackId } = require('../../shared/localTrackId.mjs');
 
 function register(deps = {}) {
   const domain = deps.domain;
@@ -48,7 +49,9 @@ function register(deps = {}) {
     if (typeof prefs.saveTrash === 'function') prefs.saveTrash(t); else prefs.set(TRASH_KEY, t);
   }
   function _loadPlaylists() {
-    return (typeof prefs.loadUserPlaylists === 'function') ? prefs.loadUserPlaylists() : (prefs.get('userPlaylists') || []);
+    const raw = (typeof prefs.loadUserPlaylists === 'function') ? prefs.loadUserPlaylists() : (prefs.get('userPlaylists') || []);
+    // 旧形状本地行（id=路径）读出即升为哈希 id，迁移结果随下次写回落盘
+    return migrateLocalSongIds(raw).playlists;
   }
   function _savePlaylists(p) {
     if (typeof prefs.saveUserPlaylists === 'function') prefs.saveUserPlaylists(p); else prefs.set('userPlaylists', p);
@@ -228,7 +231,7 @@ function register(deps = {}) {
           .filter((f) => f && f.filePath)
           .map((f) => ({
             source: 'local',
-            id: f.filePath,
+            id: localTrackId(f.filePath),
             filePath: f.filePath,
             title: f.title || f.fileName || '',
             artist: f.artist || '',

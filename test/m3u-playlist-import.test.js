@@ -3,13 +3,14 @@
  *
  * 的 m3u 导入走「解析→在线搜索→入队下载」，但本地玩家导出的 m3u
  * 里大多数歌本就躺在曲库——本增量补第二条路：路径/曲名两级匹配本地曲库，
- * 命中歌折叠成 source:'local'+id=filePath（与收藏红心/播放器 file:// 分支
- * 同键形，导入即可播），走既有 saveUserPlaylist 建单。
+ * 命中歌折叠成 source:'local'+id=localTrackId(filePath)（与收藏红心/播放器
+ * file:// 分支同键形，导入即可播），走既有 saveUserPlaylist 建单。
  */
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
+const { localTrackId } = require('../src/shared/localTrackId.mjs');
 
 const HTML = fs.readFileSync(
   path.join(__dirname, '../src/renderer/index.html'), 'utf8'
@@ -69,7 +70,7 @@ test('matchEntriesToLibrary：路径命中（大小写/分隔符归一）与曲�
   assert.strictEqual(matched.length, 2);
   assert.strictEqual(matched[0].title, '晴天');
   assert.strictEqual(matched[0].source, 'local', '折叠 source=local');
-  assert.strictEqual(matched[0].id, 'D:\\Music\\jay\\qingtian.mp3', 'id=曲库原路径（不是 m3u 里的变体）');
+  assert.strictEqual(matched[0].id, localTrackId('D:\\Music\\jay\\qingtian.mp3'), 'id=曲库原路径的哈希（不是 m3u 里的变体）');
   assert.strictEqual(matched[1].title, 'Hello');
   assert.strictEqual(matched[1].source, 'local');
   assert.deepStrictEqual(unmatched, ['Else']);

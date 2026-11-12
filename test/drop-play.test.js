@@ -110,3 +110,20 @@ test('接线：dragdrop 接管音频投放、player 走 blob 分支、app.js 恢
   const sync = read('js/player-sync.js');
   assert.ok(!/^\s*import\s/m.test(sync), 'player-sync 被其守卫测试禁止 import');
 });
+
+test('sanitizeSavedQueue：旧形状本地行（id=路径）恢复时升为哈希 id，playIdx 不丢', async () => {
+  const { sanitizeSavedQueue } = await fresh();
+  const { localTrackId } = require('../src/shared/localTrackId.mjs');
+  const p = 'F:\\m\\old.mp3';
+  const oldRow = { source: 'local', id: p, title: '旧', filePath: p };
+  const online = { source: 'netease', id: 5, title: 'N' };
+  const saved = { queue: [online, oldRow], playIdx: 1 };
+  const out = sanitizeSavedQueue(saved);
+  assert.notStrictEqual(out, saved, '有迁移则返回新对象');
+  assert.strictEqual(out.queue.length, 2);
+  assert.strictEqual(out.queue[0], online, '在线行原对象不动');
+  assert.strictEqual(out.queue[1].id, localTrackId(p));
+  assert.strictEqual(out.queue[1].filePath, p);
+  assert.strictEqual(out.playIdx, 1, '当前行迁移后仍在原位置');
+  assert.strictEqual(sanitizeSavedQueue(out), out, '无旧形状时二次消毒原样返回');
+});
