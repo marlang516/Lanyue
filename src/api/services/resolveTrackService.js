@@ -105,6 +105,8 @@ function isDecisivelyDeadProbe(probe) {
  * 0.04（酷我占位片 11s/269s）与 0.30（汽水 60s/199s），离 0.5 都有倍数级余量。
  */
 const PREVIEW_MAX_RATIO = 0.5;
+/** 换源候选最多尝试数量：避免在一个明显不可用的歌曲上浪费太多时间 */
+const MAX_CANDIDATE_TRIES = 3;
 
 /** 判定为片段时对外给出的理由与错误码（NO_AUDIO_STREAM 在换源白名单内） */
 const PREVIEW_REJECT = Object.freeze({
@@ -434,8 +436,11 @@ function createResolveTrackService({
           || (isDecisivelyDeadProbe(await probeUrl(r.url, r)) ? DEAD_LINK_REJECT : null)
       : verifyPreviewClip;
 
+    let tried = 0;
     for (const cand of (Array.isArray(candidates) ? candidates : [])) {
       if (!cand || !cand.id || !cand.source) continue;
+      if (tried >= MAX_CANDIDATE_TRIES) break;
+      tried++;
       const r = await trySource(String(cand.id), cand.source, quality, verifyCandidate);
       if (isTrackSuccess(r)) {
         logger.log(`[ResolveTrack] 换源成功: "${song.title}" ${song.source} → ${cand.source}`);

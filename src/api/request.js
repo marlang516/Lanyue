@@ -109,8 +109,8 @@ function getLastHttpStatus() {
 /** 跟着 3xx 重定向（最多 5 次，防止无限递归） */
 const MAX_REDIRECTS = 5;
 /** 请求超时默认值（ms）：普通 API 请求 / 音频链路探测 */
-const DEFAULT_TIMEOUT_MS = 15000;
-const PROBE_TIMEOUT_MS = 8000;
+const DEFAULT_TIMEOUT_MS = 8000;
+const PROBE_TIMEOUT_MS = 5000;
 
 /**
  * SSRF 拦截的唯一错误出口。
@@ -262,7 +262,7 @@ function _followRedirects(url, options, redirectCount = 0) {
  *                                            （保持向后兼容，原代码按 JSON 解析结果取用）
  */
 async function request(url, options = {}) {
-  const maxRetries = options.retries ?? 2;
+  const maxRetries = options.retries ?? 1;
   const baseDelay  = options.retryDelay ?? 200;
   let lastErr = null;
 

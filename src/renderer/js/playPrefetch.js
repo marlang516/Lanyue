@@ -7,7 +7,7 @@
  */
 
 /** 剩余多少秒开始预热下一首（小于这个值预热已经来不及） */
-export const PREFETCH_LEAD_SEC = 20;
+export const PREFETCH_LEAD_SEC = 30;
 /** 预热结果有效期：平台直链本身会过期，宁可过期后走正常取流也不能拿死链去播 */
 export const PREFETCH_TTL_MS = 90 * 1000;
 /** 缓存条数上限（只需覆盖「下一首」，多留一条给快速连点） */
