@@ -39,7 +39,7 @@ export default defineConfig({
               // Electron 的 Node（≥22.12 的 require(esm)）按 module-sync 条件加载，
               // 而不是让 rollup 把整棵 ESM 依赖树（file-type/strtok3/token-types）
               // 塞进 CJS 主进程 bundle —— 后者既膨胀产物又容易在 import.meta 上翻车。
-              external: ['electron', 'NeteaseCloudMusicApi', 'qq-music-api', 'music-metadata'],
+              external: ['electron', '@neteasecloudmusicapienhanced/api', 'qq-music-api', 'music-metadata'],
             },
           },
         },

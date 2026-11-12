@@ -71,7 +71,9 @@
 
 ### 2. 本地 API 依赖上游第三方 SDK
 
-- `NeteaseCloudMusicApi` / `qq-music-api` 为第三方维护，其安全性不在本项目控制范围内。
+- `@neteasecloudmusicapienhanced/api` / `qq-music-api` 为第三方维护，其安全性不在本项目控制范围内。
+  网易云侧已于 2026-11-12 从停更删库的原包换装到该活跃维护 fork（ADR-20261017-01 方案 C），
+  10 个消费方法的方法模块与老包逐字节相同，换装不改变调用契约。
 - 缓解：`overrides` 锁定其脆弱子依赖；打包剔除已验证从不被加载的死依赖链；
   审计门禁（见下）对未豁免的 high/critical 仍然红灯。
 
@@ -90,13 +92,14 @@
 | --- | --- | --- |
 | `unreachable_excluded` | `jade` `constantinople` `uglify-js` `transformers` `clean-css` | 运行时插桩与源码静态引用（`scripts/check-dead-deps.cjs` 的判据）均未命中，且 `build/config.cjs` 已把它们排除出 asar —— 不在发布产物里 |
 | `unreachable_but_packaged` | `useragent` | 同上判据未命中；差别是会打进产物，故单列以示区分 |
-| `upstream_locked_server_never_launched` | `express` `body-parser` `path-to-regexp` | 打进 asar 且被加载（SDK main.js 末尾无条件 `require('./server')`），但全仓唯一的 `createServer+listen` 在 `mcpServer.js`，本项目消费面只有 SDK 的 10 个纯数据方法 —— HTTP 监听分支从未执行，攻击面收敛到「供应链投毒」而非「HTTP 请求解析」。**该组理由由 `npm run check:attack-surface` 每次机器复核**（ADR-20261017-01 方案 A，2026-10-17 落地），四条判据不再满足时 CI 必红 |
-| `upstream_locked` | `NeteaseCloudMusicApi` `node-forge` `basic-ftp` `get-uri` `pac-proxy-agent` | **可达**，但根因是 `NeteaseCloudMusicApi@4.32.0`（registry 最后一版；上游 2024-01-24 因网易法务函删库停更）内置的老依赖树，无可行修复路径。node-forge 1.4.0 即最新；basic-ftp 链仅在 SDK 的 PAC 代理分支实例化，本项目未走该配置分支。处置路线见 `documents/adr/ADR-20261017-01` |
+| `upstream_locked_server_never_launched` | `express` `body-parser` `path-to-regexp` | **漏洞版本与实际加载版本是两棵不同的树**（2026-11-12 运行时插桩实测）：报 high 的 express 4.16.4 / body-parser 1.18.3 / path-to-regexp 0.1.7 来自 `qq-music-api` 内置树，其入口加载时**零命中**；express 4.22.3 / body-parser 1.20.9 / path-to-regexp 0.1.13 来自 `unblockmusic-utils`，只在 SDK `server.js:348` 的路由回调里被 require，而该 server 从未启动。真正被加载的是 express 5.3.0 / body-parser 2.4.0 / path-to-regexp 8.4.2（SDK main.js 末尾无条件 `require('./server')` 拉入），三者均无 advisory。全仓唯一的 `createServer+listen` 在 `mcpServer.js`，本项目消费面只有 SDK 的 10 个纯数据方法 —— HTTP 监听分支从未执行，攻击面收敛到「供应链投毒」而非「HTTP 请求解析」。**该组理由由 `npm run check:attack-surface` 每次机器复核**（ADR-20261017-01 方案 A，2026-10-17 落地），四条判据不再满足时 CI 必红 |
+| `upstream_locked` | `@neteasecloudmusicapienhanced/api` `basic-ftp` `get-uri` `pac-proxy-agent` | **可达**，根因是增强包自身仍依赖 `pac-proxy-agent@7.2.0 → get-uri → basic-ftp` 代理链，advisory 无修复版。该链仅在 SDK `util/request.js:459` 的 PAC 代理分支被实例化（用户配置了 PAC 代理才走），本项目从未使用该配置分支，属配置门分支不可达。`node-forge` 已用 `overrides` 升到 1.4.3（2026-11-04 发布的修复版）移出本组 —— 能修的就修，不靠豁免。处置路线见 `docs/adr/ADR-20261017-01-NeteaseCloudMusicApi-处置评估.md` |
 
 配套约束：
 
-- 能安全升级的已经升了（`overrides`：`proxy-addr@^2.0.8`、`moment@^2.31.0`、`qs@^6.16.0`
-  —— 同大版本或 patch 级），升级后 2816 条单测与 `check:dead-deps` 均通过。
+- 能安全升级的已经升了（`overrides`：`proxy-addr@^2.0.8`、`moment@^2.31.0`、`qs@^6.16.0`、
+  `node-forge@^1.4.3` —— 同大版本或 patch 级），升级后 3673 条单测与 `check:dead-deps`
+  均通过（2026-11-12 换装增强包后实跑）。
 - 豁免清单里若有条目**当前已无对应漏洞**，门禁会报错要求移除 —— 豁免不得只增不减，
   否则它会变成掩盖新问题的集合。
 - `unreachable_*` 的依据是可达性判据，与 `check:dead-deps` 配套：任何人把这些包加回
@@ -104,8 +107,15 @@
 - `upstream_locked_server_never_launched` 的依据是攻击面判据，与 `check:attack-surface`
   配套（已串进 verify 链与 CI）：根包被直接消费、消费面扩散、listen 门被打破或打包
   前提被破坏 —— 任一判据失败，CI 必红，豁免理由当轮重评。
-- 复核触发点：`NeteaseCloudMusicApi` 发布新版本（或换装 enhanced fork，ADR 方案 C）
-  时重新评估 `upstream_locked` 与 `upstream_locked_server_never_launched` 两组。
+- 复核触发点：`@neteasecloudmusicapienhanced/api` 发布新版本时重新评估
+  `upstream_locked` 与 `upstream_locked_server_never_launched` 两组；express 5.x 出现
+  新 advisory、`qq-music-api` 入口开始加载 server、或本项目启用 PAC 代理 / 启动 SDK
+  server 时同样必须重评（换装后新增的触发条件，2026-11-12）。
+- 停更预警：`npm run check:sdk-activity` 查增强包在 registry 的最近发布时间，超过
+  180 天发 `::warning::`。**只 warn 不阻断**（停更不等于有漏洞），且必须触网，
+  所以挂在 CI 与发版流水线的独立步骤，不进离线的 `verify` 链
+  （`test/verify-chain.test.js` 守着这条分工）。老包之死正是无声停更：
+  版本号永远停在最后一版，`npm outdated` 永远不会报它。
 
 残余风险：`upstream_locked` 那批是**真实可达**的依赖，其漏洞并未消除，只是当前无
 可行的修复路径。已确认的实际缓解面：出网请求统一过 `utils/urlGuard.js` 的

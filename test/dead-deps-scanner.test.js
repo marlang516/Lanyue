@@ -10,7 +10,8 @@
  * 具体踩过的两枚（都在同一次改动里一起修掉）：
  *   ① 注释里的 `require('jade')` 举例被当成真引用。写一句「运行时从不
  *      require('jade)」就足以把 CI 弄红，而全仓没有任何一行真的 require 过它 ——
- *      排除项其实仍然安全，却没人敢再碰。31 个排除项此前一个都没撞上，纯属侥幸。
+ *      排除项其实仍然安全，却没人敢再碰。当时 31 个排除项一个都没撞上，纯属侥幸
+ *      （2026-11-12 换装 enhanced fork 后终于撞上一枚：is-promise，见文末回归钉）。
  *   ② DYN_SEG（动态 require 整段抽字面量）把 `require(Buffer.from('x'))` 里的
  *      'x' 当成包名：pkgOf 对任何非内置裸串原样返回，于是 'x' 成了一个「第三方包」。
  *      顺带「字符串里含 require(」（文案/正则里出现这段文本）也照扫不误。
@@ -192,4 +193,38 @@ test('端到端：源码里塞一段注释举例，跑完整扫描器仍判「�
   ].join('\n');
   const hit = [...staticRefsIn(sample, FILE)].filter((p) => excluded.has(p));
   assert.deepEqual(hit, [], `样例里的注释举例被报成排除项被引用：${hit.join(', ')}`);
+});
+
+// ── ④ 换装 enhanced fork 暴露的排除项回归（2026-11-12）──────────
+//
+// 事故复现：`!node_modules/is-promise/**` 原本只服务于 jade 链（根副本 2.2.2，
+// 运行时从不加载）。换装后 express 5 的路由层 router@2.2.0 依赖 is-promise@4.0.0，
+// 且 SDK main.js 末尾无条件 require('./server') 会在**启动时**就加载它。
+// electron-builder 的排除 glob 会连嵌套副本一起删（asar 实证：router 在、
+// router/node_modules/is-promise 不在），于是打包产物启动即弹
+// 「Cannot find module 'is-promise'」错误对话框、main.log 零增量。
+// 判据链全部取自真实文件（lock + router 源码），不靠印象。
+
+test('is-promise 不得进 asar 排除清单（express 5 的 router 加载即 require 它）', () => {
+  const lock = JSON.parse(fs.readFileSync(path.join(ROOT, 'package-lock.json'), 'utf8'));
+  const router = lock.packages['node_modules/router'];
+  assert.ok(router && !router.dev, 'router 应是生产依赖（express 5 的路由层）');
+  assert.ok(router.dependencies && router.dependencies['is-promise'],
+    'router 应依赖 is-promise —— 这条实证链断了说明依赖树又变了，先重测再改排除项');
+  const routerFile = path.join(ROOT, 'node_modules', 'router', 'index.js');
+  assert.ok(staticRefsIn(fs.readFileSync(routerFile, 'utf8'), routerFile).has('is-promise'),
+    'router/index.js 应真的 require is-promise（不是只有 package.json 声明）');
+
+  const excluded = excludedPackages();
+  assert.ok(!excluded.has('is-promise'),
+    'is-promise 又被排除了。electron-builder 的 !node_modules/is-promise/** 会连嵌套副本一起删：'
+    + 'express 5 → router 在 SDK 加载即 require is-promise@4，排除它 = 打包产物启动即 '
+    + 'Cannot find module（2026-11-12 实测崩溃对话框）。jade 链的根副本可以随之进包，体积代价可忽略。');
+});
+
+test('jade 链其余排除项不受 is-promise 移除牵连（仍须排除，且运行时不加载）', () => {
+  const excluded = excludedPackages();
+  for (const p of ['jade', 'uglify-js', 'transformers', 'constantinople', 'clean-css', 'jstransformer', 'promise']) {
+    assert.ok(excluded.has(p), `${p} 的排除项不见了 —— 移除 is-promise 时不该顺带砍掉整条 jade 链`);
+  }
 });

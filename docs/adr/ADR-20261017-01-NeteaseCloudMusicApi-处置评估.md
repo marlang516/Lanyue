@@ -86,17 +86,91 @@
      attack-surface / audit-gate）实跑全绿；
    - **§7 决策清单第 1 项视为已拍板**（用户指令"先做A"），其余三项待确认。
 
+7. **方案 C 已落地（2026-11-12 追记）** —— 用户指令「全部做」即 §7 第 2 项的拍板。
+   按 §7 要求的原子四步一期完成（加依赖 → 换消费面 → 回归 10 方法 → 重写豁免分组），
+   不再出现 2026-10-18 那种「依赖先到、代码后到」的中间态。
+
+   - **换装**：`NeteaseCloudMusicApi@4.32.0` 整棵移出依赖树，换入
+     `@neteasecloudmusicapienhanced/api@^4.41.1`（registry 最新版，`time.modified`
+     2026-10-05；无 install/postinstall 脚本）。消费面仍只有
+     `src/api/platforms/netease.js:9` 一处 require，10 个方法的调用点一行未改；
+     `vite.config.mjs` 的 external 同步换名。
+   - **签名一致性（§5 核实清单第 1 条，拿到比 README 声称更强的证据）**：10 个方法模块
+     （search / song_url / song_detail / lyric / login_status / playlist_detail /
+     personalized / artists / artist_album / album）与老包**逐字节相同**（diff = 0）；
+     `main.js` 头尾一致（末尾那句无条件 `Object.assign(module.exports, require('./server'))`
+     仍在）；传输层 `util/request.js` 虽经重构（355 行差异），但 `{status, body, cookie}`
+     响应形态与 resolve/reject 契约不变。回归：netease / list-cookie-scope /
+     platform-fixture 的既有用例换名后全绿。
+   - **豁免清单对账重写（§5 核实清单第 2 条）——同时修正本 ADR 初版的取证口径**：
+     初版 §4/§6 写的「express 等 5 项高危消失」**只对 SDK 自身那棵树成立，对本仓不成立**。
+     当时的干净环境探针只装了 enhanced 一个包、没有 `qq-music-api`；本仓换装后实测：
+     - `qq-music-api` 自带 express 4.16.4 / body-parser 1.18.3 / path-to-regexp 0.1.7
+       （老包在时被它 hoist 上来的 express 掩盖，老包一走就显形）；
+     - `unblockmusic-utils` 自带 express 4.22.3 / body-parser 1.20.9 / path-to-regexp 0.1.13。
+
+     运行时插桩（hook `Module._load`，按真实解析路径记版本）给出的判据是：
+     qq 入口加载时 express 链**零命中**；unblock 只在 `server.js:348` 的路由回调里被
+     require，而该 server 从未启动；真正被加载的是 express **5.3.0** / body-parser
+     **2.4.0** / path-to-regexp **8.4.2**，三者均无 advisory。
+     故 `upstream_locked_server_never_launched` 组**保留**（3 项），理由从「被加载但不
+     listen」升级为「漏洞版本从不加载 + 加载版本无 advisory + 不 listen」，
+     `_verified` 更新 2026-11-12，`_why` 写明两个毒源与插桩判据。
+   - **node-forge 能修就修，不进豁免**：初版记「无修复版」在 2026-10-17 属实，但
+     **1.4.3 已于 2026-11-04 发布并修掉该 advisory**。lock 里之所以还留着 1.4.0，
+     是因为它满足 `^1.4.0`、npm 不会主动升 patch —— 加 `overrides: node-forge ^1.4.3`
+     后实测升到 1.4.3，该项从豁免清单移出（留着会被 stale 判据判红）。
+   - **`upstream_locked` 收敛为 4 项**：增强包根 + `pac-proxy-agent` + `get-uri` +
+     `basic-ftp`。代理链仍只在 `util/request.js:459` 的 PAC 分支实例化（本项目从未
+     配置该分支），advisory 无修复版，属配置门分支不可达。
+   - **活跃度门禁（§5 核实清单第 3 条）**：新增 `scripts/check-sdk-activity.cjs` 与
+     `npm run check:sdk-activity`，查 registry 的 `time.modified`，超 **180 天**发
+     `::warning::`。判据以纯函数 `evaluate({modified, now, maxAgeDays})` 导出供测试
+     （含 180/181 边界与「发布时间在未来」的时钟偏差防护）；**任何分支都返回 0** ——
+     停更不等于有漏洞，网络失败也只 warn 放行。因必须触网，挂 ci.yml / release.yml
+     的独立步骤，**不进离线 verify 链**（`test/verify-chain.test.js` 守着这条分工）。
+   - **上游打包缺陷（如实记录，非本项目引入）**：enhanced 的 npm tarball 里 `files`
+     声明了 `data` 目录却实际缺失 `china_ip_ranges.txt`，require 时打一条 `[ERROR]`
+     日志后走 fallback（随机 116.x 前缀）——**与老包行为完全一致**（老包
+     `util/index.js` 根本没有 ranges 逻辑），且 `X-Real-IP` 只在调用方传 `realIP`
+     时才设置，本项目从不传。属日志噪声，不影响功能。
+   - **换装暴露并修复了一处发版级打包回归（is-promise）**：jade 链排除项
+     `!node_modules/is-promise/**` 原本只删根副本 2.2.2（运行时不加载）；换装后
+     express 5 的路由层 `router@2.2.0` 依赖 `is-promise@4.0.0`，且 SDK main.js 末尾
+     无条件 `require('./server')` 在**启动时**就加载它。electron-builder 的排除 glob
+     连嵌套副本一起删（asar 实证：`router` 在、`router/node_modules/is-promise` 不在），
+     打包产物启动即弹「Cannot find module 'is-promise'」错误对话框、main.log 零增量
+     （运行时冒烟 2/8）。`check:dead-deps` 的按名匹配恰好抓对了这一条。
+     处置：把 is-promise 移出排除清单（jade 链根副本随之进包，体积代价可忽略），
+     回归钉在 `test/dead-deps-scanner.test.js`（lock + router 源码的实证链 + 排除断言，
+     先红后绿）。同批系统排查其余排除项的「活父包声明依赖」冲突：`jade`（qq 入口
+     插桩零加载）、`decamelize`（qrcode 仅 CLI bin 用 yargs，库路径不碰）、
+     `source-map`（escodegen 惰性 require，属从未使用的 PAC 链）均有不可达实证，保留排除。
+   - **门禁实跑**：`audit:deps` 绿（豁免 13 项 = 5 + 1 + 3 + 4，未豁免 high/critical
+     **0**，另记录 6 项 moderate/low）；`check:attack-surface` 四条判据全绿；
+     `check:dead-deps` 30 个排除项全绿；全量 **3675** 测试 0 fail，lint 0 error
+     （25 条既有 warning 基线不变），tsc 与 vue-tsc 均 0 error；
+     `build` + `package:smoke` + `smoke:asar` **18/18** + `smoke:release` **8/8**
+     （is-promise 修复前运行时冒烟为 2/8：启动即崩、main.log 零增量）。
+     新增 `test/netease-sdk-swap.test.js` 10 例 + `test/sdk-activity.test.js` 4 例
+     + `test/dead-deps-scanner.test.js` 2 例回归钉。
+     另核实 asar 布局与磁盘 npm 布局不同（electron-builder 会重新 hoist）：
+     包内 SDK 自带嵌套 express 5.3.0 / body-parser 2.4.0，根上的 express 4.22.3
+     是无活消费者的孤儿 hoist —— 「加载版本无 advisory」的结论在两种布局下都成立。
+
 ## 7. 待用户拍板（决策清单）
 
 - [x] 是否接受"维持现状 + 收紧豁免标签"（方案 A）作为本轮动作？—— **已拍板并落地**（见 §6 追记 6）
-- [ ] 是否同意把方案 C（换装 `@neteasecloudmusicapienhanced/api`，并配套回归 + 豁免清单重写 + 活跃度门禁判据）排进下一迭代？
-  - **未拍板，且已预置的依赖已撤回**（2026-10-18 收口）：`package.json` 曾被提前加入
+- [x] 是否同意把方案 C（换装 `@neteasecloudmusicapienhanced/api`，并配套回归 + 豁免清单重写 + 活跃度门禁判据）排进下一迭代？—— **已拍板并落地**（用户指令「全部做」，2026-11-12；见 §6 追记 7）
+  - **历史记录：曾提前预置依赖并已撤回**（2026-10-18 收口）：`package.json` 曾被提前加入
     `@neteasecloudmusicapienhanced/api@4.41.1`，但全仓零引用（`src/api/platforms/netease.js`
     照旧走 `NeteaseCloudMusicApi`），而 `npm run audit:deps` 因此必红——它作为直接依赖带着一枚
     未豁免的 high 告警，v1.0.37 发版闸被它卡住。拍板前把一个带高危告警的包原样打进 asar
     是净增风险，故依赖与 `package-lock.json` 一并回退到发版基线（撤回前的 lock 已另存备份）。
-    方案 C 若要推进，请在拍板后作为独立一期落地：加依赖 → 换 `netease.js` 消费面 → 回归
-    10 个方法 → 重写豁免分组，四步一起做，不再出现「依赖先到、代码后到」的中间态。
+  - **本次落地严格遵守当时定下的原子约束**：加依赖 → 换 `netease.js` 消费面 → 回归
+    10 个方法 → 重写豁免分组，四步一期完成，未出现「依赖先到、代码后到」的中间态；
+    `test/netease-sdk-swap.test.js` 把这条约束钉成用例（依赖与消费面必须同时在场、
+    老包名在依赖树与消费面零残留）。
 - [ ] 方案 B（自研 10 方法）是否降级为"长期观察项"，仅在 C 失效或合规压力升级时启动？
 - [ ] 网易平台在什么触发条件下走方案 D（下线该源）——法务再次发函 / 包被接管 / 其它？
 

@@ -93,7 +93,7 @@ music-downloader/
 | electron | 桌面应用框架 |
 | electron-updater | GitHub Releases 自动更新 |
 | music-metadata | 音频元数据读取（MP3/FLAC/M4A 全格式） |
-| NeteaseCloudMusicApi | 网易云音乐 API |
+| @neteasecloudmusicapienhanced/api | 网易云音乐 API（社区活跃维护 fork；原包上游已停更删库） |
 | qq-music-api | QQ 音乐 API |
 | node-id3 | MP3 ID3 标签写入 |
 | iconv-lite | GBK 编码歌词解码（Windows 兼容） |

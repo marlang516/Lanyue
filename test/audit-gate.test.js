@@ -83,7 +83,7 @@ test('攻击面日志四组缺一不可：upstream_locked_server_never_launched 
     '该组 _why 必须指明机器判据挂钩（scripts/audit-attack-surface.cjs）');
   // SDK 自身不可归入该组 —— 它的 HTTP 服务部分确实存在（server.js 被要求加载），
   // 真正锁死它的点是「消费面只有纯数据方法」；SDK 归 upstream_locked。
-  assert.ok(!g.packages.includes('NeteaseCloudMusicApi'),
+  assert.ok(!g.packages.includes('@neteasecloudmusicapienhanced/api'),
     'SDK 根包不属于 server_never_launched 组（server.js 是被无条件加载的）');
 });
 
