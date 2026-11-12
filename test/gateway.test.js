@@ -369,3 +369,51 @@ test('EMPTY: 各构造器返回新对象，避免调用方共享可变引用', (
   assert.deepStrictEqual(EMPTY.albumResult(), { albums: [], total: 0 });
   assert.deepStrictEqual(EMPTY.singerResult(5), { singers: [], total: 0, page: 5 });
 });
+
+// ══════════════════════════════════════════════════════════
+// searchRaw：聚合搜索专用 —— 错误必须向上抛，fanOut 才能标记失败源
+//
+// M1：search 的 safeRun 把平台异常吞成 []，fanOut 里 ok 恒为 true，
+// searchMusic('all') 的 failed[] 永远是空的，渲染层的「某源搜索失败」
+// 提示从不触发。聚合路径需要一条**不吞错**的搜索出口。
+// ══════════════════════════════════════════════════════════
+
+test('searchRaw: 平台抛错时向上 reject（不吞成 []）', async () => {
+  const reg = makeRegistry({
+    p: withCaps({ search: async () => { throw new Error('boom'); } }),
+  });
+  const gw = createPlatformGateway({ registry: reg });
+  await assert.rejects(() => gw.searchRaw('p', 'x'), /boom/);
+});
+
+test('searchRaw: 正常返回平台结果，并注入 cookie', async () => {
+  let seenCookie = null;
+  const reg = makeRegistry({
+    p: withCaps({
+      search: async (kw, page, cookie) => { seenCookie = cookie; return [{ title: kw, page }]; },
+    }),
+  });
+  const gw = createPlatformGateway({ registry: reg, getCookie: () => 'RAW_CK' });
+  const r = await gw.searchRaw('p', 'abc', 2);
+  assert.deepStrictEqual(r, [{ title: 'abc', page: 2 }]);
+  assert.strictEqual(seenCookie, 'RAW_CK');
+});
+
+test('searchRaw: 未知平台 / 无 search 能力时 reject（聚合需知道该源不可用）', async () => {
+  const reg = makeRegistry({ x: withCaps({}) });
+  const gw = createPlatformGateway({ registry: reg });
+  await assert.rejects(() => gw.searchRaw('nope', 'k'), /不存在|无 search/);
+  await assert.rejects(() => gw.searchRaw('x', 'k'), /不存在|无 search/);
+});
+
+test('fanOut + searchRaw: 抛错平台 ok=false，正常平台 ok=true 且结果按位回填', async () => {
+  const reg = makeRegistry({
+    good: withCaps({ search: async () => [{ id: 'g1' }] }),
+    bad: withCaps({ search: async () => { throw new Error('bad down'); } }),
+  }, ['good', 'bad']);
+  const gw = createPlatformGateway({ registry: reg });
+  const results = await gw.fanOut(['good', 'bad'], (id) => gw.searchRaw(id, '晴天', 1));
+  assert.deepStrictEqual(results.map((r) => [r.platform, r.ok]), [['good', true], ['bad', false]]);
+  assert.deepStrictEqual(results[0].value, [{ id: 'g1' }]);
+  assert.strictEqual(results[1].value, null);
+});

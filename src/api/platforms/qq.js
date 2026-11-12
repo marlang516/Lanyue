@@ -153,15 +153,15 @@ async function qqGetSingerAlbums(singerMid, pageNo = 1, pageSize = 20) {
         id: String(a.album_id || ''),
         mid: a.album_mid || '',
         title: a.album_name || '',
-        artist: result?.data?.name || '',
+        artist: result?.name || '',
         cover: a.album_mid
           ? `https://y.qq.com/music/photo_new/T002R300x300M000${a.album_mid}.jpg`
           : '',
         publishTime: a.publish_date || '',
         source: 'qq',
       })),
-      total: result?.data?.total || list.length,
-      singerName: result?.data?.name || '',
+      total: result?.total || list.length,
+      singerName: result?.name || '',
     };
   } catch (e) {
     logger.warn('[qq] getSingerAlbums 失败:', e.message);
@@ -230,7 +230,9 @@ async function qqSearch(keyword, page = 1) {
     }));
   } catch (e) {
     logger.warn('[qqSearch] 失败:', e.message);
-    return [];
+    // M1：向上抛错，聚合搜索才能把 qq 记入 failed[]。
+    // 单源搜索由 gateway.search 的 safeRun 兜底为 []，UX 不变。
+    throw e;
   }
 }
 

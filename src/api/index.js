@@ -79,8 +79,8 @@ async function searchMusic(keyword, source, page = 1, opts) {
   if (!keyword || typeof keyword !== 'string' || !keyword.trim()) {
     return { songs: [], source: source || 'all', error: '搜索关键词不能为空' };
   }
-  // M11: gateway.search 内部 safeRun 已吞异常并回退 []，永不 throw——
-  // 原先这里的 try/catch 与 errors 收集是死代码，删除后行为不变
+  // 聚合走 searchRaw（不吞错）：平台异常由 fanOut 捕获并标记 ok=false，
+  // failed[] 才能真正报出挂掉的源（M1）。单源路径仍走 search 的兜底。
   if (source === 'all') {
     // all: 并行搜索所有平台的「请求的那一页」。
     // aggregateLimit 等于该源搜索页大小（见各平台 manifest）：再往下截
@@ -91,7 +91,7 @@ async function searchMusic(keyword, source, page = 1, opts) {
     const active = plan.slots.filter((s) => s.limit > 0);
     const results = await gateway.fanOut(
       active.map((s) => s.id),
-      (id) => gateway.search(id, keyword, plan.page),
+      (id) => gateway.searchRaw(id, keyword, plan.page),
     );
     const failed = [];
     const groups = results.map((r, i) => {
