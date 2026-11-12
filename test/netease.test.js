@@ -10,10 +10,10 @@
  *   2. fee 语义互换 → 把「充钱能解决」说成「版权没有」，用户永远不会去填 Cookie
  *   3. catch 挪出循环 → 首个品质网络抖动就整首失败（本该降级成功）
  *
- * 打桩方式：替换 require.cache 里 NeteaseCloudMusicApi 的导出（沿用
+ * 打桩方式：替换 require.cache 里 @neteasecloudmusicapienhanced/api 的导出（沿用
  * test/kugou.test.js 对 src/api/request 的已验证手法），再清掉适配器模块缓存重新
- * require。适配器顶层 `const ncm = require('NeteaseCloudMusicApi')` 已捕获引用，
- * 所以必须换「模块导出对象本身」。
+ * require。适配器顶层 `const ncm = require('@neteasecloudmusicapienhanced/api')`
+ * 已捕获引用，所以必须换「模块导出对象本身」。
  *
  * 未命中即抛（本文件的核心守卫）：
  *   - 桩只提供白名单方法，调用白名单外的方法**立即抛错并记账**。
@@ -27,8 +27,8 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-// ── 打桩：NeteaseCloudMusicApi ───────────────────────────────
-const SDK_PATH = require.resolve('NeteaseCloudMusicApi');
+// ── 打桩：@neteasecloudmusicapienhanced/api ──────────────────
+const SDK_PATH = require.resolve('@neteasecloudmusicapienhanced/api');
 const realSdk = require(SDK_PATH);
 
 /** 适配器实际会用到的方法；新增 SDK 依赖必须显式加进来 */

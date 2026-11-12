@@ -59,11 +59,18 @@ module.exports = {
     //      uglify-js 引用，均无旁路依赖。
     //
     // ⚠️ 与 express 的区别：express 虽也只被 server.js 使用，但
-    // NeteaseCloudMusicApi/main.js 末尾有一句**无条件的**
+    // @neteasecloudmusicapienhanced/api 的 main.js 末尾有一句**无条件的**
     //   Object.assign(module.exports, require('./server'))
     // 会在加载即拉入 express 整棵树 —— 故 express/body-parser/raw-body/
     // finalhandler/serve-static 等**不可删**。切勿照着「server 才用」
     // 的直觉一刀切。
+    //
+    // 换装后实测（2026-11-12，运行时插桩）：真正被加载的是 express 5.3.0 /
+    // body-parser 2.4.0 / path-to-regexp 8.4.2，三者均无 advisory。
+    // audit 报 high 的 express 4.16.4 与 4.22.3 分别来自 qq-music-api 与
+    // unblockmusic-utils 各自内置的树，从不被加载（qq 入口插桩零命中；
+    // unblock 只在从未启动的 server 路由回调里 require）——
+    // 见 scripts/audit-allowlist.json 的 upstream_locked_server_never_launched 组。
     //
     // 维护提示：若将来升级 qq-music-api 到改用 jade 渲染的接口，需先
     // 运行 scripts/check-dead-deps.cjs 复验，再移除本段排除项。
@@ -74,7 +81,13 @@ module.exports = {
     '!node_modules/transformers/**',
     '!node_modules/constantinople/**',
     '!node_modules/character-parser/**',
-    '!node_modules/is-promise/**',
+    // ⚠️ is-promise **故意不在排除清单里**（2026-11-12，换装 enhanced fork 后）：
+    // 它曾是 jade 链成员（根副本 2.2.2，运行时不加载），但 express 5 的路由层
+    // router@2.2.0 依赖 is-promise@4.0.0，且 SDK main.js 末尾无条件
+    // require('./server') 会在启动时就加载它。electron-builder 的
+    // !node_modules/is-promise/** 会连嵌套副本一起删 —— 实测排除它之后
+    // 打包产物启动即弹「Cannot find module 'is-promise'」、main.log 零增量。
+    // 根副本随之进包的体积代价可忽略；回归钉在 test/dead-deps-scanner.test.js。
     '!node_modules/jstransformer/**',
     '!node_modules/promise/**',
     '!node_modules/asap/**',

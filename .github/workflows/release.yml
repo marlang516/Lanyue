@@ -120,6 +120,12 @@ jobs:
       # 「server 从未启动」豁免理由的机器复核（ADR-20261017-01 方案 A，2026-10-17）
       - name: Attack surface check
         run: npm run check:attack-surface
+      # SDK 上游活跃度（ADR-20261017-01 方案 C 核实清单第 3 条，2026-11-12）：
+      # 与 ci.yml 同名步骤逐行相同。老包之死是无声停更（法务函 → 删库），
+      # npm outdated 永远不会报它。本步骤查最近发布时间，超 180 天发 warn ——
+      # 只 warn 不阻断，触网，所以不进离线 verify 链（test/verify-chain.test.js 守着分工）。
+      - name: SDK activity check (warn only)
+        run: npm run check:sdk-activity
       - name: Unit tests
         # 并发 2 + 重试 3 次，并把失败用例名以 annotation 形式暴露。
         #

@@ -2,11 +2,13 @@
  * 网易云音乐平台实现
  *
  * 依赖：
- *   - ncm: NeteaseCloudMusicApi 第三方 SDK
+ *   - ncm: @neteasecloudmusicapienhanced/api 第三方 SDK
+ *     （NeteaseCloudMusicApi 的活跃维护 fork，ADR-20261017-01 方案 C；
+ *     10 个被消费方法模块与老包逐字节一致）
  *   - getCookie(platform): 从 cookieStore 读 cookie
  */
 
-const ncm = require('NeteaseCloudMusicApi');
+const ncm = require('@neteasecloudmusicapienhanced/api');
 const logger = require('../../utils/logger');
 const { asSong } = require('../songShape');
 const { AppError } = require('../../shared/errors');

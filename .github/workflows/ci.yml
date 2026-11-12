@@ -101,6 +101,13 @@ jobs:
       - name: Attack surface check
         run: npm run check:attack-surface
 
+      # SDK 上游活跃度（ADR-20261017-01 方案 C 核实清单第 3 条，2026-11-12）：
+      # 老包之死是无声停更（法务函 → 删库），npm outdated 永远不会报它。
+      # 本步骤查最近发布时间，超 180 天发 warn —— 只 warn 不阻断，触网，
+      # 所以挂在这里而不是离线 verify 链（test/verify-chain.test.js 守着分工）。
+      - name: SDK activity check (warn only)
+        run: npm run check:sdk-activity
+
       # 测试不触网，但大量用例直接碰文件系统与平台分支（符号链接复核 / 目录沙箱 /
       # 路径拼接 / 媒体探测），故 runner 与打包、与用户真实环境保持一致：windows-latest
       # （2026-10-13 改：放在 ubuntu 上时 CI 连续红，而同一份代码在 Windows 上全绿）

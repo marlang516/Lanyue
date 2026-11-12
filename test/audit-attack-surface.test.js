@@ -40,21 +40,21 @@ test('B 打包前提：分组包被 build/config.cjs 排除 ⇒ 红（无任何�
 });
 
 test('C 子路径加载：SDK 的 server/main 被显式引入 ⇒ 两条判据同时红（子路径 + 消费面）', () => {
-  const r = evaluate({ files: [f('src/y.js', "require('NeteaseCloudMusicApi/server');")], excluded: ok() });
+  const r = evaluate({ files: [f('src/y.js', "require('@neteasecloudmusicapienhanced/api/server');")], excluded: ok() });
   assert.ok(r.some((s) => s.startsWith('C ') && /\/server/.test(s)), JSON.stringify(r));
   assert.ok(r.some((s) => s.startsWith('C ') && /消费面/.test(s)), JSON.stringify(r));
 });
 
 test('C 消费面扩散：第二个模块也加载 SDK 根路径 ⇒ 红（不含子路径字符串）', () => {
   const r = evaluate({
-    files: [f(SDK_CONSUMER, "require('NeteaseCloudMusicApi');"),
-            f('src/a.js', 'require("NeteaseCloudMusicApi");')],
+    files: [f(SDK_CONSUMER, "require('@neteasecloudmusicapienhanced/api');"),
+            f('src/a.js', 'require("@neteasecloudmusicapienhanced/api");')],
     excluded: ok(),
   });
   assert.ok(r.some((s) => s.startsWith('C ') && /消费面/.test(s)), JSON.stringify(r));
   // 单引号形态同样被抓住
   const r2 = evaluate({
-    files: [f(SDK_CONSUMER, ''), f('src/a.js', "require('NeteaseCloudMusicApi');")], excluded: ok(),
+    files: [f(SDK_CONSUMER, ''), f('src/a.js', "require('@neteasecloudmusicapienhanced/api');")], excluded: ok(),
   });
   assert.ok(r2.some((s) => s.startsWith('C ') && /消费面/.test(s)), JSON.stringify(r2));
 });
@@ -80,8 +80,8 @@ test('.listen( 与 createServer 的两种形态都被启动门抓住（含不带
 test('正向基线：真仓形态不红 —— 消费面唯一、MCP listen 在许可清单、排除项为空', () => {
   const r = evaluate({
     files: [
-      f(SDK_CONSUMER, "// 文档示例 require('express') 不算；import 变体 require(_'NeteaseCloudMusicApi'_) 也不算违规\n"
-        + "const ncm = require('NeteaseCloudMusicApi');"),
+      f(SDK_CONSUMER, "// 文档示例 require('express') 不算；import 变体 require(_'@neteasecloudmusicapienhanced/api'_) 也不算违规\n"
+        + "const ncm = require('@neteasecloudmusicapienhanced/api');"),
       f(LISTEN_ALLOWED[0], 'server = http.createServer(fn); server.listen(port, "127.0.0.1");'),
     ],
     excluded: ok(),

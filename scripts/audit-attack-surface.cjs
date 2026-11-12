@@ -3,15 +3,19 @@
  * 攻击面门禁 —— 让 audit-allowlist.json 里「server 从未启动」这句豁免理由
  * 每次都能被机器重新验证，而不是停留在上次的分析结论上。
  *
- * 背景（完整取证见 documents/adr/ADR-20261017-01）
+ * 背景（完整取证见 docs/adr/ADR-20261017-01）
  * ------------------------------------------------------------------
- * NeteaseCloudMusicApi/main.js 末尾有一句**无条件的**
+ * 2026-11-12 方案 C 换装 @neteasecloudmusicapienhanced/api 后的事实
+ * （运行时插桩实测）：增强包 main.js 末尾仍有一句**无条件的**
  *   Object.assign(module.exports, require('./server'))
- * 加载 SDK 即把 express 整棵树拉进运行时 —— 所以 express/body-parser/
- * path-to-regexp 必须留在 asar 里（build/config.cjs 明令注释不可删）。
- * 但本项目对 SDK 的消费面只有 src/api/platforms/netease.js 的 10 个纯数据
- * 方法，server.js 的 HTTP 监听分支从未执行。「带漏洞的 express 4 在运行时
- * 存在」与「它能被远程 HTTP 请求打中」是两回事：前者要求供应链可信，后者
+ * 加载 SDK 即把 express 5.3.0 整棵树拉进运行时（无 advisory）—— 所以
+ * express/body-parser/path-to-regexp 仍必须留在 asar 里。audit 按包名报的
+ * high 落在**从不被加载的旧版本**上：qq-music-api 的 express 4.16.4 链
+ * （入口 node/index.js 不 require server，插桩零命中）与 unblockmusic-utils
+ * 的 express 4.22.3 链（只在增强包 server.js 的路由回调里 require）。
+ * 本项目对 SDK 的消费面只有 src/api/platforms/netease.js 的 10 个纯数据
+ * 方法，server.js 的 HTTP 监听分支从未执行。「带漏洞的 express 4 在依赖树
+ * 里」与「它能被远程 HTTP 请求打中」是两回事：前者要求供应链可信，后者
  * 才是真正的漏洞可达 —— 本检查把后者的判据固化下来，每次 CI 复核。
  *
  * 四条判据（对 src/ 全部 .js，用 check-dead-deps 的 codeMask 只看真代码：
@@ -19,12 +23,13 @@
  * 出现的形态）
  *   A. 直达使用：分组包（express/body-parser/path-to-regexp）若被 src/
  *      下任何文件直接 require/import ⇒ 失败 —— 有人开始直接写 server 代码，
- *      「分组包无直接代码消费」的前提被打破。
- *   B. 打包前提：分组包不得被 build/config.cjs 排除 —— SDK 加载即 require
- *      它们，被排除必然 Cannot find module。与 check:dead-deps 互逆互补：
- *      那条闸防「被排除却被引用」（仓库自己的排除项失效），本条防
- *      「被引用却被排除」（上游打包前提失效）。
- *   C. 唯一消费面：require('NeteaseCloudMusicApi') 只允许出现在
+ *      「分组包无直接代码消费」的前提被打破（根级 express 是 4.16.4，
+ *      直接消费等于把漏洞版本拉进运行路径）。
+ *   B. 打包前提：分组包不得被 build/config.cjs 排除 —— 增强包加载即
+ *      require express 5，被排除必然 Cannot find module。与 check:dead-deps
+ *      互逆互补：那条闸防「被排除却被引用」（仓库自己的排除项失效），
+ *      本条防「被引用却被排除」（上游打包前提失效）。
+ *   C. 唯一消费面：require('@neteasecloudmusicapienhanced/api') 只允许出现在
  *      src/api/platforms/netease.js；显式子路径加载（…/server、…/main）
  *      直接失败 —— 那等于把 HTTP 服务实现拉进项目代码。
  *   D. 启动门：src/ 下 http.createServer / .listen( 的代码级出现点只允许
@@ -52,7 +57,7 @@ const SRCDIR = path.join(ROOT, 'src');
 
 /** 「server 从未启动」分组所承诺的包 —— audit-allowlist.json 同名组的机器判据侧 */
 const GROUP = Object.freeze(['express', 'body-parser', 'path-to-regexp']);
-const SDK = 'NeteaseCloudMusicApi';
+const SDK = '@neteasecloudmusicapienhanced/api';
 const SDK_CONSUMER = 'src/api/platforms/netease.js';
 /** 允许出现 HTTP 监听语句的文件（相对 ROOT 的正斜杠路径） */
 const LISTEN_ALLOWED = Object.freeze(['src/main/mcp/mcpServer.js']);
@@ -61,7 +66,7 @@ const LISTEN_RE = /(?:\bhttp\s*\.\s*)?createServer\s*\(|\.\s*listen\s*\(/g;
 // 字符类要同时收单/双引号：SDK 源码是单引号费 Style，本仓测试串里两种都有。
 // 用字符类 ['"] 表达 —— 不玩 source.replace 字符串变形（多层转义会把替换
 // 做到字符类字面量自身上，产出永远不匹配任何东西的正则）。
-const SDK_SUBPATH_RE = /(?:require|import)?\s*\(?\s*'NeteaseCloudMusicApi\/(?:server|main)'|"(?:require|import)?\s*\(?\s*NeteaseCloudMusicApi\/(?:server|main)"/g;
+const SDK_SUBPATH_RE = /(?:require|import)?\s*\(?\s*'@neteasecloudmusicapienhanced\/api\/(?:server|main)'|"(?:require|import)?\s*\(?\s*@neteasecloudmusicapienhanced\/api\/(?:server|main)"/g;
 
 function collectFiles(dir) {
   const out = [];

@@ -29,7 +29,7 @@ const KEYWORD = '晴天';
 // ⚠️ 加载顺序即正确性：先拿真实传输引用、装好 Module._load 钩子，
 // 之后才 require pluginRegistry / 平台模块 —— 让它们在钩子下捕获到包装层。
 const realRequest = require('../src/api/request');
-const realNcm = require('NeteaseCloudMusicApi');
+const realNcm = require('@neteasecloudmusicapienhanced/api');
 const realQq = require('qq-music-api');
 
 const CASES = require('../test/platform-fixture-expectations');
@@ -88,7 +88,7 @@ const qqWrap = {
 const REQUEST_PATH = require.resolve('../src/api/request');
 const origLoad = Module._load;
 Module._load = function (request, parent, isMain) {
-  if (request === 'NeteaseCloudMusicApi') return ncmWrap;
+  if (request === '@neteasecloudmusicapienhanced/api') return ncmWrap;
   if (request === 'qq-music-api') return qqWrap;
   if (request === '../request' || request === './request') {
     let resolved = null;

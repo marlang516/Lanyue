@@ -8,7 +8,7 @@
  *
  * 机制：test/fixtures/platforms/<id>.search.json 存的是**实测录制的原始响应**
  * （scripts/record-platform-fixtures.js 可重录）。本测试在 Module._load 层拦截
- * 三种传输（src/api/request、NeteaseCloudMusicApi、qq-music-api），把 fixture
+ * 三种传输（src/api/request、@neteasecloudmusicapienhanced/api、qq-music-api），把 fixture
  * 喂给真实的适配器代码，然后断言：
  *   1. 输出条目数 = fixture 中合法条目数（脏条目被过滤，不是整批消失）
  *   2. 每首歌满足统一 Song 形状（shared/dto 的 isSongLike + 类型/无 HTML 残留）
@@ -73,7 +73,7 @@ const qqStub = {
 };
 
 Module._load = function (request, parent, isMain) {
-  if (request === 'NeteaseCloudMusicApi') return ncmStub;
+  if (request === '@neteasecloudmusicapienhanced/api') return ncmStub;
   if (request === 'qq-music-api') return qqStub;
   if (request === '../request' || request === './request') {
     let resolved = null;

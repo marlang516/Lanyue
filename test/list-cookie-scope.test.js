@@ -147,7 +147,7 @@ test('搬家记账：清单只有一个家，取曲目三方法都经统一入�
 
 // ── netease 侧：SDK 到底吃不吃这个 cookie ──────────────────────
 
-const SDK_PATH = require.resolve('NeteaseCloudMusicApi');
+const SDK_PATH = require.resolve('@neteasecloudmusicapienhanced/api');
 const realSdk = require(SDK_PATH);
 const SDK_METHODS = new Set(['playlist_detail', 'album', 'artists']);
 

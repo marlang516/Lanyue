@@ -29,7 +29,8 @@
     "audit:deps": "node scripts/audit-gate.cjs",
     "verify": "npm run lint && npm test && npm run check:dead-deps && npm run check:attack-surface && npm run check:icons && npm run build && npm run smoke:asar",
     "verify:release": "npm run verify && npm run smoke:release",
-    "check:attack-surface": "node scripts/audit-attack-surface.cjs"
+    "check:attack-surface": "node scripts/audit-attack-surface.cjs",
+    "check:sdk-activity": "node scripts/check-sdk-activity.cjs"
   },
   "keywords": [
     "music",
@@ -76,10 +77,10 @@
     "vue-tsc": "^2.2.12"
   },
   "dependencies": {
+    "@neteasecloudmusicapienhanced/api": "^4.41.1",
     "electron-updater": "^6.8.9",
     "iconv-lite": "^0.7.3",
     "music-metadata": "^12.2.0",
-    "NeteaseCloudMusicApi": "^4.32.0",
     "node-id3": "^0.2.9",
     "qq-music-api": "^1.1.2"
   },
@@ -90,6 +91,7 @@
     "proxy-addr": "^2.0.8",
     "moment": "^2.31.0",
     "qs": "^6.16.0",
+    "node-forge": "^1.4.3",
     "music-metadata": "^12.2.0",
     "xml2js": "^0.6.2",
     "morgan": "^1.12.1",

@@ -8,8 +8,9 @@
  * 情况都算失败，而它们的处理方式完全相反：
  *   · 不可达且已排除出包（jade 依赖链）—— 产物里根本没有这份代码，升级它没有
  *     任何收益，只会把发版永久堵死；
- *   · 上游锁死（NeteaseCloudMusicApi 内置的 express 4.16.4 等）—— 根因在已发布的
- *     最新版上游包，跨大版本升级会破坏它的 HTTP 服务行为，只能等上游。
+ *   · 上游锁死（qq-music-api / unblockmusic-utils 内置的 express 4.16.4 等）——
+ *     漏洞版本只存在于从不加载的 server 分支，跨大版本升级会破坏上游行为，
+ *     只能等上游（换装 enhanced fork 后仍如此，见 ADR-20261017-01 方案 C）。
  *
  * 所以这里改成：读 scripts/audit-allowlist.json 的显式豁免（每条带理由与核查
  * 日期），过滤后**剩余的 high/critical 仍然退出码 1**。

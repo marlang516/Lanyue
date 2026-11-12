@@ -166,7 +166,8 @@ async function getHomeSection(section) {
 /**
  * 首页全量推荐（一次性拉全部区块）。
  *
- * 分批原因：避免一次性 7+ 个并发撞到 NeteaseCloudMusicApi 限速。
+ * 分批原因：避免一次性 7+ 个并发撞到网易云接口限速
+ * （请求经 @neteasecloudmusicapienhanced/api 发出，限速来自上游服务端）。
  *   第 1 批：4 个网易云榜单（同域名，串行风险高，故单批）
  *   第 2 批：网易云歌单 + QQ 歌单 + B 站排行（不同域名，可并发）
  *
