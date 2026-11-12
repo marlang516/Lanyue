@@ -105,7 +105,7 @@ test('接线钉：favBatch 形状、search/favorites/HTML/面板落位、旧单�
   assert.match(PALETTE_JS, /id: 'sr-batchfav'[\s\S]{0,220}?_call\('batchFavorite'\)/);
   // silent 是加参不是改道：单曲调用点保持单参
   assert.match(FAV_JS, /export async function toggleFavoriteByKey\(key, silent\) \{/);
-  assert.match(FAV_JS, /return toggleFavoriteByKey\(favKey\('local', s\.filePath\)\);/);
+  assert.match(FAV_JS, /return toggleFavoriteByKey\(favKey\('local', s\.id\)\);/);
   assert.equal((FAV_JS.match(/toggleFavoriteByKey\(/g) || []).length, 4,
     '定义 + 本地切换/当前曲/红心点击 3 个旧调用点（批量调用在 search.js）');
 });

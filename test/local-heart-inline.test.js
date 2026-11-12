@@ -9,6 +9,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
+const { localTrackId } = require('../src/shared/localTrackId.mjs');
 
 const LOCAL_JS = fs.readFileSync(
   path.join(__dirname, '../src/renderer/js/views/local.js'), 'utf8'
@@ -38,16 +39,16 @@ function stubEnv(favKeys) {
   global.document = { querySelectorAll: () => [] };
 }
 
-test('行内红心：heartBtnHtml(localFavSong(s)) 键为 filePath:local，♥/♡ 随 favoriteKeys', async () => {
+test('行内红心：heartBtnHtml(localFavSong(s)) 键为 路径哈希:local，♥/♡ 随 favoriteKeys', async () => {
   const { localFavSong, heartBtnHtml } = await fresh();
   stubEnv(new Set());
   const off = heartBtnHtml(localFavSong(LOCAL_SONG), 'action-btn');
-  assert.match(off, /data-fav-key="C:\\+music\\+a\.mp3:local"/);
+  assert.match(off, new RegExp('data-fav-key="' + localTrackId('C:\\music\\a.mp3') + ':local"'));
   assert.ok(off.includes('♡') && !off.includes('♥'));
   assert.ok(off.includes('heart-btn') && off.includes('action-btn'));
 
   const { heartBtnHtml: h2 } = await fresh();
-  stubEnv(new Set(['C:\\music\\a.mp3:local']));
+  stubEnv(new Set([localTrackId('C:\\music\\a.mp3') + ':local']));
   const on = h2(localFavSong(LOCAL_SONG), 'action-btn');
   assert.ok(on.includes('♥') && !on.includes('♡'));
   assert.match(on, /fav-on/);

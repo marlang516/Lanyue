@@ -16,6 +16,7 @@ const assert = require('node:assert');
 const {
   mergePlaylists, mergeTemplates, mergeHistory, mergeSnapshotData,
 } = require('../src/utils/syncMerge');
+const { localTrackId } = require('../src/shared/localTrackId.mjs');
 
 const song = (id, source, title) => ({ id, source, title });
 
@@ -161,4 +162,41 @@ test('P2-6：412 重试的二次合并不会把一个条目变成两个', () => 
   const afterSecond = mergePlaylists(afterFirst, bad);     // 412 后重合并（远端内容未变）
   assert.strictEqual(afterSecond.length, 1,
     '同一逻辑条目在重试合并后仍只有一条（旧实现会变成两条并持续扩散）');
+});
+
+// ── 本地曲目 id 去路径化：旧形状快照在合并时收敛为哈希 id ──
+
+test('mergePlaylists: 同文件旧形状（id=路径）与新形状（哈希 id）收敛为一条', () => {
+  const p = 'D:\\music\\same.mp3';
+  const local = [{
+    id: 'a', updatedAt: 2,
+    songs: [{ id: localTrackId(p), source: 'local', title: '新', filePath: p }],
+  }];
+  const remote = [{
+    id: 'a', updatedAt: 1,
+    songs: [{ id: p, source: 'local', title: '旧', filePath: p }],
+  }];
+  const r = mergePlaylists(local, remote);
+  assert.strictEqual(r[0].songs.length, 1, '同一文件不得因 id 形状分裂成两条');
+  assert.strictEqual(r[0].songs[0].id, localTrackId(p));
+  assert.strictEqual(r[0].songs[0].filePath, p);
+  assert.strictEqual(r[0].songs[0].title, '新', '较新者仍为基底');
+});
+
+test('mergePlaylists: 两侧都是旧形状路径 id 时统一升为哈希 id，在线曲不动', () => {
+  const p = 'E:\\m\\x.mp3';
+  const local = [{
+    id: 'a', updatedAt: 2,
+    songs: [
+      { id: p, source: 'local', title: 'L', filePath: p },
+      { id: 7, source: 'netease', title: 'N' },
+    ],
+  }];
+  const remote = [{ id: 'b', updatedAt: 1, songs: [{ id: p, source: 'local', title: 'R', filePath: p }] }];
+  const r = mergePlaylists(local, remote);
+  const a = r.find(x => x.id === 'a');
+  const b = r.find(x => x.id === 'b');
+  assert.strictEqual(a.songs[0].id, localTrackId(p));
+  assert.strictEqual(a.songs[1].id, 7, '在线曲 id 不受迁移影响');
+  assert.strictEqual(b.songs[0].id, localTrackId(p));
 });

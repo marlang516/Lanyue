@@ -15,6 +15,7 @@
 import { errBrief } from './errBrief.js';
 import { logger } from './logger.js';
 import { FAVORITES_PLAYLIST_ID, favKey } from './state.js';
+import { localTrackId } from '../../shared/localTrackId.mjs';
 
 export const HEART_ON = '♥';
 export const HEART_OFF = '♡';
@@ -33,13 +34,13 @@ export function isFavorite(song) {
 }
 
 /**
- * 本地歌曲 → 收藏歌单可存的形态：source='local' + id=filePath。
- * filePath 全局唯一，天然不与其他平台撞键；其余字段（含 filePath 本身）
- * 原样保留，收藏详情里点播放走 player 的 file:// 本地分支。
+ * 本地歌曲 → 收藏歌单可存的形态：source='local' + id=localTrackId(filePath)。
+ * id 是路径哈希（键里不带磁盘路径，导出/同步不外泄）；filePath 本身原样
+ * 保留，收藏详情里点播放走 player 的 file:// 本地分支。
  */
 export function localFavSong(song) {
   if (!song || !song.filePath) return null;
-  return { ...song, source: 'local', id: song.filePath };
+  return { ...song, source: 'local', id: localTrackId(song.filePath) };
 }
 
 export function isLocalFavorite(song) {
@@ -51,12 +52,12 @@ export function toggleLocalFavorite(song) {
   const s = localFavSong(song);
   if (!s) { showToast('收藏失败：歌曲缺少文件路径', 'warn'); return; }
   registerFavSong(s);
-  return toggleFavoriteByKey(favKey('local', s.filePath));
+  return toggleFavoriteByKey(favKey('local', s.id));
 }
 
 /**
- * 播放队列行 → 收藏对象：本地行与本地曲库同走 filePath:local 键
- * （行对象 id 未必是 filePath，直接heart会和本地库红心分裂成两条）；
+ * 播放队列行 → 收藏对象：本地行与本地曲库同走 路径哈希:local 键
+ * （行对象 id 未必是哈希，直接heart会和本地库红心分裂成两条）；
  * 无 id 的行（异常数据）不出红心。
  */
 export function queueFavSong(s) {
@@ -69,7 +70,7 @@ export function queueFavSong(s) {
  * 收藏/取消当前正在播放的歌（命令面板入口）。
  *
  * 五个行面红心只覆盖列表行；主播放器/迷你窗/桌面词上没有点心处。
- * 键对齐直接复用 queueFavSong（本地折叠 filePath:local，与本地库/队列
+ * 键对齐直接复用 queueFavSong（本地折叠 路径哈希:local，与本地库/队列
  * 红心同一颗心），登记后走 toggleFavoriteByKey 的整条切换+播报链。
  */
 export async function toggleFavoriteCurrent() {

@@ -1,13 +1,14 @@
 /**
  * 播放队列行 ♥ 收藏（queueFavSong 键对齐 + 行尾红心）
  *
- * 队列里的本地行 id 未必是 filePath，直接出红心会和本地曲库的
- * filePath:local 键分裂成两条 —— queueFavSong 统一换算；无 id 行不出红心。
+ * 队列里的本地行 id 未必是路径哈希，直接出红心会和本地曲库的
+ * 哈希id:local 键分裂成两条 —— queueFavSong 统一换算；无 id 行不出红心。
  */
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
+const { localTrackId } = require('../src/shared/localTrackId.mjs');
 
 const APP_JS = fs.readFileSync(
   path.join(__dirname, '../src/renderer/js/app.js'), 'utf8'
@@ -30,13 +31,13 @@ async function fresh() {
   return import('../src/renderer/js/favorites.js?tc=' + Math.random());
 }
 
-test('queueFavSong：在线行原样直传；本地行换算 filePath 键；坏数据不出红心', async () => {
+test('queueFavSong：在线行原样直传；本地行换算路径哈希键；坏数据不出红心', async () => {
   const { queueFavSong } = await fresh();
   const netease = { id: 7, source: 'netease', title: 'N' };
   assert.strictEqual(queueFavSong(netease), netease);
   const localRow = { source: 'local', id: 3, title: 'L', filePath: 'E:\\m\\l.mp3' };
   const mapped = queueFavSong(localRow);
-  assert.strictEqual(mapped.id, 'E:\\m\\l.mp3');
+  assert.strictEqual(mapped.id, localTrackId('E:\\m\\l.mp3'));
   assert.strictEqual(mapped.source, 'local');
   assert.strictEqual(mapped.title, 'L');
   assert.strictEqual(queueFavSong({ source: 'local', title: 'no path' }), null);
@@ -44,7 +45,7 @@ test('queueFavSong：在线行原样直传；本地行换算 filePath 键；坏�
   assert.strictEqual(queueFavSong(null), null);
 });
 
-test('队列本地行红心点击链：键 filePath:local，收藏成功触发本地重过滤钩子', async () => {
+test('队列本地行红心点击链：键 哈希id:local，收藏成功触发本地重过滤钩子', async () => {
   const mod = await fresh();
   let hookCalls = 0;
   global.window.onLocalFavToggle = () => { hookCalls++; };
@@ -62,9 +63,9 @@ test('队列本地行红心点击链：键 filePath:local，收藏成功触发�
   };
   const favS = mod.queueFavSong({ source: 'local', id: 3, filePath: 'E:\\m\\l.mp3' });
   const m = /data-fav-key="([^"]*)"/.exec(mod.heartBtnHtml(favS, 'pq-fav'));
-  assert.strictEqual(m[1], 'E:\\m\\l.mp3:local');
+  assert.strictEqual(m[1], localTrackId('E:\\m\\l.mp3') + ':local');
   await mod.toggleFavoriteByKey(m[1]);
-  assert.deepStrictEqual(calls, [['local', 'E:\\m\\l.mp3', 'E:\\m\\l.mp3']]);
+  assert.deepStrictEqual(calls, [['local', localTrackId('E:\\m\\l.mp3'), 'E:\\m\\l.mp3']]);
   assert.strictEqual(hookCalls, 1);
   delete global.window.onLocalFavToggle;
 });

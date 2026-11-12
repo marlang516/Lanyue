@@ -3,13 +3,14 @@
  *
  * 五个行面红心377a837–5943b4a 只覆盖列表行；正在播放的歌（主播放器/迷你窗/
  * 桌面词）没有列表行可点心。本增量补一条命令面板可达的当前曲收藏入口：
- * currentPlaying → queueFavSong 键对齐（本地=filePath:local / 在线=source:id）
+ * currentPlaying → queueFavSong 键对齐（本地=路径哈希:local / 在线=source:id）
  * → registerFavSong 登记 → toggleFavoriteByKey 复用整条切换+播报链，零新 IPC。
  */
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
+const { localTrackId } = require('../src/shared/localTrackId.mjs');
 
 const FAV_JS = fs.readFileSync(
   path.join(__dirname, '../src/renderer/js/favorites.js'), 'utf8'
@@ -51,13 +52,13 @@ test('toggleFavoriteCurrent：在线曲走 source:id 键，先登记再切，成
   assert.strictEqual(calls.toggle[0][1], '42');
 });
 
-test('toggleFavoriteCurrent：本地曲折叠到 filePath:local 键（与本地库红心同源不分裂）', async () => {
+test('toggleFavoriteCurrent：本地曲折叠到 路径哈希:local 键（与本地库红心同源不分裂）', async () => {
   const { toggleFavoriteCurrent } = await fresh();
   const calls = envStub({ cur: { source: 'local', id: 'raw', title: 'T', filePath: 'C:\\m\\a.mp3' } });
   await toggleFavoriteCurrent();
   assert.strictEqual(calls.toggle.length, 1);
   assert.strictEqual(calls.toggle[0][0], 'local');
-  assert.strictEqual(calls.toggle[0][1], 'C:\\m\\a.mp3', '本地键折叠到 filePath');
+  assert.strictEqual(calls.toggle[0][1], localTrackId('C:\\m\\a.mp3'), '本地键折叠到路径哈希 id');
 });
 
 test('toggleFavoriteCurrent：无可收藏曲（未播放/缺 id/本地缺路径）只提示不触 api', async () => {
