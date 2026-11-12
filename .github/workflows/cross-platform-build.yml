@@ -1,0 +1,118 @@
+# 跨平台产物验证 —— 手动触发，绝不发布
+#
+# 为什么需要这条独立流水线：
+#   release.yml 只发 Windows，而 linux/mac 两段配置长期从未被真正执行过。
+#   2026-11-12 实测：在 Windows 宿主上 `electron-builder --linux --x64`
+#   的**打包阶段**能成功（release/linux-unpacked 里是真正的 ELF x86-64
+#   可执行文件，scripts/smoke-asar.js 对它 18/18 全通过），但**封装阶段**
+#   必然失败 —— app-builder-lib/out/toolsets/linux.js:104 在非 Linux 宿主上
+#   一律取 `darwin` 工具目录，而 appimage 工具包只带 darwin/linux 版
+#   mksquashfs ⇒ `spawn …/darwin/mksquashfs ENOENT`；deb 走 getFpmPath()，
+#   win32 上返回裸 `fpm`，要求宿主自备。macOS 的 dmg 更是依赖 hdiutil。
+#
+#   ⇒ 想验证跨平台产物，只能在对应宿主上打。这条流水线就是那个入口。
+#
+# 设计取舍（与 release.yml 同一条思路：会误伤的不自动化）：
+#   1. **只手动触发**：不挂 push / pull_request / schedule。macOS runner
+#      分钟数贵，每次 PR 都跑一遍跨平台打包不划算；需要验证时点一下即可。
+#   2. **绝不发布**：全程 --publish never，不引用任何 secrets，权限收到
+#      contents: read。产物只作为 Action artifact 留存 14 天供人工检查，
+#      不会进 GitHub Releases，也就不会被 electron-updater 推给已装用户。
+#   3. **不签名**：mac 侧显式关掉证书自动发现，避免无证书时打包直接失败。
+#      产物是未签名的验证品，不得当作可分发版本。
+#   4. **asar 冒烟复用既有脚本**：scripts/smoke-asar.js 接受显式路径参数，
+#      Linux/macOS 产物与 Windows 走同一套断言（平台模块齐备、生产依赖树
+#      完整、渲染层 bundle 锚点、图标无水印），不另写一套口径。
+
+name: Cross-Platform Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cross-platform-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Linux：AppImage + deb ──────────────────────────────
+  linux:
+    name: Linux (AppImage + deb)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 22：与 ci.yml 同口径（lockfileVersion 3 + urlGuard 需要 Node 20+）
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build renderer & main
+        run: npm run build
+
+      - name: Package Linux artifacts
+        run: npx electron-builder --config build/config.cjs --linux --x64 --publish never
+
+      # 与 Windows 同一套 asar 断言 —— 跨平台产物的内容正确性不靠肉眼
+      - name: Smoke check Linux asar
+        run: node scripts/smoke-asar.js release/linux-unpacked/resources/app.asar
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lanyue-linux-x64
+          path: |
+            release/*.AppImage
+            release/*.deb
+          if-no-files-found: error
+          retention-days: 14
+
+  # ── macOS：dmg + zip（x64 与 arm64）────────────────────
+  mac:
+    name: macOS (dmg + zip)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build renderer & main
+        run: npm run build
+
+      - name: Package macOS artifacts
+        run: npx electron-builder --config build/config.cjs --mac --x64 --arm64 --publish never
+        env:
+          # 无证书时关掉自动发现，否则 mac 打包会因找不到签名身份而失败
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      # .app 内的 asar 路径随架构目录变化，用 find 定位而不是写死
+      - name: Smoke check macOS asar
+        run: |
+          asar=$(find release -path '*Contents/Resources/app.asar' | head -1)
+          if [ -z "$asar" ]; then
+            echo "::error::未找到 macOS .app 内的 app.asar"
+            exit 1
+          fi
+          node scripts/smoke-asar.js "$asar"
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lanyue-macos
+          path: |
+            release/*.dmg
+            release/*.zip
+          if-no-files-found: error
+          retention-days: 14
