@@ -124,55 +124,71 @@ git push origin HEAD:main --follow-tags      # 本地当前分支 → origin/mai
 - 但走 GitHub 直连时，安装包仍是在「没有签名校验」的状态下被安装的
 - Windows 会显示 SmartScreen 提示（影响首次安装体验）
 
+### 接线已就绪（2026-11-12）——证书到位即自动生效
+
+签名接线已落地，**不需要改 `build/config.cjs`**：electron-builder 原生读取
+`WIN_CSC_LINK` / `CSC_KEY_PASSWORD` 环境变量，`.github/workflows/release.yml`
+已把仓库 Secrets 映射过去，并配了三道护栏：
+
+- **成对闸门**（build job，打包前）：`WIN_CSC_LINK` 与 `WIN_CSC_KEY_PASSWORD`
+  要么都配、要么都不配，半配置直接失败 —— 不会拿空口令去签带口令的 pfx，
+  在打包几分钟后才炸出一个指向 signtool 的误导报错；
+- **事实钉触发器**（quality job）：单测步骤注入 `WIN_CSC_LINK`（只注入证书、
+  不注入口令），证书到位时 `test/update-signature-guard.test.js` 的
+  `RECORDED_STATE` 与 `test/update-trust-wording.test.js` 的措辞钉会**变红
+  逼停发版** —— 这是设计，不是故障：先把下面清单里的「未启用」措辞全部
+  同步，再放行；
+- **notes 随事实分支**：草稿 Release 的签名表述按 build job 的 `signed` 输出
+  分支，不会在签名生效后继续宣称「未做代码签名」。
+
+未配置 secrets 时一切照旧：环境变量展开为空串，electron-builder 显式按
+「无证书」跳过签名，行为与接线前完全一致。
+
 ### 采购到证书后要做的事
 
-1. **配置签名**（`build/config.cjs` 的 `win` 段）：
+1. **买证书**：Authenticode 代码签名证书（OV 或 EV，**不是** SSL 证书）。
+   OV 便宜但 SmartScreen 信誉要慢慢攒；EV 贵但立即获得 SmartScreen 信誉。
+   Azure Trusted Signing（按月订阅）也可行，但需改配置走 `azureSignOptions`，
+   不适用本节的环境变量接线。
 
-   ```js
-   win: {
-     // ...已有配置
-     certificateFile: process.env.WIN_CERT_PFX || undefined,      // 或直接写路径
-     certificateSubjectName: process.env.WIN_CERT_SUBJECT || undefined,
-     // 时戳服务器：没有它签名虽有效但会被「未做可信时间戳」质疑
-     timeStampServer: 'http://timestamp.digicert.com',
-   }
-   ```
+2. **导出并上传 Secrets**（仓库 Settings → Secrets and variables → Actions）：
 
-   建议走环境变量而不是把路径写进配置：证书路径是本机事实，不该进仓库。
+   | Secret | 值 |
+   |---|---|
+   | `WIN_CSC_LINK` | pfx 文件的 base64（PowerShell：`[Convert]::ToBase64String([IO.File]::ReadAllBytes('cert.pfx'))`） |
+   | `WIN_CSC_KEY_PASSWORD` | pfx 的导出口令 |
 
-2. **CI 里注入证书**（`release.yml` 的 build 步骤）：
+   证书与口令**只放 Secrets，绝不提交进仓库**（`test/release-signing-wiring.test.js`
+   钉住 pfx/p12 零入库，secret 只经 env 注入、不进脚本体）。
 
-   ```yaml
-   - name: 还原证书
-     run: echo "${{ secrets.WIN_CERT_PFX_BASE64 }}" | base64 -d > $RUNNER_TEMP\cert.pfx
-   - name: Package
-     run: npx electron-builder --config build/config.cjs --win --x64 --publish never
-     env:
-       CSC_LINK: ${{ runner.temp }}\cert.pfx
-       CSC_KEY_PASSWORD: ${{ secrets.WIN_CERT_PASSWORD }}
-   ```
+3. **下一次发版会被事实钉逼停 —— 按清单在一个 PR 内同步全部措辞**：
 
-   证书与口令放仓库 Secrets，**不要**提交进仓库。
+   - `test/update-signature-guard.test.js`：`RECORDED_STATE` 改为
+     `codeSigningConfigured: true`、`verificationEffective: true`（开关保持 true）
+   - `test/update-trust-wording.test.js`：设置页提示判据从「必须写未启用」
+     翻转为「必须写已启用」，否定对照同步
+   - `src/renderer/js/lang/zh.json` / `src/renderer/js/lang/en.json`：
+     `settings.about.updateSecurityHint` 改为如实的「已启用」表述
+   - `build/config.cjs`：`verifyUpdateCodeSignature` 旁的「当前未启用安装包
+     签名校验」注释段改为已生效
+   - `SECURITY.md` 第四节第 1 条：从「已知未闭合」改写为已闭合
+   - `docs/CODE_REVIEW_2026-09-28.md` 的 P1-1 结论追记闭合
+   - `CHANGELOG.md` 的「安全」小节
 
-3. **验证签名真的生效**（关键：不要只看配置写了什么）
+4. **验证签名真的生效**（关键：不要只看配置写了什么）：
 
    ```powershell
    # 产物必须带 publisherName —— 它是 electron-updater 唯一的校验对象
    Get-Content release\win-unpacked\resources\app-update.yml
    # 安装包签名状态必须是 Valid
-   Get-AuthenticodeSignature 'release\Lanyue-Setup-1.0.36.exe' | Format-List Status,SignerCertificate
+   Get-AuthenticodeSignature 'release\Lanyue-Setup-<版本>.exe' | Format-List Status,SignerCertificate
    ```
 
-4. **同步更新**：
+   时戳不用配：electron-builder 默认 DigiCert RFC3161 时戳（sha256 嵌套签名），
+   证书过期后签名仍有效。
 
-   - `test/update-signature-guard.test.js` 的 `RECORDED_STATE`
-   - `SECURITY.md` 第四节的「已知未闭合项」
-   - `CHANGELOG.md` 的「安全」小节
-   - 确认后镜像兜底闸门会自动放行（`isMirrorFeedTrusted` 读的就是 `publisherName`），
-     可按需决定是否恢复镜像兜底
-
-5. **顺带摘掉一处**：现在更新页常驻显示「当前更新包未启用安装包签名校验」
-   （`settings.about.updateSecurityHint`），签名生效后应改文案或隐藏。
+5. **镜像兜底闸门会自动放行**（`src/main/updateMirror.js` 的 `isMirrorFeedTrusted`
+   读的就是 `publisherName`），可按需决定是否恢复镜像兜底。
 
 ---
 

@@ -131,6 +131,14 @@ module.exports = {
     // 因此：留 true 是为了证书到位那天直接生效，不是为了「现在有防护」。
     // 改证书配置时，请同步核对 test/update-signature-guard.test.js 的 RECORDED_STATE
     // 与设置页的常驻提示（当前显示「未启用安装包签名校验」）。
+    //
+    // ── 接线已就绪（2026-11-12，优化方向 #24）─────────────────
+    // 启用签名不需要改本文件：release.yml 已把仓库 Secrets WIN_CSC_LINK
+    // （base64 的 pfx）与 WIN_CSC_KEY_PASSWORD 映射成 electron-builder 原生
+    // 读取的环境变量，成对配置即自动签名（时戳默认 DigiCert RFC3161），
+    // publisherName 随之进入 app-update.yml，本开关真正生效。证书到位那次
+    // 发版会被事实钉逼停（quality job 的单测步骤能看见 WIN_CSC_LINK）——
+    // 按 docs/RELEASING.md §四 的清单把「未启用」措辞全部同步后再放行。
     verifyUpdateCodeSignature: true,
   },
 

@@ -51,7 +51,7 @@
 
 ### 1.4 签名与校验
 
-- [ ] **证书可用**：签名证书在有效期内，CI secret `CSC_LINK` / `CSC_KEY_PASSWORD` 已配置且未过期。
+- [ ] **证书可用**：签名证书在有效期内，CI secret `WIN_CSC_LINK` / `WIN_CSC_KEY_PASSWORD` 已成对配置且未过期（release.yml 映射为 electron-builder 的 `CSC_LINK` / `CSC_KEY_PASSWORD` 环境变量）。
 - [ ] **代码签名**：安装包与可执行文件已完成 Authenticode 签名（`Get-AuthenticodeSignature` 返回 `Valid`）。
 - [ ] **时间戳**：签名带 RFC3161 时间戳，证书过期后签名仍有效。
 - [ ] **更新包签名**：`latest.yml` 与更新包签名校验开启，`verifyUpdateCodeSignature` 为真实约束（非空转）。

@@ -10,10 +10,14 @@
 # 3. **产物是 Release 资产而不是 Action 直接发布**：先出「草稿 Release」，
 #    由人确认后再 publish。理由是安装包一旦挂上 GitHub Releases，
 #    electron-updater 会立刻把它推给所有已装用户 —— 没有反悔余地。
-# 4. **不碰签名**：本项目尚未配置 Windows 代码签名，签名校验对安装包是空转的
-#    （详见 SECURITY.md 第四节）。等证书到位后，在这里加 CSC_LINK/CSC_KEY_PASSWORD
-#    即可自动生效，届时 verifyUpdateCodeSignature 才真正有约束力。
-#    因此产物与已发布版本都会触发 SmartScreen 提示，这是**已知代价**而非疏漏。
+# 4. **签名接线已就绪，证书未到位**：本项目尚未配置 Windows 代码签名证书，
+#    签名校验对安装包是空转的（详见 SECURITY.md 第四节）。接线（2026-11-12）：
+#    仓库 Secrets 成对配置 WIN_CSC_LINK（base64 的 pfx）与 WIN_CSC_KEY_PASSWORD
+#    后，打包自动签名，verifyUpdateCodeSignature 随之真正生效。证书到位那次
+#    发版会被事实钉（test/update-signature-guard.test.js）逼停 —— 那是设计：
+#    先把 RECORDED_STATE / 配置注释 / 设置页提示 / SECURITY.md 的「未启用」
+#    措辞全部同步再放行（清单见 docs/RELEASING.md §四）。
+#    未配置证书期间产物会触发 SmartScreen 提示，这是**已知代价**而非疏漏。
 # 5. **不发布 macOS/Linux**：仓库脚本目前只对 Windows 有实证（asar 冒烟、native
 #    模块、python 辅助脚本都按 Windows 验证过）。宁可少发，不要发没验证过的产物。
 
@@ -114,6 +118,11 @@ jobs:
       - name: Attack surface check
         run: npm run check:attack-surface
       - name: Unit tests
+        env:
+          # 事实钉触发器（2026-11-12）：证书到位时让 update-signature-guard 的
+          # RECORDED_STATE 变红，逼停发版以同步全部「未启用」措辞。
+          # 只注入证书、不注入口令 —— 事实钉只需要知道证书存在。
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
         # 并发 2 + 重试 3 次，并把失败用例名以 annotation 形式暴露。
         #
         # 并发判据（本地已复现）：默认并发全量跑是 2818 pass / 2 fail（export-scrub 与
@@ -161,6 +170,7 @@ jobs:
     needs: [verify-version, quality]
     outputs:
       version: ${{ needs.verify-version.outputs.version }}
+      signed: ${{ steps.signcheck.outputs.signed }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -170,14 +180,43 @@ jobs:
       - run: npm ci
       - run: npm run build
 
+      # 签名凭据成对闸门（2026-11-12）：只配证书没配口令（或反之）时，
+      # electron-builder 会拿空口令去签带口令的 pfx，在打包几分钟后才炸，
+      # 报错还指向 signtool。这里把失败提前到打包之前。
+      # 两个 secret 都只经 env 注入，不进脚本体（值里带引号也不会改变脚本语义）。
+      - name: 签名凭据必须成对（要么都配，要么都不配）
+        id: signcheck
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: |
+          $hasLink = -not [string]::IsNullOrWhiteSpace($env:WIN_CSC_LINK)
+          $hasPass = -not [string]::IsNullOrWhiteSpace($env:WIN_CSC_KEY_PASSWORD)
+          if ($hasLink -ne $hasPass) {
+            Write-Output "::error::WIN_CSC_LINK 与 WIN_CSC_KEY_PASSWORD 必须成对配置（要么都设，要么都不设）"
+            exit 1
+          }
+          if ($hasLink) {
+            Write-Output "已检测到签名凭据，本次打包将启用代码签名"
+            Add-Content -Path $env:GITHUB_OUTPUT -Value "signed=true"
+          } else {
+            Write-Output "未配置签名凭据，按未签名打包（现状，见 SECURITY.md 第四节）"
+            Add-Content -Path $env:GITHUB_OUTPUT -Value "signed=false"
+          }
+
       # 这里打完整 nsis + portable（而不是 CI 里的 --dir 冒烟）：
       # 发版产物必须是真实打出来的，否则「构建通过」只证明了目录能解开。
       # 耗时几分钟，但发版本就不该快。
       - name: Package (win, x64)
         run: npx electron-builder --config build/config.cjs --win --x64 --publish never
         env:
-          # 无证书 → 跳过签名探测（详见 SECURITY.md 第四节：当前未启用签名校验）
+          # macOS 证书自动探测关闭（本项目只发 Windows 产物）
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          # Windows 签名（2026-11-12 接线）：未配置 secret 时展开为空串，
+          # electron-builder 对空串显式按「无证书」跳过签名，行为与接线前
+          # 完全一致；成对配置后自动启用签名（时戳默认 DigiCert RFC3161）。
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
 
       - name: Asar smoke test
         run: npm run smoke:asar
@@ -231,6 +270,7 @@ jobs:
         # 抽不到就 warning + 兜底文案，Release 照常创建。
         run: |
           V="${{ needs.build.outputs.version }}"
+          SIGNED="${{ needs.build.outputs.signed }}"
           NOTES=""
           if [ -f CHANGELOG.md ]; then
             NOTES=$(awk -v v="$V" '
@@ -243,13 +283,20 @@ jobs:
             echo "::warning::CHANGELOG.md 里抽不到 ## [$V] 条目，Release notes 改用兜底文案"
             NOTES="本版变更详见 CHANGELOG.md 的 \`## [$V]\` 一节。"
           fi
+          # 签名表述必须随本次打包的实际状态分支（build job 的成对闸门输出）：
+          # 证书到位后仍无条件宣称「未做代码签名」就是说谎，反之亦然。
+          if [ "$SIGNED" = "true" ]; then
+            SIGN_NOTE="安装包**已做代码签名**（Authenticode），自动更新的签名校验随之生效。"
+          else
+            SIGN_NOTE="安装包**未做代码签名**，Windows 可能显示 SmartScreen 提示（见 SECURITY.md 第四节）。"
+          fi
           {
             echo "## ${V}"
             echo
             echo "${NOTES}"
             echo
             echo "---"
-            echo "由 Release workflow 自动生成。安装包**未做代码签名**，Windows 可能显示 SmartScreen 提示（见 SECURITY.md 第四节）。"
+            echo "由 Release workflow 自动生成。${SIGN_NOTE}"
           } > notes.md
           cat notes.md
 
@@ -270,4 +317,5 @@ jobs:
           echo "  1. 安装包能正常安装与启动"
           echo "  2. 安装包内版本号与 tag 一致"
           echo "  3. latest.yml 里的 sha512 与实际文件匹配（electron-updater 依赖它）"
+          echo "  4. 若本次已签名：Get-AuthenticodeSignature 应为 Valid，app-update.yml 应含 publisherName"
           echo "发布后自动更新会把该版本推给所有已装用户 —— 这一步没有反悔余地。"

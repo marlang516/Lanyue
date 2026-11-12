@@ -65,8 +65,10 @@
   因此 `verifyUpdateCodeSignature` 这个开关不产生实际约束。
 - 缓解：第三方镜像兜底已做成 **fail-closed** —— 检测到无 `publisherName` 就直接拒绝切换
   feed 并向用户说明原因，宁可更新失败也不静默安装来路不明的安装包。
-- 关闭条件：配置代码签名证书（`win.certificateFile` / `certificateSubjectName`），
-  `publisherName` 出现后闸门自动放行。
+- 关闭条件：仓库 Secrets 成对配置 `WIN_CSC_LINK`（base64 的 pfx）与
+  `WIN_CSC_KEY_PASSWORD`。接线已就绪（2026-11-12，`.github/workflows/release.yml`）：
+  打包自动签名，`publisherName` 出现后闸门自动放行。证书到位那次发版会被
+  事实钉逼停，先同步全部「未启用」措辞再放行（清单见 `docs/RELEASING.md` 第四节）。
 - 设置页常驻提示「当前更新包未启用安装包签名校验，请仅从官方渠道获取」。
 
 ### 2. 本地 API 依赖上游第三方 SDK

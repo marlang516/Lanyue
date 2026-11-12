@@ -110,8 +110,12 @@ test('事实钉：配置开关与 RECORDED_STATE 仍一致（采购证书后此�
   const src = read('test/update-signature-guard.test.js');
   const m = src.match(/verificationEffective:\s*(true|false)/);
   assert.ok(m, 'update-signature-guard.test.js 里找不到 RECORDED_STATE.verificationEffective');
+  // 证书有两个通道：配置键（下方正则）与环境变量（release.yml 把 secrets
+  // 映射成 WIN_CSC_LINK/CSC_LINK，2026-11-12 接线）。只查配置文本会在
+  // 证书经 secrets 到位时失明 —— 与 update-signature-guard 的 envCodeSigning 同口径。
+  const envCert = !!((process.env.WIN_CSC_LINK || process.env.CSC_LINK || '').trim());
   const hasCert = /certificateFile|certificateSubjectName|cscLink|signtoolOptions|azureSignOptions/
-    .test(CONFIG);
+    .test(CONFIG) || envCert;
   assert.equal(
     m[1] === 'true',
     hasCert,

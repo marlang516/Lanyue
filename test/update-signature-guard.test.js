@@ -34,7 +34,8 @@
  *
  *   · 现在：绿。且「开关开着但不生效」这件事被写进代码，不再只活在注释里；
  *   · 任何人加了证书：测试红，提示把 codeSigningConfigured 改为 true，
- *     顺带逼他回来清理文档里「尚未生效」的措辞；
+ *     顺带逼他回来清理文档里「尚未生效」的措辞（证书也可以走环境变量通道：
+ *     release.yml 注入 WIN_CSC_LINK secret，2026-11-12 接线，同样被识别）；
  * · 任何人把开关改成 false：测试红（P0 回归，与674634a 的结论冲突）；
  *   · 任何人删掉证书配置：测试红。
  *
@@ -85,6 +86,17 @@ function detectCodeSigning(cfg) {
 }
 
 /**
+ * 环境变量通道的签名配置（2026-11-12，#24 接线）：electron-builder 原生读
+ * WIN_CSC_LINK / CSC_LINK（windowsSignToolManager.js:75），release.yml 把
+ * 仓库 secrets 映射过去。只认非空值：GitHub Actions 未配置的 secret 展开为
+ * 空串，electron-builder 对空串显式按「无证书」处理（同文件 :76）。
+ */
+function envCodeSigning() {
+  const link = process.env.WIN_CSC_LINK || process.env.CSC_LINK;
+  return !!(link && link.trim());
+}
+
+/**
  * 当前记录的**真实状态**。
  *
  * ⚠️ 这三行是「事实」不是「期望」：它们描述今天的世界长什么样。
@@ -95,7 +107,8 @@ function detectCodeSigning(cfg) {
 const RECORDED_STATE = {
   /** build/config.cjs 里这一项当前是开着的（674634a 的 P0 加固，不得回退） */
   verifyUpdateCodeSignature: true,
-  /** 当前仓库**没有**配置代码签名证书 */
+  /** 当前仓库**没有**配置代码签名证书（配置对象与 WIN_CSC_LINK/CSC_LINK
+   *  环境变量通道都为空；release.yml 的 secrets 未配置） */
   codeSigningConfigured: false,
   /**
    * 因此校验**实际不生效**：无证书 ⇒ 无 publisherName ⇒ electron-updater
@@ -119,14 +132,18 @@ test('事实钉：verifyUpdateCodeSignature 开关本身必须是开着的', () 
 
 test('事实钉：是否配置了代码签名，与记录一致', () => {
   const cfg = loadConfig();
-  const { configured, keys } = detectCodeSigning(cfg);
+  const { configured: inConfig, keys } = detectCodeSigning(cfg);
+  const viaEnv = envCodeSigning();
+  const configured = inConfig || viaEnv;
+  const channels = [...keys, ...(viaEnv ? ['环境变量 WIN_CSC_LINK/CSC_LINK'] : [])];
   assert.strictEqual(
     configured,
     RECORDED_STATE.codeSigningConfigured,
     configured
-      ? `检测到签名配置（${keys.join(', ')}）—— 真实状态变了！请把 RECORDED_STATE.codeSigningConfigured `
+      ? `检测到签名配置（${channels.join(', ')}）—— 真实状态变了！请把 RECORDED_STATE.codeSigningConfigured `
         + '改为 true、verificationEffective 改为 true，并清理 build/config.cjs 注释与 '
-        + 'docs/CODE_REVIEW_2026-09-28.md 里「尚未生效 / 已知未闭合」的措辞。'
+        + 'docs/CODE_REVIEW_2026-09-28.md 里「尚未生效 / 已知未闭合」的措辞'
+        + '（完整清单见 docs/RELEASING.md §四）。'
       : '签名配置消失了。若是有意移除（例如改为仅用官方渠道分发），请同步更新本测试的记录与相关文档；'
         + '若是误删，请恢复。',
   );
@@ -134,8 +151,8 @@ test('事实钉：是否配置了代码签名，与记录一致', () => {
 
 test('事实钉：校验是否真正生效，与记录一致（开关 ∧ 有证书）', () => {
   const cfg = loadConfig();
-  const { configured } = detectCodeSigning(cfg);
-  const effective = cfg.win.verifyUpdateCodeSignature === true && configured;
+  const { configured: inConfig } = detectCodeSigning(cfg);
+  const effective = cfg.win.verifyUpdateCodeSignature === true && (inConfig || envCodeSigning());
   assert.strictEqual(
     effective,
     RECORDED_STATE.verificationEffective,
@@ -161,6 +178,49 @@ test('守卫自检：detectCodeSigning 真的能识别签名配置（正则/取�
     detectCodeSigning({ win: { signtoolOptions: { certificateFile: 'x.pfx' } } }).configured, true,
     'signtoolOptions 形态（electron-builder 24+）必须被识别',
   );
+});
+
+// ── 环境变量通道（2026-11-12，#24 签名接线）──────────────────
+// electron-builder 原生读 WIN_CSC_LINK / CSC_LINK 环境变量
+// （windowsSignToolManager.js:75），release.yml 把仓库 secrets 映射过去：
+// 证书材料不进仓库，detectCodeSigning 在配置对象里永远看不见它。
+// 事实钉若不认环境变量通道，证书到位那天签名会**悄悄生效**，而
+// RECORDED_STATE、配置注释、设置页提示、SECURITY.md 的「未启用」措辞
+// 全部继续说谎 —— 正是本守卫文件头描述的静默落差。实测接线前注入
+// WIN_CSC_LINK 跑两份事实钉文件 20 条全绿（盲区），故补此通道。
+
+test('守卫自检：环境变量通道 CSC_LINK / WIN_CSC_LINK 能被识别（空串不算）', () => {
+  const saved = { csc: process.env.CSC_LINK, win: process.env.WIN_CSC_LINK };
+  try {
+    delete process.env.CSC_LINK;
+    delete process.env.WIN_CSC_LINK;
+    assert.strictEqual(envCodeSigning(), false, '未设置环境变量不应命中');
+    process.env.CSC_LINK = '';
+    assert.strictEqual(envCodeSigning(), false, '空串（未配置 secret 的展开值）不应命中');
+    process.env.CSC_LINK = '   ';
+    assert.strictEqual(envCodeSigning(), false, '纯空白不应命中');
+    process.env.CSC_LINK = 'base64-pfx-material';
+    assert.strictEqual(envCodeSigning(), true, 'CSC_LINK 必须被识别');
+    delete process.env.CSC_LINK;
+    process.env.WIN_CSC_LINK = 'base64-pfx-material';
+    assert.strictEqual(envCodeSigning(), true, 'WIN_CSC_LINK 必须被识别（release.yml 用的就是它）');
+  } finally {
+    if (saved.csc === undefined) delete process.env.CSC_LINK; else process.env.CSC_LINK = saved.csc;
+    if (saved.win === undefined) delete process.env.WIN_CSC_LINK; else process.env.WIN_CSC_LINK = saved.win;
+  }
+});
+
+test('事实钉：证书经环境变量注入时，必须被报为「已配置签名」', () => {
+  const saved = process.env.WIN_CSC_LINK;
+  try {
+    process.env.WIN_CSC_LINK = 'base64-pfx-material';
+    const cfg = loadConfig();
+    const configured = detectCodeSigning(cfg).configured || envCodeSigning();
+    assert.strictEqual(configured, true,
+      '环境变量通道的证书未被识别 —— 证书到位那天事实钉会失明，措辞与事实脱节');
+  } finally {
+    if (saved === undefined) delete process.env.WIN_CSC_LINK; else process.env.WIN_CSC_LINK = saved;
+  }
 });
 
 test('守卫：electron-updater 的 null 放行语义未被上游改变', () => {
