@@ -1,5 +1,5 @@
 /**
- * 搜索域 domain —— 搜索参数校验与结果包装
+ * 搜索域 domain —— 搜索参数校验
  * 纯业务逻辑，不依赖 electron、context.getCtx()、safeSend。
  */
 
@@ -21,23 +21,7 @@ function validateKeyword(keyword) {
   return { ok: true, keyword: k };
 }
 
-/**
- * 包装搜索结果，统一返回形状。
- * @param {Object} result - api.searchMusic 的返回
- * @returns {{songs:Array, source:string, error:string|null, stats?:Object, failed?:Array}}
- */
-function wrapSearchResult(result) {
-  return {
-    songs: Array.isArray(result.songs) ? result.songs : [],
-    source: result.source || 'all',
-    error: result.error || null,
-    stats: result.stats,
-    failed: result.failed,
-  };
-}
-
 module.exports = {
   MAX_KEYWORD_LEN,
   validateKeyword,
-  wrapSearchResult,
 };

@@ -113,11 +113,13 @@ function createScheduler({
     return Math.min(cap, getConcurrency());
   }
 
-  /** 某请求源当前在途任务数（从队列状态派生，不另立计数器避免漂移） */
+  /** 某请求源当前在途任务数（从队列状态派生，不另立计数器避免漂移）。
+   *  含重试退避中的协程（status=pending 但 _processing=true）—— 它仍占并发额度。 */
   function activeCountBySource(source) {
     let n = 0;
     for (const s of getQueue()) {
-      if (s && s.status === 'downloading' && s.source === source) n++;
+      if (!s || s.source !== source) continue;
+      if (s.status === 'downloading' || (s.status === 'pending' && s._processing)) n++;
     }
     return n;
   }
