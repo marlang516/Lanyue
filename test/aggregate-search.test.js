@@ -75,9 +75,10 @@ test('周杰伦：一页已经取回的歌按该源页大小保留，不再削�
 test('searchMusic 把计划页码传给每个源，不再把全部平台写死成第 1 页', () => {
   const src = fs.readFileSync(path.join(__dirname, '../src/api/index.js'), 'utf8');
   assert.match(src, /planAggregateSearch\(allPlugins,\s*page\)/);
-  assert.match(src, /gateway\.search\(id,\s*keyword,\s*plan\.page\)/);
+  // M1：聚合走 searchRaw（不吞错），页码仍须透传 plan.page
+  assert.match(src, /gateway\.searchRaw\(id,\s*keyword,\s*plan\.page\)/);
   assert.match(src, /clipAggregateSongs\(r\.value,\s*slot\.limit\)/);
-  assert.doesNotMatch(src, /gateway\.search\(id,\s*keyword,\s*1\)/);
+  assert.doesNotMatch(src, /gateway\.searchRaw\(id,\s*keyword,\s*1\)/);
 });
 
 test('没人返回满页时没有下一页；limit<=0 即使带着歌也不算满页', () => {

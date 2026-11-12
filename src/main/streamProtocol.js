@@ -181,9 +181,15 @@ function requestUpstream(u, ips, referer, rangeHeader) {
       headers,
       lookup: makePinnedLookup(ips),
       servername: u.hostname,
-    }, resolve);
+    }, (res) => {
+      // M6：setTimeout 是 socket 空闲超时，响应到达后依然生效 —— 下游背压
+      // （缓冲满 / 暂停播放）停读 30 秒就会掐断健康连接。看门狗只守
+      // 「等第一个字节」阶段，响应一到达就解除。
+      req.setTimeout(0);
+      resolve(res);
+    });
     req.on('error', reject);
-    // 单次响应超时：流式下这是"等第一个字节"的耐心，不是整首的时限
+    // 等第一个字节的耐心（不是整首的时限，也不覆盖响应体阶段，见上）
     req.setTimeout(30000, () => { req.destroy(new Error('stream timeout')); });
   });
 }

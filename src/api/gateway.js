@@ -157,6 +157,22 @@ function createPlatformGateway({ registry, getCookie = () => '' } = {}) {
   }
 
   /**
+   * 搜索单曲（不吞错版）—— 聚合搜索专用。
+   *
+   * search 的 safeRun 把异常折叠成 []，fanOut 里 ok 恒为 true，
+   * 「全部平台」搜索的 failed[] 因此永远是空的（M1）。聚合路径需要
+   * 区分「0 条结果」与「这个源挂了」，错误必须传到 fanOut 的 catch。
+   * 单源搜索仍走 search，兜底 UX 不变。
+   */
+  async function searchRaw(platformId, keyword, page = 1) {
+    const plugin = pluginOf(platformId);
+    if (!plugin || typeof plugin.search !== 'function') {
+      throw new Error(`平台 ${platformId} 不存在或无 search 能力`);
+    }
+    return plugin.search(keyword, page, cookieFor(platformId));
+  }
+
+  /**
    * 取下载 URL。
    * 返回：平台原始结果对象（含 url 或 error/code）。
    * ⚠️ 与 search 不同，此处**保留平台的原始错误对象** ——
@@ -426,6 +442,7 @@ function createPlatformGateway({ registry, getCookie = () => '' } = {}) {
   return Object.freeze({
     // 单平台能力调用
     search,
+    searchRaw,
     getUrl,
     getLyrics,
     getLyricsByTitle,

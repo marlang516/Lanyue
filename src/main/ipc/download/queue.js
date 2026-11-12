@@ -106,9 +106,16 @@ function register(queueDeps = {}) {
           finishedAt: done.finishedAt,
         };
       }
+      // M2：await 让出事件循环期间，并发的 add-to-queue / 批量入队可能已把
+      // 同一首歌推进队列 —— 顶部的查重快照失效，push 前必须对活队列复查。
+      const dupAfterAwait = downloadQueue.find(s =>
+        s && s.id === song.id && s.source === song.source && s.status !== 'done');
+      if (dupAfterAwait) {
+        return { queued: false, duplicated: true, taskId: dupAfterAwait.taskId };
+      }
     }
     const taskId = makeTaskId();
-    downloadQueue.push({ ...song, taskId, status: 'pending', progress: 0, addedAt: Date.now() });
+    downloadQueue.push({ ...sanitizeQueueSong(song), taskId, status: 'pending', progress: 0, addedAt: Date.now() });
     progress.emitQueueUpdated(downloadQueue);
     persistQueue();
     processQueue();
@@ -260,8 +267,18 @@ function register(queueDeps = {}) {
           skippedDownloaded++;
           continue;
         }
+        // M2：existingIds 是循环前的快照，await 期间并发入队（另一批 / 单曲）
+        // 看不见 —— push 前对活队列按同一口径复查（done/error 不算重复）。
+        const raced = downloadQueue.some(t =>
+          t && t.status !== 'done' && t.status !== 'error'
+          && t.id != null && t.id !== '' && t.source
+          && `${t.source}:${t.id}` === key);
+        if (raced) {
+          skippedDup++;
+          continue;
+        }
         downloadQueue.push({
-          ...s,
+          ...sanitizeQueueSong(s),
           taskId: makeTaskId(),
           status: 'pending',
           progress: 0,
@@ -292,6 +309,29 @@ function register(queueDeps = {}) {
 
 function makeTaskId() {
   return Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+}
+
+/**
+ * 队列状态由引擎独占（M3）：入队载荷不得携带内部调度标记或状态字段。
+ *
+ * 歌曲形状本身是开放的 —— 平台扩展字段（pay/mid/fee…）与歌单元数据
+ * （playlistName/trackNo/trackTotal）都是合法输入，不能用封闭白名单整体拒收
+ * （那会打断批量下载）。这里只剥离两类键：
+ *   - `_` 前缀的内部标记（_processing/_cancelRequested/_altSource…）：
+ *     注入 _processing:true 会让调度器把 pending 任务当「协程在途」永久跳过；
+ *   - 引擎自有的状态字段：必须由引擎在入队/运行时赋值，外部注入会污染状态机。
+ */
+const ENGINE_OWNED_KEYS = new Set([
+  'status', 'taskId', 'progress', 'addedAt',
+  'error', 'errorCode', 'savePath', 'finishedAt',
+]);
+function sanitizeQueueSong(song) {
+  const out = {};
+  for (const key of Object.keys(song)) {
+    if (key.startsWith('_') || ENGINE_OWNED_KEYS.has(key)) continue;
+    out[key] = song[key];
+  }
+  return out;
 }
 
 module.exports = { register, makeTaskId };

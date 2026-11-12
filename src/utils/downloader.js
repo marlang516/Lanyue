@@ -355,6 +355,20 @@ function _downloadFileInner(url, savePath, onProgress, extraHeaders = {}, redire
       fsa.removeQuiet(tmpPath).catch((e) => logger.warn('清理 .tmp 失败:', tmpPath, e.message));
     };
 
+    // H2：写流句柄必须在失败/取消时释放。writeStream 在响应回调里才创建，
+    // 而 req 的 error/timeout 可能在任何时刻触发，故提升到 Promise 作用域。
+    let writeStream = null;
+    let transferFailed = false;
+    const failTransfer = (e) => {
+      if (transferFailed) return;
+      transferFailed = true;
+      if (e && req._cancelled) e.cancelled = true;
+      // destroy() 只关句柄不删文件：.tmp 前缀留给断点续传。
+      // 不 destroy 则每次失败/取消泄漏一个 fd（Windows 上还占着 .tmp）。
+      if (writeStream) writeStream.destroy();
+      reject(e);
+    };
+
     const req = lib.request(reqOptions, (res) => {
       // 处理重定向（修复 B4：覆盖 301/302/303/307/308，关闭当前 res 后递归）
       if (
@@ -406,7 +420,7 @@ function _downloadFileInner(url, savePath, onProgress, extraHeaders = {}, redire
         return reject(new Error(`服务端返回 HTML 而非音频数据（Content-Type: ${contentType.slice(0, 40)}），疑似 CDN 错误页`));
       }
 
-      const writeStream = fs.createWriteStream(tmpPath, { flags: isResume ? 'a' : 'w' });
+      writeStream = fs.createWriteStream(tmpPath, { flags: isResume ? 'a' : 'w' });
 
       // 限速流
       const throttle = speedLimit > 0 ? createThrottleStream(speedLimit) : null;
@@ -426,10 +440,7 @@ function _downloadFileInner(url, savePath, onProgress, extraHeaders = {}, redire
       // （test/downloader.test.js 的「瞬时中断后保留 .tmp，重试带 Range 断点续传」
       // 就是这么红的）。续传要的就是「出错时把已经落盘的字节留住」，所以这里坚持
       // 手工接线：只让错误**通知**调用方，不让错误**摧毁**已落盘的数据。
-      const failTransfer = (e) => {
-        if (e && req._cancelled) e.cancelled = true;
-        reject(e);
-      };
+      // failTransfer 已提升到 Promise 作用域（H2：req 的 error/timeout 也要走它）
       res.on('error', failTransfer);                       // 源流（限速与否都挂）
       if (throttle) throttle.on('error', failTransfer);   // 限速流自身出错
       dataStream.on('error', failTransfer);
@@ -469,13 +480,19 @@ function _downloadFileInner(url, savePath, onProgress, extraHeaders = {}, redire
         });
       });
 
-      // 落盘侧失败（磁盘满 / 权限 / 句柄坏）：重试没有意义，.tmp 留着只占地方
-      writeStream.on('error', (e) => { cleanupTmp(); reject(e); });
+      // 落盘侧失败（磁盘满 / 权限 / 句柄坏）：重试没有意义，.tmp 留着只占地方。
+      // transferFailed 时这里的 error 是我们自己 destroy 引发的（在途写被
+      // ERR_STREAM_DESTROYED 打断）：.tmp 必须留给续传，不能清理、不重复上报。
+      writeStream.on('error', (e) => {
+        if (transferFailed) return;
+        cleanupTmp();
+        reject(e);
+      });
     });
 
     // 瞬时错误保留 .tmp（同 dataStream.on('error') —— 续传依赖残留前缀）
-    req.on('error', (e) => { if (req._cancelled) e.cancelled = true; reject(e); });
-    req.on('timeout', () => { req.destroy(); reject(new Error('下载超时')); });
+    req.on('error', failTransfer);
+    req.on('timeout', () => { req.destroy(); failTransfer(new Error('下载超时')); });
     // Minor: 注册在途请求，支持按 token 打断（用户取消下载中任务）
     if (options.token) {
       const token = String(options.token);

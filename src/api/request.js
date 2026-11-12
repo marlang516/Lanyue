@@ -194,9 +194,12 @@ function _sendHop(url, options, redirectCount, parsedUrl, pinnedIps) {
         return _followRedirects(nextUrl.toString(), options, redirectCount + 1)
           .then(resolve).catch(reject);
       }
-      let data = '';
-      res.on('data', chunk => data += chunk);
+      // 收齐字节再整体解码：逐块 chunk.toString() 会把跨分块的多字节 UTF-8
+      // 字符（中文歌名/歌手名）拆成 U+FFFD。
+      const chunks = [];
+      res.on('data', chunk => chunks.push(chunk));
       res.on('end', () => {
+        const data = Buffer.concat(chunks).toString('utf8');
         if (isRetriableStatus(res.statusCode)) {
           // 5xx / 429 → 伪装成错误让外层 retry 捕获
           const err = new Error(`HTTP ${res.statusCode}: ${data.slice(0, 200)}`);

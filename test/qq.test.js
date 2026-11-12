@@ -211,3 +211,58 @@ test('游离异常隔离：模块级兜底拦截 SDK 特征异常并计数', () 
   );
   assert.strictEqual(_qqEscapeCount(), before + 1, '未识别异常不应计数');
 });
+
+// ── M1：搜索失败必须向上抛，聚合才能把 qq 记入 failed ─────────
+//
+// qqSearch 原先 catch 后 return []，与 gateway.search 的 safeRun 叠加，
+// 「全部平台」搜索里 qq 挂了也表现为「0 条结果」，failed[] 永远为空。
+// 单源搜索的 UX 由 gateway.search 的兜底保持不变；平台层须把错误交出去。
+
+test('qqSearch: SDK 失败时向上抛错（不再静默返回 []）', async () => {
+  const qqMusic = require('qq-music-api');
+  const origApi = qqMusic.api;
+  qqMusic.api = async () => { throw new Error('qq upstream 500'); };
+  try {
+    await assert.rejects(() => qq.search('周杰伦', 1), /qq upstream 500/);
+  } finally {
+    qqMusic.api = origApi;
+  }
+});
+
+test('qqSearch: 非法关键词仍返回 []（参数校验不抛错）', async () => {
+  assert.deepStrictEqual(await qq.search('', 1), []);
+  assert.deepStrictEqual(await qq.search(null, 1), []);
+});
+
+// ── M4：singer/album 返回的是已解包结构，歌手名/总数在顶层 ────
+//
+// SDK 的 singer/album 路由返回 { list, id, singermid, name, total, ... }，
+// data 已被解包。代码却读 result.data.name / result.data.total →
+// 歌手名恒空、total 恒等于当页条数（分页 UI 因此只有一页）。
+
+test('getSingerAlbums: 歌手名与总数取自顶层字段（SDK 已解包 data）', async () => {
+  const qqMusic = require('qq-music-api');
+  const origApi = qqMusic.api;
+  qqMusic.api = async (route) => {
+    if (route === 'singer/album') {
+      return {
+        list: [
+          { album_id: 1, album_mid: 'M001', album_name: '叶惠美', publish_date: '2003-07-31' },
+        ],
+        id: 4558, singermid: 'SINGERMID', name: '周杰伦',
+        total: 50, pageNo: 1, pageSize: 20,
+      };
+    }
+    throw new Error(`unexpected route: ${route}`);
+  };
+  try {
+    const r = await qq.getSingerAlbums('SINGERMID', 1, 20);
+    assert.strictEqual(r.singerName, '周杰伦', '歌手名应取顶层 name');
+    assert.strictEqual(r.total, 50, '总数应取顶层 total，而非当页条数');
+    assert.strictEqual(r.albums.length, 1);
+    assert.strictEqual(r.albums[0].artist, '周杰伦', '专辑 artist 应取顶层 name');
+    assert.strictEqual(r.albums[0].title, '叶惠美');
+  } finally {
+    qqMusic.api = origApi;
+  }
+});
