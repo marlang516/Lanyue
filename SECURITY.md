@@ -9,7 +9,7 @@
 **请不要用公开 issue 报告安全问题。**
 
 - 私密渠道：GitHub 仓库的 Security Advisory（`Security` 标签 → `Report a vulnerability`）
-- 或直接联系作者：`https://github.com/maliang04110233-dot/Lanyue`
+- 或直接联系作者：`https://github.com/marlang516/Lanyue`
 
 请在报告里给出：
 

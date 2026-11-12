@@ -10,7 +10,7 @@
 
 | 项 | 实测值 |
 |---|---|
-| 远端 | `origin` = `https://github.com/maliang04110233-dot/Lanyue.git`（与 `build/config.cjs` 的 publish 段一致） |
+| 远端 | `origin` = `https://github.com/marlang516/Lanyue.git`（2026-11-12 仓库由 maliang04110233-dot 转移至 marlang516，旧地址由 GitHub 自动重定向；与 `build/config.cjs` 的 publish 段一致） |
 | 远端默认分支 | `main` |
 | 本地分支 | `master`、`backup/local-1.0.36`（均指向 `a462edc`）、`release/1.0.36`（当前，跟踪 `origin/main`，**ahead 21**） |
 | CI 反馈 | `.github/workflows/` 已就位，但是否真正产出过结果需在仓库 Actions 页核对——**本地流程不以 CI 为前提** |

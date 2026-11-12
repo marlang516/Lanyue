@@ -50,11 +50,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/maliang04110233-dot/Lanyue.git"
+    "url": "git+https://github.com/marlang516/Lanyue.git"
   },
-  "homepage": "https://github.com/maliang04110233-dot/Lanyue#readme",
+  "homepage": "https://github.com/marlang516/Lanyue#readme",
   "bugs": {
-    "url": "https://github.com/maliang04110233-dot/Lanyue/issues"
+    "url": "https://github.com/marlang516/Lanyue/issues"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
