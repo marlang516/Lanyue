@@ -41,7 +41,7 @@ test('时机判定：进入lead窗口才预热', () => {
   assert.equal(shouldPrefetchNow({ currentTime: NaN, duration: 200 }), false);
   assert.equal(shouldPrefetchNow({ currentTime: 190, duration: 200, cached: true }), false, '缓存已有货');
   assert.equal(shouldPrefetchNow({ currentTime: 190, duration: 200, fetching: true }), false, '请求在飞不重复发');
-  assert.equal(PREFETCH_LEAD_SEC, 20);
+  assert.equal(PREFETCH_LEAD_SEC, 30);
 });
 
 test('缓存：容量封顶、取用即失效、过期不返回', () => {
@@ -94,7 +94,7 @@ test('接线钉：player.js 命中缓存时跳过取流，未命中照原路', (
   const hitBlock = [
     '  const pkey = prefetchKeyOf(song);',
     '  const hit = pkey ? _prefetch.take(pkey) : null;',
-    '  // 预热时的音质与当前设置不一致（用户在剩余 20s 窗口里改过音质）则弃用缓存，走原路重取',
+    '  // 预热时的音质与当前设置不一致（用户在剩余 30s 窗口里改过音质）则弃用缓存，走原路重取',
   ].join('\n');
   assert.ok(PLAYER_JS.includes(hitBlock), 'playSongByIdx 开头先查预热缓存');
   assert.ok(PLAYER_JS.includes('await loadAndPlay(song, hit.fileUrl, true);'), '命中就直接用预热好的直链开播');

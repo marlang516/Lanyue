@@ -13,7 +13,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 
 const { AGENT_TOOLS, toolsFromContract } = require('../src/main/mcp/tools');
-const { createMcpHandler, namedToPositional } = require('../src/main/mcp/mcpCore');
+const { createMcpHandler, namedToPositional, PROTOCOL_VERSION } = require('../src/main/mcp/mcpCore');
 const { CHANNELS } = require('../src/shared/ipcContract');
 
 // ── 1. 工具面派生 ────────────────────────────────────
@@ -98,10 +98,16 @@ test('rpc: initialize 返回协议版本 / 能力 / 服务信息', async () => {
   const r = await handler({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26' } });
   assert.strictEqual(r.id, 1);
   assert.ok(!r.error);
-  assert.ok(r.result.protocolVersion);
+  assert.strictEqual(r.result.protocolVersion, PROTOCOL_VERSION);
   assert.ok(r.result.capabilities.tools);
   assert.strictEqual(r.result.serverInfo.name, 'musicdl');
   assert.strictEqual(r.result.serverInfo.version, '9.9.9');
+});
+
+test('rpc: initialize 对不支持的协议版本返回服务器支持的版本', async () => {
+  const { handler } = makeHandler();
+  const r = await handler({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2099-01-01' } });
+  assert.strictEqual(r.result.protocolVersion, PROTOCOL_VERSION);
 });
 
 test('rpc: notifications/* 无响应（返回 null）', async () => {

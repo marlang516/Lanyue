@@ -79,6 +79,36 @@ test('syncOnce: 远端文件来自其它应用 → 拒绝，不推不回写', as
   assert.strictEqual(calls.apply.length, 0);
 });
 
+test('syncOnce: 远端快照是未来版本 → 拒绝，不推不回写', async () => {
+  const { d, calls } = deps({
+    fetchSnapshot: async () => ({
+      exists: true,
+      snapshot: { app: 'music-downloader', version: 3, data: { futureField: true } },
+    }),
+  });
+  const r = await syncOnce(d);
+  assert.strictEqual(r.success, false);
+  assert.match(r.error, /版本高于当前客户端支持/);
+  assert.strictEqual(calls.push.length, 0);
+  assert.strictEqual(calls.apply.length, 0);
+});
+
+test('syncOnce: 显式无效远端版本 → 拒绝，不推不回写', async () => {
+  for (const version of ['future', 2.5, 0, -1, null]) {
+    const { d, calls } = deps({
+      fetchSnapshot: async () => ({
+        exists: true,
+        snapshot: { app: 'music-downloader', version, data: {} },
+      }),
+    });
+    const r = await syncOnce(d);
+    assert.strictEqual(r.success, false, `version=${version} 应被拒绝`);
+    assert.match(r.error, /远端快照版本无效/);
+    assert.strictEqual(calls.push.length, 0, `version=${version} 不应推送`);
+    assert.strictEqual(calls.apply.length, 0, `version=${version} 不应回写`);
+  }
+});
+
 test('syncOnce: 412 冲突 → 重拉重并再推（必须带重拉到的 etag）', async () => {
   // 2026-10-13 复审 P2-4：旧实现第二次 pushSnapshot 传 {}，webdav.js 因
   // opts.etag 为空省略 If-Match ⇒ 无锁覆盖。此刻若还有第三台设备在写，它的修改
@@ -108,6 +138,36 @@ test('syncOnce: 412 冲突 → 重拉重并再推（必须带重拉到的 etag�
     '412 重试必须带**重拉后**的 etag，否则等于无锁覆盖第三方的写入');
   const ids = calls.apply[0].userPlaylists.map(p => p.id).sort();
   assert.deepStrictEqual(ids, ['a', 'r1', 'r2']);
+});
+
+test('syncOnce: 412 重试拉到未来版本 → 不再推送且不回写本地', async () => {
+  let fetchCount = 0;
+  const { d, calls } = deps({
+    fetchSnapshot: async () => {
+      fetchCount++;
+      return fetchCount === 1
+        ? {
+          exists: true,
+          etag: '"stale"',
+          snapshot: { app: 'music-downloader', version: 2, data: {} },
+        }
+        : {
+          exists: true,
+          etag: '"newer"',
+          snapshot: { app: 'music-downloader', version: 3, data: { futureField: true } },
+        };
+    },
+    pushSnapshot: async (cfg, snapshot, opts) => {
+      calls.push.push({ snapshot, opts });
+      return { ok: false, conflict: true };
+    },
+  });
+  const r = await syncOnce(d);
+  assert.strictEqual(r.success, false);
+  assert.match(r.error, /版本高于当前客户端支持/);
+  assert.strictEqual(fetchCount, 2);
+  assert.strictEqual(calls.push.length, 1, '未来版本快照不能被重试推送覆盖');
+  assert.strictEqual(calls.apply.length, 0);
 });
 
 test('syncOnce: 412 重试时远端已被删除 ⇒ 退回无条件 PUT（无对象可锁）', async () => {

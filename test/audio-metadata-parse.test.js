@@ -122,6 +122,13 @@ test('CommonJS 侧 require("music-metadata") 仍可用且导出 parseFile', () =
   assert.strictEqual(typeof mm.parseBuffer, 'function');
 });
 
+test('Node 引擎下限满足 CommonJS require(ESM) 支持要求', () => {
+  const packageJson = require('../package.json');
+  const packageLock = require('../package-lock.json');
+  assert.strictEqual(packageJson.engines.node, '>=22.12.0');
+  assert.strictEqual(packageLock.packages[''].engines.node, packageJson.engines.node);
+});
+
 test('parseFile 接受 localLibrary 实际传入的选项组合（duration / skipCovers）', async (t) => {
   const { dir, audioPath } = await makeTempLibrary();
   t.after(async () => { await fsp.rm(dir, { recursive: true, force: true }); });

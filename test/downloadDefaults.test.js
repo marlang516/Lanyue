@@ -81,10 +81,10 @@ test('downloadTemplates: 路径校验兜底不得再用 home/Music（与真实�
 
 test('request.js: 超时数值收进具名常量，禁止散落的裸数字', () => {
   const src = readSrc('api', 'request.js');
-  assert.match(src, /const DEFAULT_TIMEOUT_MS = 15000;/);
-  assert.match(src, /const PROBE_TIMEOUT_MS = 8000;/);
-  assert.doesNotMatch(src, /options\.timeout \|\| 15000/, '应引用 DEFAULT_TIMEOUT_MS');
-  assert.doesNotMatch(src, /opts\.timeout \|\| 8000/, '应引用 PROBE_TIMEOUT_MS');
+  assert.match(src, /const DEFAULT_TIMEOUT_MS = 8000;/);
+  assert.match(src, /const PROBE_TIMEOUT_MS = 5000;/);
+  assert.doesNotMatch(src, /options\.timeout \|\| 8000/, '应引用 DEFAULT_TIMEOUT_MS');
+  assert.doesNotMatch(src, /opts\.timeout \|\| 5000/, '应引用 PROBE_TIMEOUT_MS');
 });
 
 // ── 死模块防复活 ─────────────────────────────────────────
