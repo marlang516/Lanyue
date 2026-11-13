@@ -503,7 +503,7 @@ async function playSongByIdx(idx, song) {
   }
   const pkey = prefetchKeyOf(song);
   const hit = pkey ? _prefetch.take(pkey) : null;
-  // 预热时的音质与当前设置不一致（用户在剩余 20s 窗口里改过音质）则弃用缓存，走原路重取
+  // 预热时的音质与当前设置不一致（用户在剩余 30s 窗口里改过音质）则弃用缓存，走原路重取
   if (hit && hit.quality !== resolveQuality(song.source)) {
     logger.error('预取音质与当前设置不符，弃用缓存:', hit.quality);
   } else if (hit) {
@@ -561,7 +561,7 @@ async function playSongByIdx(idx, song) {
 }
 
 // ── 下一首预取──────────────────────────────
-// 切歌空白来自「取流 + 代理」两次串行网络往返。当前歌只剩 20s 时在后台把下一首的直链取好，
+// 切歌空白来自「取流 + 代理」两次串行网络往返。当前歌只剩 30s 时在后台把下一首的直链取好，
 // 下一首播时直接开播（判定口径全在 playPrefetch.js，此处只做网络调用与缓存）。
 const _prefetch = createPrefetchStore();
 let _prefetchBusy = null;

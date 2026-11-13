@@ -2,10 +2,10 @@
  * 通用 HTTP 请求函数（带重试 + 指数退避）
  *
  * 设计要点：
- *   - 统一超时（默认 15s，可按场景覆盖）
+ *   - 统一超时（默认 8s，可按场景覆盖）
  *   - 自动跟随重定向（最多 5 次）
  *   - GET / POST 都支持
- *   - 默认对 网络错误 / 5xx / 429 重试 2 次（指数退避 200ms → 600ms → 1800ms）
+ *   - 默认对网络错误 / 5xx / 429 重试 1 次（重试延迟从 200ms 起按 ×3 指数增长）
  *   - 4xx 客户端错误不重试（重试也白搭，3xx 已经在内部重定向处理）
  *
  * 不引入 axios/undici —— 项目里没有原生模块依赖，少装一个包就少一个供应链面。
@@ -14,8 +14,8 @@
  * @property {string} [method]   - 默认 GET
  * @property {Object} [headers]
  * @property {string|Buffer} [body]
- * @property {number} [timeout]  - 单次请求超时 ms，默认 15000
- * @property {number} [retries]  - 重试次数，默认 2
+ * @property {number} [timeout]  - 单次请求超时 ms，默认 8000
+ * @property {number} [retries]  - 重试次数，默认 1
  * @property {number} [retryDelay] - 第一次重试延迟 ms，默认 200（之后 ×3 指数）
  */
 
