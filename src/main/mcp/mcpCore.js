@@ -72,7 +72,9 @@ function createMcpHandler({ tools, serverVersion, callTool, onCall = null, sourc
     switch (method) {
       case 'initialize':
         return rpcResult(id, {
-          protocolVersion: (params && params.protocolVersion) || PROTOCOL_VERSION,
+          protocolVersion: params && params.protocolVersion === PROTOCOL_VERSION
+            ? params.protocolVersion
+            : PROTOCOL_VERSION,
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: SERVER_NAME, version: String(serverVersion || '0.0.0') },
         });
