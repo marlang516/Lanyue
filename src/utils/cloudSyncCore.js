@@ -11,10 +11,12 @@
 
 const { mergeSnapshotData } = require('./syncMerge');
 
+const CLOUD_SYNC_SCHEMA_VERSION = 2;
+
 function _envelope(data, now) {
   return {
     app: 'music-downloader',
-    version: 2,
+    version: CLOUD_SYNC_SCHEMA_VERSION,
     exportedAt: new Date(now()).toISOString(),
     data,
   };
@@ -25,6 +27,18 @@ function _remoteDataOrThrow(remote) {
   const snap = remote.snapshot;
   if (!snap || snap.app !== 'music-downloader') {
     throw new Error('远端文件不是本应用的备份（app 字段不匹配），已中止');
+  }
+  if (Object.prototype.hasOwnProperty.call(snap, 'version')) {
+    const rawVersion = snap.version;
+    const version = typeof rawVersion === 'number' || typeof rawVersion === 'string'
+      ? Number(rawVersion)
+      : NaN;
+    if (!Number.isInteger(version) || version < 1) {
+      throw new Error('远端快照版本无效，已中止');
+    }
+    if (version > CLOUD_SYNC_SCHEMA_VERSION) {
+      throw new Error('远端快照版本高于当前客户端支持的版本，已中止');
+    }
   }
   return snap.data && typeof snap.data === 'object' ? snap.data : {};
 }
