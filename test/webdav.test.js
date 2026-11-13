@@ -65,7 +65,7 @@ test('fetchSnapshot: 非 404 的失败状态 → 抛错并带 status；200 坏 J
   );
 });
 
-test('pushSnapshot: PUT JSON；有 etag 时带 If-Match（乐观锁），没有则不带', async () => {
+test('pushSnapshot: PUT JSON；已有 ETag 用 If-Match，首次创建用 If-None-Match', async () => {
   const withEtag = stubTransport({ status: 204, headers: {}, body: '' });
   const r = await pushSnapshot(
     { url: 'https://x/a.json', user: 'u', pass: 'p' },
@@ -81,6 +81,14 @@ test('pushSnapshot: PUT JSON；有 etag 时带 If-Match（乐观锁），没有�
   const noEtag = stubTransport({ status: 201, headers: {}, body: '' });
   await pushSnapshot({ url: 'https://x/a.json' }, { hello: 2 }, noEtag);
   assert.strictEqual('If-Match' in noEtag.calls[0].headers, false);
+  assert.strictEqual('If-None-Match' in noEtag.calls[0].headers, false);
+
+  const createOnly = stubTransport({ status: 201, headers: {}, body: '' });
+  await pushSnapshot(
+    { url: 'https://x/a.json' }, { hello: 3 }, { ifNoneMatch: '*', ...createOnly },
+  );
+  assert.strictEqual(createOnly.calls[0].headers['If-None-Match'], '*');
+  assert.strictEqual('If-Match' in createOnly.calls[0].headers, false);
 });
 
 test('pushSnapshot: 412 → conflict:true（远端被别人写过，交由上层重拉重并）', async () => {

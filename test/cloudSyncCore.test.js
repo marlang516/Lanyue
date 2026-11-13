@@ -41,9 +41,44 @@ test('syncOnce: 远端为空 → 推本地快照（version/app/exportedAt 信封
   assert.strictEqual(payload.version, 2);
   assert.strictEqual(payload.exportedAt, new Date(1700000000000).toISOString());
   assert.deepStrictEqual(payload.data.userPlaylists.map(p => p.id), ['a']);
-  assert.strictEqual(calls.push[0].opts.etag, undefined, '远端不存在时无条件 PUT');
+  assert.strictEqual(calls.push[0].opts.ifNoneMatch, '*', '首次创建必须避免覆盖并发创建的快照');
   assert.strictEqual(calls.apply.length, 1);
   assert.deepStrictEqual(r.summary, { playlists: 1, templates: 0, historyTotal: 1 });
+});
+
+test('syncOnce: 并发首次创建冲突 → 拉取并合并另一设备快照后重试', async () => {
+  const remote = {
+    exists: true,
+    etag: '"created-by-other-device"',
+    snapshot: {
+      app: 'music-downloader',
+      version: 2,
+      data: {
+        userPlaylists: [{ id: 'remote', name: '另一设备', updatedAt: 5, songs: [] }],
+      },
+    },
+  };
+  let fetchCount = 0;
+  const { d, calls } = deps({
+    fetchSnapshot: async () => {
+      fetchCount++;
+      return fetchCount === 1 ? { exists: false } : remote;
+    },
+    pushSnapshot: async (cfg, snapshot, opts) => {
+      calls.push.push({ snapshot, opts });
+      return calls.push.length === 1 ? { ok: false, conflict: true } : { ok: true };
+    },
+  });
+
+  const r = await syncOnce(d);
+  assert.strictEqual(r.success, true);
+  assert.strictEqual(r.conflictRetried, true);
+  assert.strictEqual(calls.push[0].opts.ifNoneMatch, '*');
+  assert.strictEqual(calls.push[1].opts.etag, '"created-by-other-device"');
+  assert.deepStrictEqual(
+    calls.apply[0].userPlaylists.map(p => p.id).sort(),
+    ['a', 'remote'],
+  );
 });
 
 test('syncOnce: 远端已有数据 → 双向并集，既回写本地也推回远端', async () => {
@@ -170,7 +205,7 @@ test('syncOnce: 412 重试拉到未来版本 → 不再推送且不回写本地'
   assert.strictEqual(calls.apply.length, 0);
 });
 
-test('syncOnce: 412 重试时远端已被删除 ⇒ 退回无条件 PUT（无对象可锁）', async () => {
+test('syncOnce: 412 重试时远端已被删除 ⇒ 用条件创建而不是无条件 PUT', async () => {
   const remote1 = {
     exists: true, etag: '"stale"',
     snapshot: { app: 'music-downloader', version: 2, data: { userPlaylists: [{ id: 'r1', updatedAt: 1, songs: [] }] } },
@@ -185,7 +220,7 @@ test('syncOnce: 412 重试时远端已被删除 ⇒ 退回无条件 PUT（无对
   });
   const r = await syncOnce(d);
   assert.strictEqual(r.success, true);
-  assert.strictEqual(calls.push[1].opts.etag, undefined, '远端已不存在时没有可锁的对象');
+  assert.strictEqual(calls.push[1].opts.ifNoneMatch, '*', '远端已不存在时必须防止并发重建覆盖');
 });
 
 test('syncOnce: 推送抛错（如 403）→ 失败返回，本地不回写', async () => {
