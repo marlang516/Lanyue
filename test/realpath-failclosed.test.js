@@ -108,3 +108,123 @@ test('链接指向沙箱外 ⇒ 判否（链接可解析时也必须精确判定
     fs.rmSync(outside, { recursive: true, force: true });
   }
 });
+
+test('realpath 遇到非 ENOENT 错误时仍逐段解析嵌套链接，拒绝链接逃逸', () => {
+  const ad = freshApprovedDirs();
+  const base = tmpDir('rpfc-nested-base-');
+  const inside = path.join(base, 'inside');
+  const outside = tmpDir('rpfc-nested-out-');
+  fs.mkdirSync(inside);
+
+  const firstLink = path.join(base, 'first');
+  const nestedLink = path.join(inside, 'nested');
+  if (!tryLink(inside, firstLink) || !tryLink(outside, nestedLink)) {
+    fs.rmSync(base, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+    assert.ok(true, '当前平台/权限不支持创建目录链接，跳过');
+    return;
+  }
+
+  const singleLinkTarget = path.join(firstLink, 'song.mp3');
+  const target = path.join(firstLink, 'nested', 'song.mp3');
+  const failingPaths = new Set([singleLinkTarget, target].map((p) => path.resolve(p)));
+  const originalRealpathSync = fs.realpathSync;
+  fs.realpathSync = function (p, ...args) {
+    if (failingPaths.has(path.resolve(String(p)))) {
+      const e = new Error('mock: junction realpath unavailable');
+      e.code = 'UNKNOWN';
+      e.errno = -4094;
+      throw e;
+    }
+    return originalRealpathSync.call(this, p, ...args);
+  };
+
+  try {
+    ad.approve(base);
+    assert.strictEqual(ad.isApprovedDir(singleLinkTarget), true,
+      '非 ENOENT 下单链接仍应解析到批准根内并放行');
+    assert.strictEqual(ad.isInside(base, target), true, '前提：路径词法上仍在批准根内');
+    assert.strictEqual(ad.isApprovedDir(target), false,
+      '第一链接指向根内、第二链接逃出根外时必须拒绝');
+  } finally {
+    fs.realpathSync = originalRealpathSync;
+    fs.rmSync(base, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('链接环或超出解析深度时仍 fail-closed', () => {
+  const base = tmpDir('rpfc-loop-base-');
+  const loopLink = path.join(base, 'loop');
+  const loopTarget = path.join(loopLink, 'song.mp3');
+  const originalRealpathSync = fs.realpathSync;
+  const originalReadlinkSync = fs.readlinkSync;
+
+  fs.realpathSync = function (p, ...args) {
+    const resolved = path.resolve(String(p));
+    if (resolved === path.resolve(loopTarget)) {
+      const e = new Error('mock: junction realpath unavailable');
+      e.code = 'UNKNOWN';
+      e.errno = -4094;
+      throw e;
+    }
+    if (resolved === path.resolve(loopLink)) {
+      const e = new Error('mock: symbolic link loop');
+      e.code = 'ELOOP';
+      throw e;
+    }
+    return originalRealpathSync.call(this, p, ...args);
+  };
+  fs.readlinkSync = function (p, ...args) {
+    if (path.resolve(String(p)) === path.resolve(loopLink)) return loopLink;
+    return originalReadlinkSync.call(this, p, ...args);
+  };
+
+  try {
+    assert.strictEqual(require('../src/utils/realpathContain').isInsideReal(base, loopTarget), false,
+      '无法解析的链接环不得被拼成看似安全的路径');
+  } finally {
+    fs.realpathSync = originalRealpathSync;
+    fs.readlinkSync = originalReadlinkSync;
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+
+  const deepBase = tmpDir('rpfc-deep-base-');
+  const baseDepth = path.resolve(deepBase).slice(path.parse(deepBase).root.length)
+    .split(path.sep).filter(Boolean).length;
+  const padding = Array.from({ length: Math.max(0, 34 - baseDepth) }, (_, i) => `d${i}`);
+  const deepLink = path.join(deepBase, ...padding, 'link');
+  const deepTarget = path.join(deepLink, 'song.mp3');
+  const outside = tmpDir('rpfc-deep-out-');
+  let deepLinkRead = false;
+  const realpathSync = fs.realpathSync;
+  const readlinkSync = fs.readlinkSync;
+
+  fs.realpathSync = function (p, ...args) {
+    if (path.resolve(String(p)) === path.resolve(deepTarget)) {
+      const e = new Error('mock: junction realpath unavailable');
+      e.code = 'UNKNOWN';
+      e.errno = -4094;
+      throw e;
+    }
+    return realpathSync.call(this, p, ...args);
+  };
+  fs.readlinkSync = function (p, ...args) {
+    if (path.resolve(String(p)) === path.resolve(deepLink)) {
+      deepLinkRead = true;
+      return outside;
+    }
+    return readlinkSync.call(this, p, ...args);
+  };
+
+  try {
+    assert.strictEqual(require('../src/utils/realpathContain').isInsideReal(deepBase, deepTarget), false,
+      '超过既有解析深度限制的路径不得放行');
+    assert.strictEqual(deepLinkRead, false, '超过 32 段时不得继续解析更深的链接');
+  } finally {
+    fs.realpathSync = realpathSync;
+    fs.readlinkSync = readlinkSync;
+    fs.rmSync(deepBase, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});

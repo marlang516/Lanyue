@@ -70,27 +70,28 @@ function _isMissing(e) {
  * 不可用；若像旧实现那样回退到祖先真实路径，又等于没有第二道闸。
  *
  * 做法：逐段向下走，遇到可 `readlink` 的段就解析其目标、对目标做 realpath，
- * 再把剩余段拼回去。解析不出（目标同样不可验证 / 链接环）返回 null，
+ * 再从真实目标继续解析剩余段，避免漏掉后续嵌套链接。解析不出
+ * （目标同样不可验证 / 链接环）返回 null，
  * 调用方据此判否。
  */
 function _realpathViaLink(p) {
   const root = path.parse(p).root;
   const parts = p.slice(root.length).split(path.sep).filter(Boolean);
   let cur = root;
+  let resolvedLink = false;
   for (let i = 0; i < parts.length; i++) {
-    if (i > 32) return null;          // 防链接环（junction 指向自身之类）
+    if (i > 32) return null;          // 防过深路径或链接链路
     cur = path.join(cur, parts[i]);
     let target = null;
     try { target = fs.readlinkSync(cur); } catch (_e) { continue; }  // 不是链接，继续往下
-    const rest = parts.slice(i + 1);
     try {
-      const realTarget = fs.realpathSync(path.resolve(path.dirname(cur), target));
-      return rest.length ? path.join(realTarget, ...rest) : realTarget;
+      cur = fs.realpathSync(path.resolve(path.dirname(cur), target));
+      resolvedLink = true;
     } catch (_e) {
       return null;                    // 目标本身不可验证 ⇒ 无法判定
     }
   }
-  return null;
+  return resolvedLink ? cur : null;
 }
 
 /**
