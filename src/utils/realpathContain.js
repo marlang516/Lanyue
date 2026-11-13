@@ -83,7 +83,12 @@ function _realpathViaLink(p) {
     if (i > 32) return null;          // 防过深路径或链接链路
     cur = path.join(cur, parts[i]);
     let target = null;
-    try { target = fs.readlinkSync(cur); } catch (_e) { continue; }  // 不是链接，继续往下
+    try {
+      target = fs.readlinkSync(cur);
+    } catch (e) {
+      if (e && (e.code === 'EINVAL' || _isMissing(e))) continue;
+      return null;                    // 非 benign 错误 ⇒ 无法验证后续路径
+    }
     try {
       cur = fs.realpathSync(path.resolve(path.dirname(cur), target));
       resolvedLink = true;
