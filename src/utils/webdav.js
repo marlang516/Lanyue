@@ -4,9 +4,10 @@
  * 快照 = export-all-data 同构的 JSON 文件，URL 直接指向该文件
  * （如 https://nas/dav/musicdl.json），一次同步 = GET 拉取 + PUT 回写。
  *
- * 并发控制用乐观锁而非 WebDAV LOCK：PUT 带 GET 拿到的 If-Match ETag，
+ * 并发控制用条件 PUT 而非 WebDAV LOCK：已有快照时带 GET 拿到的 If-Match
+ * ETag；首次创建时带 If-None-Match: *，避免两个首次同步互相覆盖。
  * 412 表示远端已被其它设备写过 → 上层重拉重并再推一次；服务器不返回
- * ETag 时退化为无条件 PUT（最后写入者赢，与无锁行为一致）。
+ * ETag 时，更新既有快照退化为无条件 PUT（最后写入者赢）。
  *
  * transport 可注入（默认 node http/https），单测全部走假 transport。
  *
@@ -187,6 +188,7 @@ async function pushSnapshot(cfg, snapshot, opts = {}) {
   });
   const headers = { ..._authHeaders(cfg), 'Content-Type': 'application/json' };
   if (opts.etag) headers['If-Match'] = opts.etag;
+  else if (opts.ifNoneMatch) headers['If-None-Match'] = '*';
   const res = await transport({
     method: 'PUT', url: cfg.url, headers, body: JSON.stringify(snapshot),
   });
