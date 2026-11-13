@@ -153,6 +153,58 @@ test('realpath 遇到非 ENOENT 错误时仍逐段解析嵌套链接，拒绝链
   }
 });
 
+test('嵌套链接的 readlink 非 benign 失败时拒绝，普通缺失路径仍放行', () => {
+  const ad = freshApprovedDirs();
+  const base = tmpDir('rpfc-readlink-base-');
+  const inside = path.join(base, 'inside');
+  const outside = tmpDir('rpfc-readlink-out-');
+  fs.mkdirSync(inside);
+
+  const firstLink = path.join(base, 'first');
+  const nestedLink = path.join(inside, 'nested');
+  if (!tryLink(inside, firstLink) || !tryLink(outside, nestedLink)) {
+    fs.rmSync(base, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+    assert.ok(true, '当前平台/权限不支持创建目录链接，跳过');
+    return;
+  }
+
+  const target = path.join(firstLink, 'nested', 'song.mp3');
+  const originalRealpathSync = fs.realpathSync;
+  const originalReadlinkSync = fs.readlinkSync;
+  fs.realpathSync = function (p, ...args) {
+    if (path.resolve(String(p)) === path.resolve(target)) {
+      const e = new Error('mock: junction realpath unavailable');
+      e.code = 'UNKNOWN';
+      e.errno = -4094;
+      throw e;
+    }
+    return originalRealpathSync.call(this, p, ...args);
+  };
+  fs.readlinkSync = function (p, ...args) {
+    if (path.resolve(String(p)) === path.resolve(nestedLink)) {
+      const e = new Error('mock: readlink denied');
+      e.code = 'EACCES';
+      throw e;
+    }
+    return originalReadlinkSync.call(this, p, ...args);
+  };
+
+  try {
+    ad.approve(base);
+    assert.strictEqual(ad.isApprovedDir(path.join(base, 'ordinary', 'missing.mp3')), true,
+      '普通缺失路径仍应按最近存在祖先解析并放行');
+    assert.strictEqual(ad.isInside(base, target), true, '前提：路径词法上仍在批准根内');
+    assert.strictEqual(ad.isApprovedDir(target), false,
+      '第一链接解析到根内后，后续链接 readlink 非 benign 失败必须拒绝');
+  } finally {
+    fs.realpathSync = originalRealpathSync;
+    fs.readlinkSync = originalReadlinkSync;
+    fs.rmSync(base, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
 test('链接环或超出解析深度时仍 fail-closed', () => {
   const base = tmpDir('rpfc-loop-base-');
   const loopLink = path.join(base, 'loop');
