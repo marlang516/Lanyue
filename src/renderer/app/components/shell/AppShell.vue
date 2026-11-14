@@ -2,7 +2,7 @@
 import { onMounted, onBeforeUnmount, ref } from 'vue';
 import { ui, togglePalette } from '../../stores/ui';
 import { player } from '../../stores/player';
-import { dialogState } from '../../core/dialog';
+import { dialogState, settleDialog } from '../../core/dialog';
 import NavRail from './NavRail.vue';
 import TopBar from './TopBar.vue';
 import CommandPalette from './CommandPalette.vue';
@@ -20,10 +20,9 @@ function onGlobalKey(e: KeyboardEvent): void {
     return;
   }
   if (e.key !== 'Escape') return;
-  // ESC 关闭优先级：对话框 > 命令面板 > 大屏歌词（正在播放页）。
-  // 对话框由 DialogHost 自处理，此处不抢；其余按层叠顺序关最上层，
-  // 避免大屏歌词盖住整个窗口后无法用键盘收起（表现为"卡死/播放卡"）。
-  if (dialogState.open) return;
+  // ESC 关闭优先级：对话框 > 命令面板 > 大屏歌词。
+  // 模态焦点管理通常会先处理 Escape；此处仍保留对话框的全局兜底。
+  if (dialogState.open) { settleDialog(false); return; }
   if (ui.paletteOpen) { togglePalette(false); return; }
   if (player.fullscreen) player.fullscreen = false;
 }

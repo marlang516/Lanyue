@@ -1,21 +1,23 @@
 <script setup lang="ts">
-import { ref, watch, nextTick, computed } from 'vue';
+import { ref, watch, computed } from 'vue';
 import { ui, matchCommands, togglePalette } from '../../stores/ui';
 import type { CommandItem } from '../../stores/types';
+import { useModalAccessibility } from '../../composables/useModalAccessibility';
 import Icon from '../common/Icon.vue';
 
 const keyword = ref('');
 const active = ref(0);
 const inputEl = ref<HTMLInputElement | null>(null);
+const paletteEl = ref<HTMLElement | null>(null);
 
 const results = computed<CommandItem[]>(() => matchCommands(keyword.value));
 
-watch(() => ui.paletteOpen, async (open: boolean) => {
+useModalAccessibility(() => ui.paletteOpen, paletteEl, () => togglePalette(false), () => inputEl.value);
+
+watch(() => ui.paletteOpen, (open: boolean) => {
   if (!open) return;
   keyword.value = '';
   active.value = 0;
-  await nextTick();
-  inputEl.value?.focus();
 });
 
 watch(results, () => { active.value = 0; });
@@ -34,7 +36,6 @@ function run(cmd: CommandItem | undefined): void {
 }
 
 function onKey(e: KeyboardEvent): void {
-  if (e.key === 'Escape') { e.preventDefault(); togglePalette(false); return; }
   if (e.key === 'ArrowDown') { e.preventDefault(); move(1); return; }
   if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); return; }
   if (e.key === 'Enter') { e.preventDefault(); run(results.value[active.value]); }
@@ -45,7 +46,7 @@ function onKey(e: KeyboardEvent): void {
   <Teleport to="body">
     <Transition name="palette">
       <div v-if="ui.paletteOpen" class="mask" @mousedown.self="togglePalette(false)">
-        <div class="palette ly-card" role="dialog" aria-modal="true" aria-label="命令面板">
+        <div ref="paletteEl" class="palette ly-card" role="dialog" aria-modal="true" aria-label="命令面板" tabindex="-1">
           <div class="psearch">
             <Icon name="search" :size="16" />
             <input

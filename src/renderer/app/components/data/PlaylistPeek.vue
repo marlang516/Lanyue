@@ -7,6 +7,7 @@ import { errText, toast } from '../../core/toast';
 import { playFromList, appendToQueue } from '../../stores/player';
 import type { PlaylistSummary } from '../../stores/types';
 import { platformName } from '../../core/format';
+import { useModalAccessibility } from '../../composables/useModalAccessibility';
 import SongTable from './SongTable.vue';
 import Icon from '../common/Icon.vue';
 
@@ -25,8 +26,11 @@ const emit = defineEmits<{ close: [] }>();
 const loading = ref(false);
 const error = ref('');
 const songs = ref<Song[]>([]);
+const panelEl = ref<HTMLElement | null>(null);
 
 const title = computed(() => props.playlist?.name || '歌单');
+
+useModalAccessibility(() => props.open, panelEl, () => emit('close'));
 
 watch(() => [props.open, props.playlist?.id, props.playlist?.source], async () => {
   if (!props.open || !props.playlist) return;
@@ -69,7 +73,7 @@ function dropBrokenImg(e: Event): void {
   <Teleport to="body">
     <Transition name="pk">
       <div v-if="open" class="mask" @mousedown.self="emit('close')">
-        <div class="panel ly-card" role="dialog" aria-modal="true" :aria-label="title">
+        <div ref="panelEl" class="panel ly-card" role="dialog" aria-modal="true" :aria-label="title" tabindex="-1">
           <header class="hd">
             <div class="cover" :class="{ ph: !playlist?.cover }">
               <img v-if="playlist?.cover" :src="playlist.cover" alt="" @error="dropBrokenImg" />

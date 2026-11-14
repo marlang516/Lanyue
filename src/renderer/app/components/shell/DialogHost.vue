@@ -1,27 +1,24 @@
 <script setup lang="ts">
-import { watch, nextTick, ref } from 'vue';
+import { ref } from 'vue';
 import { dialogState, settleDialog } from '../../core/dialog';
+import { useModalAccessibility } from '../../composables/useModalAccessibility';
 import Icon from '../common/Icon.vue';
 
 const inputEl = ref<HTMLInputElement | null>(null);
-
-watch(() => dialogState.open, async (open: boolean) => {
-  if (!open) return;
-  await nextTick();
-  if (dialogState.kind === 'prompt') inputEl.value?.focus();
-});
-
-function onKey(e: KeyboardEvent): void {
-  if (e.key === 'Escape') { e.preventDefault(); settleDialog(false); }
-  if (e.key === 'Enter' && dialogState.kind === 'prompt') { e.preventDefault(); settleDialog(true); }
-}
+const dialogEl = ref<HTMLElement | null>(null);
+useModalAccessibility(
+  () => dialogState.open,
+  dialogEl,
+  () => settleDialog(false),
+  () => dialogState.kind === 'prompt' ? inputEl.value : null,
+);
 </script>
 
 <template>
   <Teleport to="body">
     <Transition name="dlg">
-      <div v-if="dialogState.open" class="mask" @mousedown.self="settleDialog(false)" @keydown="onKey">
-        <div class="dlg ly-card" role="dialog" aria-modal="true" :aria-label="dialogState.title || '提示'">
+      <div v-if="dialogState.open" class="mask" @mousedown.self="settleDialog(false)">
+        <div ref="dialogEl" class="dlg ly-card" role="dialog" aria-modal="true" :aria-label="dialogState.title || '提示'" tabindex="-1">
           <div class="hd">
             <span class="ico" :class="{ danger: dialogState.danger }">
               <Icon :name="dialogState.danger ? 'warning' : 'info'" :size="17" />

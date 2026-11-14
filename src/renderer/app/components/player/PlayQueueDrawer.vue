@@ -6,12 +6,16 @@ import {
 } from '../../stores/player';
 import { fmtDurationMs, platformName } from '../../core/format';
 import { toast } from '../../core/toast';
+import { useModalAccessibility } from '../../composables/useModalAccessibility';
 import Icon from '../common/Icon.vue';
 
 const dragIndex = ref(-1);
 const dragOver = ref(-1);
+const drawerEl = ref<HTMLElement | null>(null);
 
 const currentIdx = computed(() => player.queueIdx);
+
+useModalAccessibility(() => player.queueOpen, drawerEl, close);
 
 function close(): void {
   player.queueOpen = false;
@@ -73,7 +77,7 @@ function dropBrokenImg(e: Event): void {
   <Teleport to="body">
     <Transition name="qd">
       <div v-if="player.queueOpen" class="mask" @mousedown.self="close">
-        <aside class="drawer ly-card" role="dialog" aria-modal="true" aria-label="播放队列">
+        <aside ref="drawerEl" class="drawer ly-card" role="dialog" aria-modal="true" aria-label="播放队列" tabindex="-1">
           <header class="hd">
             <div>
               <h3>播放队列</h3>
@@ -93,23 +97,24 @@ function dropBrokenImg(e: Event): void {
                 v-for="(s, i) in player.queue" :key="(s.id || s.filePath) + '-' + i"
                 class="qitem" :class="{ on: i === currentIdx, over: i === dragOver }"
                 draggable="true"
-                @click="playAt(i)"
                 @dragstart="onDragStart(i, $event)"
                 @dragover="onDragOver(i, $event)"
                 @drop.prevent="onDrop(i)"
                 @dragend="onDragEnd"
               >
-                <span class="grip"><Icon name="grip" :size="12" /></span>
-                <span class="idx">{{ i === currentIdx && player.playing ? '▶' : String(i + 1).padStart(2, '0') }}</span>
-                <div class="cov" :class="{ ph: !s.cover }">
-                  <img v-if="s.cover" :src="s.cover" alt="" loading="lazy" @error="dropBrokenImg" />
-                  <Icon v-else name="music" :size="13" />
-                </div>
-                <div class="tx">
-                  <div class="t">{{ s.title }}</div>
-                  <div class="a">{{ s.artist || '未知歌手' }} · {{ platformName(s.source) }}</div>
-                </div>
-                <span class="dur">{{ fmtDurationMs(s.duration) }}</span>
+                <button class="qplay" type="button" :aria-label="`播放 ${s.title} - ${s.artist || '未知歌手'}`" @click="playAt(i)">
+                  <span class="grip" aria-hidden="true"><Icon name="grip" :size="12" /></span>
+                  <span class="idx" aria-hidden="true">{{ i === currentIdx && player.playing ? '▶' : String(i + 1).padStart(2, '0') }}</span>
+                  <span class="cov" :class="{ ph: !s.cover }">
+                    <img v-if="s.cover" :src="s.cover" alt="" loading="lazy" @error="dropBrokenImg" />
+                    <Icon v-else name="music" :size="13" />
+                  </span>
+                  <span class="tx">
+                    <span class="t">{{ s.title }}</span>
+                    <span class="a">{{ s.artist || '未知歌手' }} · {{ platformName(s.source) }}</span>
+                  </span>
+                  <span class="dur">{{ fmtDurationMs(s.duration) }}</span>
+                </button>
                 <button class="ly-icon-btn danger" title="移除" aria-label="移除" @click="removeAt(i, $event)">
                   <Icon name="x" :size="13" />
                 </button>
@@ -150,10 +155,15 @@ function dropBrokenImg(e: Event): void {
 .qitem {
   display: flex; align-items: center; gap: var(--sp-2);
   padding: 7px var(--sp-2); border-radius: var(--r-md);
-  cursor: pointer;
   transition: background var(--dur-1), box-shadow var(--dur-1);
 }
 .qitem:hover { background: var(--glass-3); }
+.qplay {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-2);
+  padding: 0; border: 0; border-radius: var(--r-sm);
+  background: transparent; color: inherit; text-align: left; cursor: pointer;
+}
+.qplay:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
 .qitem.on { background: linear-gradient(95deg, rgba(124, 92, 255, .14), rgba(0, 198, 255, .1)); box-shadow: inset 0 0 0 1px var(--accent-line); }
 .qitem.over { border-top: 2px solid var(--au-1); }
 .grip { color: var(--ink-3); opacity: .5; cursor: grab; display: inline-flex; }
@@ -162,7 +172,7 @@ function dropBrokenImg(e: Event): void {
 .cov { width: 32px; height: 32px; flex-shrink: 0; border-radius: 9px; overflow: hidden; background: var(--glass-3); display: flex; align-items: center; justify-content: center; color: var(--ink-3); }
 .cov img { width: 100%; height: 100%; object-fit: cover; }
 .cov.ph { background: linear-gradient(135deg, var(--glass-2), var(--accent-soft)); }
-.tx { flex: 1; min-width: 0; }
+.tx { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .t { font-size: var(--fs-sm); font-weight: var(--fw-med); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .qitem.on .t { color: var(--au-1); }
 .a { margin-top: 1px; font-size: var(--fs-2xs); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

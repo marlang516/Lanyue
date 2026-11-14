@@ -30,6 +30,36 @@ function onScrub(e: MouseEvent): void {
   const r = track.getBoundingClientRect();
   seekTo(((e.clientX - r.left) / r.width) * (player.duration || 0));
 }
+function onScrubKeydown(e: KeyboardEvent): void {
+  const duration = Math.max(0, player.duration);
+  let target: number;
+  switch (e.key) {
+    case 'ArrowLeft':
+    case 'ArrowDown':
+      target = player.progress - 5;
+      break;
+    case 'ArrowRight':
+    case 'ArrowUp':
+      target = player.progress + 5;
+      break;
+    case 'PageDown':
+      target = player.progress - Math.max(1, duration * 0.1);
+      break;
+    case 'PageUp':
+      target = player.progress + Math.max(1, duration * 0.1);
+      break;
+    case 'Home':
+      target = 0;
+      break;
+    case 'End':
+      target = duration;
+      break;
+    default:
+      return;
+  }
+  e.preventDefault();
+  seekTo(Math.max(0, Math.min(duration, target)));
+}
 function onVolume(e: Event): void {
   if (e.target instanceof HTMLInputElement) setVolume(Number(e.target.value) / 100);
 }
@@ -100,7 +130,14 @@ function onHeart(): void {
 
       <div class="scrub">
         <span class="time">{{ fmtDuration(player.progress) }}</span>
-        <div class="track" role="slider" aria-label="播放进度" :aria-valuenow="Math.round(progressPct)" aria-valuemin="0" aria-valuemax="100" @click="onScrub">
+        <div
+          class="track" role="slider" aria-label="播放进度" tabindex="0"
+          :aria-valuenow="Math.min(Math.round(player.progress), Math.round(player.duration))"
+          aria-valuemin="0" :aria-valuemax="Math.round(player.duration)"
+          :aria-valuetext="`${fmtDuration(player.progress)} / ${fmtDuration(player.duration)}`"
+          :aria-disabled="player.duration <= 0"
+          @click="onScrub" @keydown="onScrubKeydown"
+        >
           <i :style="{ width: progressPct + '%' }"><b></b></i>
         </div>
         <span class="time">{{ fmtDuration(player.duration) }}</span>
@@ -186,6 +223,7 @@ function onHeart(): void {
 .scrub { display: flex; align-items: center; gap: 10px; width: 100%; max-width: 560px; }
 .time { width: 38px; flex-shrink: 0; text-align: center; font-size: var(--fs-2xs); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .track { flex: 1; height: 14px; display: flex; align-items: center; cursor: pointer; }
+.track:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 3px; border-radius: var(--r-full); }
 .track > i {
   position: relative; display: block; width: 0; height: 4px; border-radius: var(--r-full);
   background: var(--au-grad); transition: width .12s linear;
