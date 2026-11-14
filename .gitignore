@@ -3,6 +3,8 @@ dist/
 out/
 *.log
 .DS_Store
+.claude/
+.bees/run-swarm.bat
 Thumbs.db
 
 # Electron
