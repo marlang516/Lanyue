@@ -11,6 +11,7 @@
 const path = require('path');
 const fs = require('fs');
 const { buildContractArg } = require('../shared/ipcContract');
+const senderTrust = require('./ipc/senderTrust');
 
 // dist 根：打包后 __dirname 是 <app>/dist/main，上一级即 <app>/dist。
 const DIST_ROOT = path.resolve(__dirname, '..');
@@ -121,6 +122,10 @@ function createWindow({
     titleBarStyle: 'hidden',
     icon: path.join(__dirname, '../../assets/icon.png'),
   });
+
+  // 主窗口是唯一持有完整 IPC 能力面的窗口；先登记再加载页面，
+  // 首屏脚本的第一条 invoke 就能通过来源闸。
+  senderTrust.trust(win.webContents, 'main');
 
   // 默认入口是重写后的新渲染层（dist/renderer）。LY_RENDERER_DIR 只是显式回退
   // 开关（例如指向 dist/renderer-legacy），且必须先过 resolveRendererEntry 的

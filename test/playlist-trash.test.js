@@ -169,11 +169,12 @@ ipcPlaylist.register({
 });
 
 const { ENVELOPE_KEY } = require('../src/shared/ipcContract');
+const { event: TEST_EVENT } = require('./helpers/ipcTrust').install();
 const invoke = (channel) => {
   const fn = handlers.get(channel);
   assert.ok(fn, `IPC handler 未注册: ${channel}`);
   return async (...args) => {
-    const env = await fn(...args);
+    const env = await fn(TEST_EVENT, ...args);
     if (env && typeof env === 'object' && env[ENVELOPE_KEY] === 1) {
       if (!env.ok) throw new Error(env.error);
       return env.data;
@@ -190,11 +191,11 @@ const getIds = async () => (await invoke('get-user-playlists')()).map(p => p.id)
 
 test('端到端：删除→进回收站→撤销原 id 找回，全程零新通道', async () => {
   fresh();
-  const created = await invoke('save-user-playlist')(null, { name: '下班听的', songs: [{ id: 7, source: 'netease', title: 'x' }] });
+  const created = await invoke('save-user-playlist')({ name: '下班听的', songs: [{ id: 7, source: 'netease', title: 'x' }] });
   assert.ok(created.success && created.playlist.id);
   const pl = created.playlist;
 
-  const del = await invoke('delete-user-playlist')(null, pl.id);
+  const del = await invoke('delete-user-playlist')(pl.id);
   assert.equal(del.success, true);
   assert.ok(!(await getIds()).includes(pl.id), '列表里不该再看得见');
   const tr = prefs.get('playlistTrash');
@@ -203,7 +204,7 @@ test('端到端：删除→进回收站→撤销原 id 找回，全程零新通�
   assert.ok(typeof tr[0].deletedAt === 'number');
 
   // 撤销 = 渲染层攥着副本走既有 save-user-playlist（模拟浏览器端传法）
-  const back = await invoke('save-user-playlist')(null, pl);
+  const back = await invoke('save-user-playlist')(pl);
   assert.equal(back.success, true);
   assert.equal(back.restored, true);
   assert.equal(back.playlist.id, pl.id, 'id 必须原样，收藏/封面等按 id 记的东西才不断链');
@@ -213,15 +214,15 @@ test('端到端：删除→进回收站→撤销原 id 找回，全程零新通�
 
 test('端到端：列表里已有同 id（云端先带回来）⇒ 保存走更新分支并顺手清掉回收站陈旧条目，不出现两份', async () => {
   fresh();
-  const created = await invoke('save-user-playlist')(null, { name: '撞上云', songs: [] });
+  const created = await invoke('save-user-playlist')({ name: '撞上云', songs: [] });
   const pl = created.playlist;
-  await invoke('delete-user-playlist')(null, pl.id);
+  await invoke('delete-user-playlist')(pl.id);
   // 模拟云同步把原歌单灌回 userPlaylists（回收站条目仍挂着）
   const list = prefs.get('userPlaylists');
   list.unshift(pl);
   prefs.set('userPlaylists', list);
 
-  const r = await invoke('save-user-playlist')(null, pl);
+  const r = await invoke('save-user-playlist')(pl);
   assert.equal(r.success, true);
   assert.equal((await getIds()).filter(id => id === pl.id).length, 1);
   assert.equal(prefs.get('playlistTrash').length, 0, '复活后的陈旧回收站条目必须被清掉');
@@ -230,7 +231,7 @@ test('端到端：列表里已有同 id（云端先带回来）⇒ 保存走更�
 test('端到端：收藏系统单依然删不动，且不会误进回收站', async () => {
   fresh();
   await invoke('get-user-playlists')();
-  const r = await invoke('delete-user-playlist')(null, 'favorites');
+  const r = await invoke('delete-user-playlist')('favorites');
   assert.equal(r.success, false);
   assert.match(r.error, /不能删除/);
   assert.ok((await getIds()).includes('favorites'));
@@ -239,7 +240,7 @@ test('端到端：收藏系统单依然删不动，且不会误进回收站', as
 
 test('端到端：带陌生 id 的保存（导入场景）保持旧行为 —— 另发新 id 新建，不去回收站碰瓷', async () => {
   fresh();
-  const r = await invoke('save-user-playlist')(null, { id: 'pl_from_elsewhere', name: '导入的', songs: [] });
+  const r = await invoke('save-user-playlist')({ id: 'pl_from_elsewhere', name: '导入的', songs: [] });
   assert.equal(r.success, true);
   assert.notEqual(r.playlist.id, 'pl_from_elsewhere');
   assert.equal(r.restored, undefined);
@@ -263,11 +264,11 @@ test('端到端：register() 启动清过期 —— 31 天前的条目没了，�
 
 test('端到端：get-user-playlists({trash:true}）返回带倒计时的视图，普通调用不受影响', async () => {
   fresh();
-  const created = await invoke('save-user-playlist')(null, { name: '删了看看', songs: [{ id: 1, source: 'netease' }] });
+  const created = await invoke('save-user-playlist')({ name: '删了看看', songs: [{ id: 1, source: 'netease' }] });
   const pl = created.playlist;
-  await invoke('delete-user-playlist')(null, pl.id);
+  await invoke('delete-user-playlist')(pl.id);
 
-  const view = await invoke('get-user-playlists')(null, { trash: true });
+  const view = await invoke('get-user-playlists')({ trash: true });
   assert.equal(view.length, 1);
   assert.equal(view[0].playlist.id, pl.id);
   assert.equal(view[0].playlist.name, '删了看看');
@@ -280,28 +281,28 @@ test('端到端：get-user-playlists({trash:true}）返回带倒计时的视图�
 
 test('端到端：回收站里"再删一次"= 彻底删除；此后既不在列表也不在回收站', async () => {
   fresh();
-  const created = await invoke('save-user-playlist')(null, { name: '彻底删', songs: [] });
+  const created = await invoke('save-user-playlist')({ name: '彻底删', songs: [] });
   const pl = created.playlist;
-  await invoke('delete-user-playlist')(null, pl.id);
+  await invoke('delete-user-playlist')(pl.id);
 
-  const purge = await invoke('delete-user-playlist')(null, pl.id);
+  const purge = await invoke('delete-user-playlist')(pl.id);
   assert.equal(purge.success, true);
   assert.equal(purge.purged, true);
   assert.deepEqual(prefs.get('playlistTrash'), []);
   // 第三次同 id 删除：列表没有、回收站也没有 ⇒ 如实报"歌单不存在"，绝不静默成功
-  const third = await invoke('delete-user-playlist')(null, pl.id);
+  const third = await invoke('delete-user-playlist')(pl.id);
   assert.equal(third.success, false);
   assert.match(third.error, /不存在/);
 });
 
 test('端到端：回收站视图条目走 save-user-playlist = 恢复，id 内容原样回列表', async () => {
   fresh();
-  const created = await invoke('save-user-playlist')(null, { name: '从站内回', songs: [{ id: 9, source: 'netease', title: 'y' }] });
+  const created = await invoke('save-user-playlist')({ name: '从站内回', songs: [{ id: 9, source: 'netease', title: 'y' }] });
   const pl = created.playlist;
-  await invoke('delete-user-playlist')(null, pl.id);
-  const view = await invoke('get-user-playlists')(null, { trash: true });
+  await invoke('delete-user-playlist')(pl.id);
+  const view = await invoke('get-user-playlists')({ trash: true });
 
-  const r = await invoke('save-user-playlist')(null, view[0].playlist);
+  const r = await invoke('save-user-playlist')(view[0].playlist);
   assert.equal(r.success, true);
   assert.equal(r.restored, true);
   assert.ok((await getIds()).includes(pl.id));

@@ -27,6 +27,7 @@ const fsa = require('../utils/fsAsync');
 // 窗口创建（含渲染层入口白名单校验 / 导航拦截）已抽到 main/createWindow.js
 const { createWindow } = require('./createWindow');
 // ─── IPC 域模块（装配在 ipc/index.js 的 registerAllIpcHandlers 里完成）───
+const senderTrust = require('./ipc/senderTrust');
 const ipcWindow  = require('./ipc/window');
 const ipcSearch  = require('./ipc/search');
 const ipcDownload= require('./ipc/download');
@@ -395,6 +396,12 @@ app.whenReady().then(async () => {
   globalShortcuts.init({
     getMainWindow: () => mainWindow,
     toggleMainWindow: trayMod.toggleMainWindow,
+  });
+  // IPC 来源闸的 URL 判据基准：包内 file: + dev server 同源（见 ipc/senderTrust）。
+  // 必须在创建任何窗口之前配置，否则窗口登记的 senderFrame 会因缺少基准被拒。
+  senderTrust.configure({
+    appPath: app.getAppPath(),
+    devOrigin: process.env.VITE_DEV_SERVER_URL || null,
   });
   openMainWindow();
   trayMod.createTray();

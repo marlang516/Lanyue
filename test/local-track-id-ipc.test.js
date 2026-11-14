@@ -52,11 +52,12 @@ const { FAVORITES_ID } = ipcPlaylist;
 const { localTrackId } = require('../src/shared/localTrackId.mjs');
 
 const { ENVELOPE_KEY } = require('../src/shared/ipcContract');
+const { event: TEST_EVENT } = require('./helpers/ipcTrust').install();
 const invoke = (channel) => {
   const fn = handlers.get(channel);
   assert.ok(fn, `IPC handler 未注册: ${channel}`);
   return async (...args) => {
-    const env = await fn(...args);
+    const env = await fn(TEST_EVENT, ...args);
     if (env && typeof env === 'object' && env[ENVELOPE_KEY] === 1) {
       if (!env.ok) throw new Error(env.error);
       return env.data;
@@ -124,7 +125,7 @@ test('aggregate-cross-source：本地组折叠 id=路径哈希，不再外泄磁
     dirPath: 'E:\\lib', lastScan: 1,
     songs: [{ filePath: p, title: 'S', artist: 'X', durationMs: 1000 }],
   }));
-  const r = await invoke('aggregate-cross-source')(null, { includeLocal: true });
+  const r = await invoke('aggregate-cross-source')({ includeLocal: true });
   const local = r.songs.filter(s => s.source === 'local');
   assert.strictEqual(local.length, 1);
   assert.strictEqual(local[0].id, localTrackId(p));

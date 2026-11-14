@@ -59,11 +59,12 @@ ipcPlaylist.register({
 });
 
 const { ENVELOPE_KEY } = require('../src/shared/ipcContract');
+const { event: TEST_EVENT } = require('./helpers/ipcTrust').install();
 const invoke = (channel) => {
   const fn = handlers.get(channel);
   assert.ok(fn, `IPC handler 未注册: ${channel}`);
   return async (...args) => {
-    const env = await fn(...args);
+    const env = await fn(TEST_EVENT, ...args);
     if (env && typeof env === 'object' && env[ENVELOPE_KEY] === 1) {
       if (!env.ok) throw new Error(env.error);
       return env.data;

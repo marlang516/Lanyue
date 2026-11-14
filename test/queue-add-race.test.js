@@ -26,8 +26,9 @@ Module._load = function interceptedLoad(request, parent, isMain) {
 };
 
 const { register } = require('../src/main/ipc/download/queue');
+const { event: TEST_EVENT } = require('./helpers/ipcTrust').install();
 
-const call = (channel, event = {}, ...args) => handlers.get(channel)(event, ...args);
+const call = (channel, event = TEST_EVENT, ...args) => handlers.get(channel)(event, ...args);
 
 /** 每个用例一份新队列 + 重新注册（handler 闭包持最新 deps） */
 function setup() {
@@ -53,8 +54,8 @@ test('M2: 并发两次 add-to-queue 同一首歌只入队一次', async () => {
   const queue = setup();
   const release = gatedHistory();
   const song = { id: 's1', source: 'netease', title: '晴天', artist: '周杰伦' };
-  const p1 = call('add-to-queue', {}, song);
-  const p2 = call('add-to-queue', {}, { ...song });
+  const p1 = call('add-to-queue', TEST_EVENT, song);
+  const p2 = call('add-to-queue', TEST_EVENT, { ...song });
   release();
   const [r1, r2] = await Promise.all([p1, p2]);
   assert.strictEqual(queue.length, 1, `同一首歌入了 ${queue.length} 次`);
@@ -69,8 +70,8 @@ test('M2: 并发两批 add-playlist-to-queue 重叠歌曲只入队一次', async
   const a = { id: 'a', source: 'qq', title: 'A' };
   const b = { id: 'b', source: 'qq', title: 'B' };
   const c = { id: 'c', source: 'qq', title: 'C' };
-  const p1 = call('add-playlist-to-queue', {}, { songs: [a, b] });
-  const p2 = call('add-playlist-to-queue', {}, { songs: [a, c] });
+  const p1 = call('add-playlist-to-queue', TEST_EVENT, { songs: [a, b] });
+  const p2 = call('add-playlist-to-queue', TEST_EVENT, { songs: [a, c] });
   release();
   const [r1, r2] = await Promise.all([p1, p2]);
   const aCount = queue.filter((s) => s.id === 'a').length;
@@ -83,8 +84,8 @@ test('M2: 单曲入队与批量入队并发重叠也只入队一次', async () =
   const queue = setup();
   const release = gatedHistory();
   const a = { id: 'a', source: 'kugou', title: 'A' };
-  const p1 = call('add-to-queue', {}, a);
-  const p2 = call('add-playlist-to-queue', {}, { songs: [a] });
+  const p1 = call('add-to-queue', TEST_EVENT, a);
+  const p2 = call('add-playlist-to-queue', TEST_EVENT, { songs: [a] });
   release();
   await Promise.all([p1, p2]);
   assert.strictEqual(queue.filter((s) => s.id === 'a').length, 1);
@@ -93,7 +94,7 @@ test('M2: 单曲入队与批量入队并发重叠也只入队一次', async () =
 test('顺序场景不回归：历史已下载仍返回 alreadyDownloaded 且不入队', async () => {
   const queue = setup();
   historyStub.findDownloadedAsync = async () => ({ savePath: 'C:/x.mp3', finishedAt: 123 });
-  const r = await call('add-to-queue', {}, { id: 'z', source: 'qq', title: 'Z' });
+  const r = await call('add-to-queue', TEST_EVENT, { id: 'z', source: 'qq', title: 'Z' });
   assert.strictEqual(r.data.alreadyDownloaded, true);
   assert.strictEqual(r.data.savePath, 'C:/x.mp3');
   assert.strictEqual(queue.length, 0);
@@ -105,7 +106,7 @@ test('顺序场景不回归：批量内部重复与队内重复仍被跳过', as
   queue.push({ id: 'a', source: 'qq', taskId: 't0', status: 'pending' });
   const a = { id: 'a', source: 'qq', title: 'A' };
   const b = { id: 'b', source: 'qq', title: 'B' };
-  const r = await call('add-playlist-to-queue', {}, { songs: [a, b, { ...b }] });
+  const r = await call('add-playlist-to-queue', TEST_EVENT, { songs: [a, b, { ...b }] });
   assert.strictEqual(r.data.queued, 1, '只应入队 b 一次');
   assert.strictEqual(r.data.skipped, 2, '队内已有的 a + 批内重复的 b');
   assert.strictEqual(queue.length, 2);

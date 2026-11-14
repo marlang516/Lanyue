@@ -15,6 +15,7 @@ const path = require('path');
 const { getMainWindow } = require('../context');
 const playCache = require('../playCache');
 const approvedDirs = require('../approvedDirs');
+const senderTrust = require('./senderTrust');
 const logger = require('../../utils/logger');
 // 主进程即 UI 线程：文件 IO 必须异步
 const fsa = require('../../utils/fsAsync');
@@ -72,6 +73,8 @@ function createDesktopLyric() {
       additionalArguments: [buildContractArg('secondary')],
     },
   });
+  // 二级窗口只登记 secondary 能力面：歌词/播放器通道之外一律在来源闸被拒
+  senderTrust.trust(desktopLyricWin.webContents, 'secondary');
   // 二级窗口只加载本地固定页面，任何导航/弹窗一律拒绝
   desktopLyricWin.webContents.on('will-navigate', (event) => event.preventDefault());
   desktopLyricWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -117,6 +120,7 @@ function createMiniPlayer() {
       additionalArguments: [buildContractArg('secondary')],
     },
   });
+  senderTrust.trust(miniPlayerWin.webContents, 'secondary');
   miniPlayerWin.webContents.on('will-navigate', (event) => event.preventDefault());
   miniPlayerWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   miniPlayerWin.loadFile(path.join(__dirname, '../../renderer/mini-player.html'));

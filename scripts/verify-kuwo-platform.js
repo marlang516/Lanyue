@@ -66,14 +66,14 @@ function check(name, ok, detail) {
 
   // ── 5) 预检工具正例（用刚拿到的真实直链）─────────────
   if (gotUrl) {
-    const t = await testAudioLink(gotUrl.url, { headers: { Referer: 'http://www.kuwo.cn/' } });
+    const t = await testAudioLink(gotUrl.url, { headers: { Referer: 'https://www.kuwo.cn/' } });
     check('testAudioLink 对真实直链判定可用', t.ok, `status=${t.status} ext=${t.ext} size=${t.sizeBytes} ct=${t.contentType || '(空)'}`);
   }
 
   // ── 6) 预检工具负例（无效 rid 应判不可用，且不能把正文读进内存）──
   const bad = await testAudioLink(
-    'http://antiserver.kuwo.cn/anti.s?type=convert_url&format=mp3&response=url&rid=MUSIC_1',
-    { headers: { Referer: 'http://www.kuwo.cn/' } },
+    'https://antiserver.kuwo.cn/anti.s?type=convert_url&format=mp3&response=url&rid=MUSIC_1',
+    { headers: { Referer: 'https://www.kuwo.cn/' } },
   );
   check('testAudioLink 对无效直链判定不可用', bad.ok === false, `ok=${bad.ok} status=${bad.status} reason=${bad.reason}`);
 

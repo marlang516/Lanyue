@@ -47,11 +47,12 @@ const ipcTemplates = require('../src/main/ipc/downloadTemplates');
 ipcTemplates.register();
 
 const { ENVELOPE_KEY } = require('../src/shared/ipcContract');
+const { event: TEST_EVENT } = require('./helpers/ipcTrust').install();
 /** 直调 ipcMain 包装器并解包信封，等价于渲染层 api.xxx() 拿到的值 */
 async function invoke(channel, arg) {
   const fn = handlers.get(channel);
   assert.ok(fn, `IPC handler 未注册: ${channel}`);
-  const env = await fn({}, arg);
+  const env = await fn(TEST_EVENT, arg);
   assert.ok(env && typeof env === 'object', 'handler 必须回信封对象');
   assert.equal(env[ENVELOPE_KEY], 1, '必须是传输层信封');
   assert.equal(env.ok, true, '不该抛错: ' + (env.error && env.error.message));

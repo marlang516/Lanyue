@@ -28,8 +28,19 @@ Module._load = function interceptedLoad(request, parent, isMain) {
   return originalLoad(request, parent, isMain);
 };
 
+const { pathToFileURL } = require('node:url');
+const pathMod = require('node:path');
 const { register } = require('../src/main/ipc/download/queue');
-const call = (channel, event = {}, ...args) => handlers.get(channel)(event, ...args);
+const senderTrust = require('../src/main/ipc/senderTrust');
+
+// 来源闸：走真实 ipcMain 监听器，必须带已登记的主窗口 sender。
+senderTrust.configure({ appPath: process.cwd() });
+const frame = { url: pathToFileURL(pathMod.join(__dirname, '../dist/renderer/index.html')).href, parent: null };
+const wc = { id: 301, isDestroyed: () => false, mainFrame: frame };
+senderTrust.trust(wc, 'main');
+const mkEvent = () => ({ sender: wc, senderFrame: frame });
+
+const call = (channel, event = mkEvent(), ...args) => handlers.get(channel)(event, ...args);
 
 function setup() {
   const queue = [];
@@ -63,7 +74,7 @@ function maliciousSong() {
 
 test('M3: 批量入队剥离内部/状态字段，保留合法歌曲与歌单元数据', async () => {
   const queue = setup();
-  const r = await call('add-playlist-to-queue', {}, { songs: [maliciousSong()] });
+  const r = await call('add-playlist-to-queue', mkEvent(), { songs: [maliciousSong()] });
   assert.strictEqual(r.data.queued, 1);
   assert.strictEqual(queue.length, 1);
   const item = queue[0];
@@ -93,7 +104,7 @@ test('M3: 干净批量载荷不受影响（正常歌单仍全部入队）', asyn
     { id: 'a', source: 'qq', title: 'A', playlistName: 'P', trackNo: 1 },
     { id: 'b', source: 'netease', title: 'B', playlistName: 'P', trackNo: 2 },
   ];
-  const r = await call('add-playlist-to-queue', {}, { songs });
+  const r = await call('add-playlist-to-queue', mkEvent(), { songs });
   assert.strictEqual(r.data.queued, 2);
   assert.strictEqual(queue.length, 2);
   assert.strictEqual(queue[0].playlistName, 'P');
