@@ -145,7 +145,11 @@ function dropBrokenImg(e: Event): void {
             <button class="ly-btn" title="去重" @click="dedupeActive"><Icon name="layers" :size="14" /> 去重</button>
             <button class="ly-btn" title="复制 M3U 清单" @click="onExport"><Icon name="copy" :size="14" /> 导出</button>
             <button v-if="!activePlaylist.system" class="ly-btn" @click="renamePlaylist(activePlaylist)"><Icon name="edit" :size="14" /> 重命名</button>
-            <button v-if="!activePlaylist.system" class="ly-btn ly-btn-danger" @click="removePlaylist(activePlaylist)"><Icon name="trash" :size="14" /></button>
+            <button
+              v-if="!activePlaylist.system" class="ly-btn ly-btn-danger"
+              :aria-label="`删除歌单 ${activePlaylist.name}`" :title="`删除歌单 ${activePlaylist.name}`"
+              @click="removePlaylist(activePlaylist)"
+            ><Icon name="trash" :size="14" /></button>
             <button class="ly-btn" :class="{ 'ly-btn-primary': playlists.batchMode }" @click="playlists.batchMode = !playlists.batchMode; playlists.selected.clear()">
               <Icon name="check" :size="14" /> 选择
             </button>

@@ -73,12 +73,12 @@ function onVolumeInput(e: Event) {
         <div class="group">
           <h4>主题</h4>
           <div class="cards two">
-            <button class="opt" :class="{ on: ui.theme === 'light' }" @click="chooseTheme('light')">
+            <button class="opt" :class="{ on: ui.theme === 'light' }" :aria-pressed="ui.theme === 'light'" @click="chooseTheme('light')">
               <span class="swatch light"></span>
               <b>浅色</b>
               <small>极光玻璃 · 明亮</small>
             </button>
-            <button class="opt" :class="{ on: ui.theme === 'dark' }" @click="chooseTheme('dark')">
+            <button class="opt" :class="{ on: ui.theme === 'dark' }" :aria-pressed="ui.theme === 'dark'" @click="chooseTheme('dark')">
               <span class="swatch dark"></span>
               <b>深色</b>
               <small>极光玻璃 · 夜间</small>
@@ -89,8 +89,8 @@ function onVolumeInput(e: Event) {
         <div class="group">
           <h4>界面语言</h4>
           <div class="row">
-            <button class="ly-btn" :class="{ 'ly-btn-primary': ui.lang === 'zh' }" @click="chooseLanguage('zh')">简体中文</button>
-            <button class="ly-btn" :class="{ 'ly-btn-primary': ui.lang === 'en' }" @click="chooseLanguage('en')">English</button>
+            <button class="ly-btn" :class="{ 'ly-btn-primary': ui.lang === 'zh' }" :aria-pressed="ui.lang === 'zh'" @click="chooseLanguage('zh')">简体中文</button>
+            <button class="ly-btn" :class="{ 'ly-btn-primary': ui.lang === 'en' }" :aria-pressed="ui.lang === 'en'" @click="chooseLanguage('en')">English</button>
           </div>
         </div>
       </template>
@@ -103,9 +103,9 @@ function onVolumeInput(e: Event) {
         <div class="group">
           <h4>默认音质</h4>
           <div class="row">
-            <button class="ly-btn" :class="{ 'ly-btn-primary': settings.playQuality === 'standard' }" @click="chooseQuality('standard')">标准 128k</button>
-            <button class="ly-btn" :class="{ 'ly-btn-primary': settings.playQuality === 'hq' }" @click="chooseQuality('hq')">高品质 320k</button>
-            <button class="ly-btn" :class="{ 'ly-btn-primary': settings.playQuality === 'lossless' }" @click="chooseQuality('lossless')">无损 FLAC</button>
+            <button class="ly-btn" :class="{ 'ly-btn-primary': settings.playQuality === 'standard' }" :aria-pressed="settings.playQuality === 'standard'" @click="chooseQuality('standard')">标准 128k</button>
+            <button class="ly-btn" :class="{ 'ly-btn-primary': settings.playQuality === 'hq' }" :aria-pressed="settings.playQuality === 'hq'" @click="chooseQuality('hq')">高品质 320k</button>
+            <button class="ly-btn" :class="{ 'ly-btn-primary': settings.playQuality === 'lossless' }" :aria-pressed="settings.playQuality === 'lossless'" @click="chooseQuality('lossless')">无损 FLAC</button>
           </div>
           <p class="hint">当前：{{ qualityLabel(player.quality) }}</p>
         </div>

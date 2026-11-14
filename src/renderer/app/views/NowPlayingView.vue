@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import {
   player, togglePlay, next, prev, seekTo, setVolume, cycleMode,
 } from '../stores/player';
+import { useModalAccessibility } from '../composables/useModalAccessibility';
 import { isFavorite, toggleFavorite } from '../stores/playlist';
 import { fmtDuration, pct, platformName, qualityLabel } from '../core/format';
 import { downloadSongs } from '../stores/search';
@@ -12,6 +13,9 @@ import Icon from '../components/common/Icon.vue';
 
 const fav = computed(() => (player.current ? isFavorite(player.current) : false));
 const progressPct = computed(() => pct(player.progress, player.duration));
+const nowEl = ref<HTMLElement | null>(null);
+
+useModalAccessibility(() => player.fullscreen, nowEl, close);
 
 function close() {
   player.fullscreen = false;
@@ -30,6 +34,36 @@ function onScrub(e: MouseEvent) {
   const r = el.getBoundingClientRect();
   seekTo(((e.clientX - r.left) / r.width) * (player.duration || 0));
 }
+function onScrubKeydown(e: KeyboardEvent): void {
+  const duration = Math.max(0, player.duration);
+  let target: number;
+  switch (e.key) {
+    case 'ArrowLeft':
+    case 'ArrowDown':
+      target = player.progress - 5;
+      break;
+    case 'ArrowRight':
+    case 'ArrowUp':
+      target = player.progress + 5;
+      break;
+    case 'PageDown':
+      target = player.progress - Math.max(1, duration * 0.1);
+      break;
+    case 'PageUp':
+      target = player.progress + Math.max(1, duration * 0.1);
+      break;
+    case 'Home':
+      target = 0;
+      break;
+    case 'End':
+      target = duration;
+      break;
+    default:
+      return;
+  }
+  e.preventDefault();
+  seekTo(Math.max(0, Math.min(duration, target)));
+}
 function onVolume(e: Event) {
   const el = e.target;
   if (el instanceof HTMLInputElement) setVolume(Number(el.value) / 100);
@@ -47,7 +81,10 @@ async function onDownload() {
 <template>
   <Teleport to="body">
     <Transition name="np">
-      <div v-if="player.fullscreen" class="now" @click="onRootClick">
+      <div
+        v-if="player.fullscreen" ref="nowEl" class="now" role="dialog" aria-modal="true"
+        aria-label="正在播放" tabindex="-1" @click="onRootClick"
+      >
         <div class="bg" :style="player.current?.cover ? { backgroundImage: `url(${player.current.cover})` } : {}"></div>
         <div class="veil"></div>
 
@@ -96,7 +133,14 @@ async function onDownload() {
         <footer class="ctr ly-card">
           <div class="scrub">
             <span class="time">{{ fmtDuration(player.progress) }}</span>
-            <div class="track" role="slider" aria-label="播放进度" @click="onScrub">
+            <div
+              class="track" role="slider" aria-label="播放进度" tabindex="0"
+              :aria-valuenow="Math.min(Math.round(player.progress), Math.round(player.duration))"
+              aria-valuemin="0" :aria-valuemax="Math.round(player.duration)"
+              :aria-valuetext="`${fmtDuration(player.progress)} / ${fmtDuration(player.duration)}`"
+              :aria-disabled="player.duration <= 0"
+              @click="onScrub" @keydown="onScrubKeydown"
+            >
               <i :style="{ width: progressPct + '%' }"></i>
             </div>
             <span class="time">{{ fmtDuration(player.duration) }}</span>
@@ -206,6 +250,7 @@ async function onDownload() {
 .scrub { display: flex; align-items: center; gap: var(--sp-3); }
 .time { width: 42px; flex-shrink: 0; text-align: center; font-size: var(--fs-xs); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .track { flex: 1; height: 16px; display: flex; align-items: center; cursor: pointer; }
+.track:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 3px; border-radius: var(--r-full); }
 .track > i { display: block; height: 4px; border-radius: var(--r-full); background: var(--au-grad); }
 .track:hover > i { height: 6px; }
 

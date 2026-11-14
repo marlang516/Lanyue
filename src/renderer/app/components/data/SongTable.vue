@@ -90,7 +90,9 @@ function dropBrokenImg(e: Event): void {
         <div class="cover" :class="{ nocover: !s.cover }">
           <img v-if="s.cover" :src="s.cover" alt="" loading="lazy" decoding="async" @error="dropBrokenImg" />
           <Icon v-if="!s.cover" name="music" :size="15" />
-          <span class="cover-play" aria-label="播放" @click.stop="emit('play', i)"><Icon name="play" :size="12" /></span>
+          <button class="cover-play" type="button" :aria-label="`播放 ${s.title || '歌曲'}`" @click.stop="emit('play', i)">
+            <Icon name="play" :size="12" />
+          </button>
         </div>
 
         <div class="meta">
@@ -189,10 +191,11 @@ function dropBrokenImg(e: Event): void {
 .cover.nocover { background: linear-gradient(135deg, var(--glass-2), var(--accent-soft)); }
 .cover-play {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-  background: rgba(20, 24, 36, .42); color: #fff;
+  padding: 0; border: 0; background: rgba(20, 24, 36, .42); color: #fff;
   opacity: 0; cursor: pointer;
   transition: opacity var(--dur-1) var(--ease);
 }
+.cover-play:focus-visible { opacity: 1; outline: 2px solid #fff; outline-offset: -3px; }
 .cover-play svg { width: 12px; height: 12px; transform: translateX(1px); }
 .row:hover .cover-play { opacity: 1; }
 .row.on .cover-play { background: rgba(124, 92, 255, .55); }

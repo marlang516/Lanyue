@@ -81,11 +81,24 @@ function changeQuality(e: Event) {
 }
 
 function pickHistory(h: string) {
+  inputEl.value?.focus();
   kwInput.value = h;
   submit();
 }
 
-function hideHistorySoon() {
+function clearSearchHistory() {
+  clearHistory();
+  inputEl.value?.focus();
+}
+
+function removeSearchHistoryItem(h: string) {
+  removeHistoryItem(h);
+  inputEl.value?.focus();
+}
+
+function hideHistorySoon(e: FocusEvent) {
+  const form = inputEl.value?.form;
+  if (e.relatedTarget instanceof Node && form?.contains(e.relatedTarget)) return;
   clearTimeout(blurTimer);
   blurTimer = setTimeout(() => { showHistory.value = false; }, 160);
 }
@@ -154,7 +167,7 @@ function dropBrokenImg(e: Event): void {
           </button>
         </div>
 
-        <form class="ly-search input-wrap" role="search" @submit.prevent="submit">
+        <form class="ly-search input-wrap" role="search" @submit.prevent="submit" @focusout="hideHistorySoon">
           <Icon name="search" :size="16" />
           <input
             ref="inputEl"
@@ -162,7 +175,6 @@ function dropBrokenImg(e: Event): void {
             placeholder="搜索歌曲、歌手、专辑…（支持直接粘贴平台链接）"
             aria-label="搜索关键词"
             @focus="keepHistory"
-            @blur="hideHistorySoon"
             @keydown.enter.prevent="submit"
           />
           <button class="ly-btn ly-btn-sm ly-btn-primary" type="submit">搜索</button>
@@ -171,14 +183,14 @@ function dropBrokenImg(e: Event): void {
             <div v-if="showHistory && search.history.length && !search.keyword" class="history" @mousedown.prevent>
               <header>
                 <span>最近搜索</span>
-                <button class="ly-btn ly-btn-sm ly-btn-ghost" @click="clearHistory">清空</button>
+                <button class="ly-btn ly-btn-sm ly-btn-ghost" type="button" @click="clearSearchHistory">清空</button>
               </header>
               <div class="hlist">
                 <div v-for="h in search.history" :key="h" class="hitem">
-                  <button class="hbtn" @mousedown.prevent="pickHistory(h)">
+                  <button class="hbtn" type="button" @click="pickHistory(h)">
                     <Icon name="clock" :size="13" /> {{ h }}
                   </button>
-                  <button class="hdel" aria-label="移除" @mousedown.prevent="removeHistoryItem(h)">
+                  <button class="hdel" type="button" aria-label="移除" @click="removeSearchHistoryItem(h)">
                     <Icon name="x" :size="11" />
                   </button>
                 </div>
