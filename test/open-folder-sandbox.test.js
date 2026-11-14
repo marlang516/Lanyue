@@ -68,12 +68,13 @@ ipcWindow.setWindowPort({
 ipcWindow.register();
 
 const { ENVELOPE_KEY } = require(path.join(ROOT, 'src/shared/ipcContract'));
+const { event: TEST_EVENT } = require('./helpers/ipcTrust').install();
 
 /** 直调注册好的 handler，并按 preload 的方式拆掉传输层信封 */
 async function openFolder(folder) {
   const fn = handlers.get('open-folder');
   assert.ok(fn, 'open-folder handler 未注册');
-  const env = await fn({}, folder);
+  const env = await fn(TEST_EVENT, folder);
   assert.equal(env && env[ENVELOPE_KEY], 1, `返回的不是信封形态: ${JSON.stringify(env)}`);
   return env.data;
 }

@@ -77,11 +77,12 @@ prefs.init(userDataDir);
 // register.js 的传输层信封（见 test/ipc-envelope.test.js）：
 // 本测试直调 ipcMain 包装器，模拟 preload 的解包还原
 const { ENVELOPE_KEY } = require('../src/shared/ipcContract');
+const { event: TEST_EVENT } = require('./helpers/ipcTrust').install();
 const invoke = (channel) => {
   const fn = handlers.get(channel);
   assert.ok(fn, `IPC handler 未注册: ${channel}`);
   return async (...args) => {
-    const env = await fn(...args);
+    const env = await fn(TEST_EVENT, ...args);
     if (env && typeof env === 'object' && env[ENVELOPE_KEY] === 1) {
       if (!env.ok) throw new Error(env.error);
       return env.data;
@@ -213,7 +214,7 @@ test('出网守卫本身有效（防止守卫失效导致假绿）', async () =>
 
 test('scan-local-library: 返回全部音频，全程无同步 fs 调用且零出网', async () => {
   const { result: scan, syncCalls } = await withSyncFsGuard(() =>
-    invoke('scan-local-library')({}, libDir)
+    invoke('scan-local-library')(libDir)
   );
 
   assert.strictEqual(scan.error, undefined, `扫描报错: ${scan.error}`);
@@ -232,20 +233,20 @@ test('scan-local-library: 返回全部音频，全程无同步 fs 调用且零�
 });
 
 test('scan-local-library: 二次扫描走增量，结果稳定', async () => {
-  const r = await invoke('scan-local-library')({}, libDir);
+  const r = await invoke('scan-local-library')(libDir);
   assert.strictEqual(r.incremental, true);
   assert.strictEqual(r.count, LIB_FILES.length);
 });
 
 test('scan-local-library: 目录不存在时返回错误而非抛异常', async () => {
   const missing = path.join(libDir, 'no-such-subdir');
-  const r = await invoke('scan-local-library')({}, missing);
+  const r = await invoke('scan-local-library')(missing);
   assert.strictEqual(r.error, '目录不存在');
   assert.deepStrictEqual(r.songs, []);
 });
 
 test('scan-local-library: 非法路径被沙箱拒绝', async () => {
-  const r = await invoke('scan-local-library')({}, 'file:///etc/passwd');
+  const r = await invoke('scan-local-library')('file:///etc/passwd');
   assert.strictEqual(r.error, '非法路径');
   assert.deepStrictEqual(r.songs, []);
 });
@@ -253,7 +254,7 @@ test('scan-local-library: 非法路径被沙箱拒绝', async () => {
 // ── 索引读取 ─────────────────────────────────────────────────
 
 test('load-library-index: 读回上一轮扫描结果，且无同步 fs 调用', async () => {
-  const { result, syncCalls } = await withSyncFsGuard(() => invoke('load-library-index')({}));
+  const { result, syncCalls } = await withSyncFsGuard(() => invoke('load-library-index')());
   assert.strictEqual(result.songs.length, LIB_FILES.length);
   assert.strictEqual(result.dirPath, libDir);
   assert.ok(result.lastScan > 0, 'lastScan 应被写入');
@@ -266,7 +267,7 @@ test('write-local-lrc → read-local-lrc: 往返一致，带 BOM 且能解码', 
   const audio = path.join(libDir, '晴天.flac');
   const lrc = '[00:01.00]故事的小黄花\n[00:05.00]从出生那年就飘着';
 
-  const w = await invoke('write-local-lrc')({}, audio, lrc);
+  const w = await invoke('write-local-lrc')(audio, lrc);
   assert.strictEqual(w.success, true, `写入失败: ${w.error}`);
 
   const lrcPath = path.join(libDir, '晴天.lrc');
@@ -274,20 +275,20 @@ test('write-local-lrc → read-local-lrc: 往返一致，带 BOM 且能解码', 
   const buf = fs.readFileSync(lrcPath);
   assert.deepStrictEqual([...buf.slice(0, 3)], [0xEF, 0xBB, 0xBF], '必须写 UTF-8 BOM');
 
-  const r = await invoke('read-local-lrc')({}, audio);
+  const r = await invoke('read-local-lrc')(audio);
   assert.strictEqual(r.source, 'sidecar');
   assert.strictEqual(r.lrc, lrc);
 });
 
 test('read-local-lrc: 非音频扩展名直接返回空', async () => {
-  const r = await invoke('read-local-lrc')({}, path.join(libDir, 'note.txt'));
+  const r = await invoke('read-local-lrc')(path.join(libDir, 'note.txt'));
   assert.strictEqual(r.lrc, '');
   assert.strictEqual(r.source, '');
 });
 
 test('read-local-lrc: 沙箱外路径被拒绝', async () => {
   const outside = path.join(os.tmpdir(), 'outside.mp3');
-  const r = await invoke('read-local-lrc')({}, outside);
+  const r = await invoke('read-local-lrc')(outside);
   assert.strictEqual(r.error, '路径不可访问');
 });
 
@@ -298,7 +299,7 @@ test('rename-file: 正常重命名，且无同步 fs 调用', async () => {
   const dst = path.join(libDir, '夜曲-重命名.flac');
 
   const { result, syncCalls } = await withSyncFsGuard(() =>
-    invoke('rename-file')({}, src, dst)
+    invoke('rename-file')(src, dst)
   );
   assert.strictEqual(result.success, true, `重命名失败: ${result.error}`);
   assert.strictEqual(fs.existsSync(dst), true);
@@ -306,13 +307,13 @@ test('rename-file: 正常重命名，且无同步 fs 调用', async () => {
   assert.deepStrictEqual(syncCalls, [], `rename-file 含同步调用: ${syncCalls.join(', ')}`);
 
   // 复原，避免影响后续用例
-  await invoke('rename-file')({}, dst, src);
+  await invoke('rename-file')(dst, src);
 });
 
 test('rename-file: 目标已存在时拒绝覆盖', async () => {
   const a = path.join(libDir, '晴天.flac');
   const b = path.join(libDir, '七里香.flac');
-  const r = await invoke('rename-file')({}, a, b);
+  const r = await invoke('rename-file')(a, b);
   assert.strictEqual(r.success, false);
   assert.strictEqual(r.error, '目标文件已存在');
   // 两个文件都必须还在（不允许静默覆盖）
@@ -321,7 +322,7 @@ test('rename-file: 目标已存在时拒绝覆盖', async () => {
 });
 
 test('rename-file: 源文件不存在时返回错误', async () => {
-  const r = await invoke('rename-file')({}, path.join(libDir, 'ghost.flac'), path.join(libDir, 'x.flac'));
+  const r = await invoke('rename-file')(path.join(libDir, 'ghost.flac'), path.join(libDir, 'x.flac'));
   assert.strictEqual(r.success, false);
   assert.strictEqual(r.error, '源文件不存在');
 });
@@ -330,14 +331,14 @@ test('delete-file: 移入回收站后原路径消失', async () => {
   const tmp = path.join(libDir, '待删除.flac');
   fs.writeFileSync(tmp, 'fake-flac');
 
-  const r = await invoke('delete-file')({}, tmp);
+  const r = await invoke('delete-file')(tmp);
   assert.strictEqual(r.success, true, `删除失败: ${r.error}`);
   assert.strictEqual(fs.existsSync(tmp), false);
   assert.strictEqual(fs.existsSync(path.join(trashDir, '待删除.flac')), true);
 });
 
 test('delete-file: 文件不存在时返回错误而非抛异常', async () => {
-  const r = await invoke('delete-file')({}, path.join(libDir, 'ghost2.flac'));
+  const r = await invoke('delete-file')(path.join(libDir, 'ghost2.flac'));
   assert.strictEqual(r.success, false);
   assert.strictEqual(r.error, '文件不存在');
 });

@@ -10,8 +10,10 @@
  *    用户没点「查看」之前绝不因其剪贴板内容发起任何请求；
  *  - 同一段文本只提示一次（lastText 去重），忽略后不会再骚扰；
  *  - 超过 500 字符的文本由解析器按普通文本忽略（防误粘整篇文章刷屏）；
- *  - prefs.clipboardWatch === false 时直接跳过读取（设置页即时生效，
- *    无需专门的开关 IPC）。
+ *  - **默认关闭**：只有 prefs.clipboardWatch === true 才读取剪贴板。
+ *    剪贴板是用户最私密的输入面之一，静默轮询必须在用户明确同意后才行；
+ *    默认开会让「装完就装了个剪贴板读取器」成为既成事实（2026-11 审计 P2）。
+ *    设置页开关写 prefs 后下一 tick 生效，无需专门的开关 IPC。
  */
 
 'use strict';
@@ -61,7 +63,7 @@ function inspect(text) {
 
 function _tick() {
   try {
-    if (prefs.get('clipboardWatch') === false) return; // 默认开
+    if (prefs.get('clipboardWatch') !== true) return; // 默认关，需用户显式开启
     if (!clipboard || typeof clipboard.readText !== 'function') return;
     const payload = inspect(clipboard.readText());
     if (payload) safeSend('clipboard-link', payload);

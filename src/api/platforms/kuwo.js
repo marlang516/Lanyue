@@ -46,7 +46,7 @@ async function kuwoSearch(keyword, page = 1) {
     encoding: 'utf8', rformat: 'json', mobi: '1', issubtitle: '1',
     show_copyright_off: '1', pn: String(Math.max(0, page - 1)), rn: String(SEARCH_PAGE_SIZE), all: keyword,
   });
-  const res = await request(`http://www.kuwo.cn/search/searchMusicBykeyWord?${params}`, {
+  const res = await request(`https://www.kuwo.cn/search/searchMusicBykeyWord?${params}`, {
     headers: HEADERS,
     timeout: 8000,
   });
@@ -84,7 +84,7 @@ async function relayLossless(id) {
       logger.warn('[kuwo] 中转返回非 kuwo 域直链，丢弃:', host);
       return null;
     }
-    const test = await testAudioLink(d.url, { headers: { Referer: 'http://www.kuwo.cn/' } });
+    const test = await testAudioLink(d.url, { headers: { Referer: 'https://www.kuwo.cn/' } });
     if (!test.ok) return null;
     return { url: d.url, ext: test.ext, size: test.sizeBytes, via: 'relay:cenguigui' };
   } catch (e) {
@@ -100,7 +100,7 @@ async function relayLossless(id) {
  */
 async function antiserverMp3(id) {
   const res = await request(
-    `http://antiserver.kuwo.cn/anti.s?type=convert_url&format=mp3&response=url&rid=MUSIC_${encodeURIComponent(id)}`,
+    `https://antiserver.kuwo.cn/anti.s?type=convert_url&format=mp3&response=url&rid=MUSIC_${encodeURIComponent(id)}`,
     { headers: HEADERS, timeout: 8000 },
   );
   const url = String(res || '').trim();
@@ -128,7 +128,7 @@ async function kuwoGetUrl(id, quality = 'standard') {
     }
     const official = await antiserverMp3(id);
     if (official) {
-      const test = await testAudioLink(official.url, { headers: { Referer: 'http://www.kuwo.cn/' } });
+      const test = await testAudioLink(official.url, { headers: { Referer: 'https://www.kuwo.cn/' } });
       if (test.ok) {
         return { ...official, size: test.sizeBytes, br: 128000, requestedBr: 128000, via: 'official:antiserver' };
       }
@@ -169,7 +169,7 @@ function lrcFromLines(lines) {
 async function kuwoGetLyrics(id) {
   if (!id) return '';
   try {
-    const res = await request(`http://m.kuwo.cn/newh5/singsong/get_lrc?rid=${encodeURIComponent(id)}`, {
+    const res = await request(`https://m.kuwo.cn/newh5/singsong/get_lrc?rid=${encodeURIComponent(id)}`, {
       headers: HEADERS, timeout: 6000,
     });
     return lrcFromLines(res?.data?.lrclist);
@@ -189,9 +189,9 @@ module.exports = {
   // 网络事实：搜索(www) / 取流(antiserver) / 歌词(m) / 封面(img4)
   hosts: {
     origins: [
-      'http://www.kuwo.cn',
-      'http://antiserver.kuwo.cn',
-      'http://m.kuwo.cn',
+      'https://www.kuwo.cn',
+      'https://antiserver.kuwo.cn',
+      'https://m.kuwo.cn',
       'https://img4.kuwo.cn',
     ],
   },

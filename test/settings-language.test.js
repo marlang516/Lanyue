@@ -63,10 +63,19 @@ prefs.init(userDataDir);
 require('../src/main/ipc/prefs').register();
 
 const { ENVELOPE_KEY } = require('../src/shared/ipcContract');
+const { pathToFileURL } = require('node:url');
+const senderTrust = require('../src/main/ipc/senderTrust');
+
+// 来源闸：handler 走真实 ipcMain 包装，必须带已登记的主窗口 sender。
+senderTrust.configure({ appPath: process.cwd() });
+const frame = { url: pathToFileURL(path.join(ROOT, 'dist/renderer/index.html')).href, parent: null };
+const wc = { id: 302, isDestroyed: () => false, mainFrame: frame };
+senderTrust.trust(wc, 'main');
+
 async function invoke(channel, ...args) {
   const fn = handlers.get(channel);
   assert.ok(fn, `IPC handler 未注册: ${channel}`);
-  const env = await fn({}, ...args);
+  const env = await fn({ sender: wc, senderFrame: frame }, ...args);
   assert.equal(env[ENVELOPE_KEY], 1, '必须是传输层信封');
   assert.equal(env.ok, true, '不该抛错: ' + (env.error && env.error.message));
   return env.data;

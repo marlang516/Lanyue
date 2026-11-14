@@ -25,10 +25,19 @@ Module._load = function interceptedLoad(request, parent, isMain) {
   return originalLoad(request, parent, isMain);
 };
 
+const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const { on } = require('../src/main/ipc/register');
+const senderTrust = require('../src/main/ipc/senderTrust');
+
+// 来源闸：send 测试同样走真实监听器，需要已登记的主窗口。
+senderTrust.configure({ appPath: process.cwd() });
+const frame = { url: pathToFileURL(path.join(__dirname, '../dist/renderer/index.html')).href, parent: null };
+const wc = { id: 2, isDestroyed: () => false, mainFrame: frame };
+senderTrust.trust(wc, 'main');
 
 /** 模拟渲染层 send：ipcMain.on 的监听器 */
-const fire = (channel, ...args) => sendHandlers.get(channel)({}, ...args);
+const fire = (channel, ...args) => sendHandlers.get(channel)({ sender: wc, senderFrame: frame }, ...args);
 
 test('send handler 同步抛错被就地接住，不向 ipcMain 外抛', () => {
   on('window-minimize', () => { throw new Error('sync boom'); });

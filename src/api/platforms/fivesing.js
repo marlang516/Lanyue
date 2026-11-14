@@ -39,8 +39,8 @@ const { asSong } = require('../songShape');
 const { testAudioLink } = require('../request');
 const logger = require('../../utils/logger');
 
-const SEARCH_HOST = 'http://search.5sing.kugou.com';
-const API_HOST = 'http://mobileapi.5sing.kugou.com';
+const SEARCH_HOST = 'https://search.5sing.kugou.com';
+const API_HOST = 'https://mobileapi.5sing.kugou.com';
 const REFERER = 'https://5sing.kugou.com/';
 const HEADERS = { Referer: REFERER };
 
@@ -255,8 +255,8 @@ module.exports = {
   // 网络事实：搜索(search) / 取流与歌词(mobileapi) / 页面(5sing)
   hosts: {
     origins: [
-      'http://search.5sing.kugou.com',
-      'http://mobileapi.5sing.kugou.com',
+      'https://search.5sing.kugou.com',
+      'https://mobileapi.5sing.kugou.com',
       'https://5sing.kugou.com',
     ],
   },

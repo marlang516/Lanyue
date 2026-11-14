@@ -10,6 +10,7 @@
 const { ipcMain } = require('electron');
 const { CHANNELS, normalizeArgs, ENVELOPE_KEY } = require('../../shared/ipcContract');
 const logger = require('../../utils/logger');
+const senderTrust = require('./senderTrust');
 
 const _registered = new Set();
 const _invokeFns = new Map(); // channel → 原始 handler（供 getInvokeHandler 主进程内复用）
@@ -34,6 +35,13 @@ function _envelope(result) {
 function handle(channel, fn) {
   _entry(channel, 'invoke');
   ipcMain.handle(channel, async (event, ...raw) => {
+    // 来源闸：只认登记过的窗口，且通道必须在其能力面内（见 senderTrust 头注）。
+    // 信封化返回而不是 throw —— 渲染层拿到的是明确的拒绝，不是未捕获异常。
+    const trust = senderTrust.check(event, channel, 'invoke');
+    if (!trust.ok) {
+      logger.warn(`[ipc] 拒绝 invoke ${channel}: ${trust.reason}`);
+      return { [ENVELOPE_KEY]: 1, ok: false, error: 'IPC 来源不可信' };
+    }
     const r = normalizeArgs(channel, raw);
     if (!r.ok) {
       logger.warn(`[ipc] ${r.error}`);
@@ -64,6 +72,11 @@ function handle(channel, fn) {
 function on(channel, fn) {
   _entry(channel, 'send');
   ipcMain.on(channel, (event, ...raw) => {
+    const trust = senderTrust.check(event, channel, 'send');
+    if (!trust.ok) {
+      logger.warn(`[ipc] 丢弃 send ${channel}: ${trust.reason}`);
+      return;
+    }
     const r = normalizeArgs(channel, raw);
     if (!r.ok) {
       logger.warn(`[ipc] ${r.error}（已丢弃）`);

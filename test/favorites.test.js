@@ -49,11 +49,12 @@ const { FAVORITES_ID, songKey } = ipcPlaylist;
 // register.js 的传输层信封（见 test/ipc-envelope.test.js）：
 // 本测试直调 ipcMain 包装器，模拟 preload 的解包还原
 const { ENVELOPE_KEY } = require('../src/shared/ipcContract');
+const { event: TEST_EVENT } = require('./helpers/ipcTrust').install();
 const invoke = (channel) => {
   const fn = handlers.get(channel);
   assert.ok(fn, `IPC handler 未注册: ${channel}`);
   return async (...args) => {
-    const env = await fn(...args);
+    const env = await fn(TEST_EVENT, ...args);
     if (env && typeof env === 'object' && env[ENVELOPE_KEY] === 1) {
       if (!env.ok) throw new Error(env.error);
       return env.data;
@@ -93,13 +94,13 @@ test('toggle-favorite: 首次添加，再次调用取消', async () => {
   fresh();
   await invoke('get-user-playlists')();
 
-  const on = await invoke('toggle-favorite')(null, 'netease', '1001', SONG_NETEASE);
+  const on = await invoke('toggle-favorite')('netease', '1001', SONG_NETEASE);
   assert.equal(on.success, true);
   assert.equal(on.favorited, true);
   assert.equal(on.playlist.songs.length, 1);
   assert.equal(on.playlist.songs[0].title, '夜曲');
 
-  const off = await invoke('toggle-favorite')(null, 'netease', '1001', SONG_NETEASE);
+  const off = await invoke('toggle-favorite')('netease', '1001', SONG_NETEASE);
   assert.equal(off.success, true);
   assert.equal(off.favorited, false);
   assert.equal(off.playlist.songs.length, 0);
@@ -107,23 +108,23 @@ test('toggle-favorite: 首次添加，再次调用取消', async () => {
 
 test('toggle-favorite: 参数不完整被拒绝', async () => {
   fresh();
-  assert.equal((await invoke('toggle-favorite')(null, '', '', SONG_NETEASE)).success, false);
-  assert.equal((await invoke('toggle-favorite')(null, 'netease', '1', null)).success, false);
-  assert.equal((await invoke('toggle-favorite')(null, 'netease', '1', 'not-an-object')).success, false);
+  assert.equal((await invoke('toggle-favorite')('', '', SONG_NETEASE)).success, false);
+  assert.equal((await invoke('toggle-favorite')('netease', '1', null)).success, false);
+  assert.equal((await invoke('toggle-favorite')('netease', '1', 'not-an-object')).success, false);
 });
 
 test('toggle-favorite: 跨平台同 id 是两条独立收藏，取消一条不动另一条', async () => {
   fresh();
   await invoke('get-user-playlists')();
 
-  await invoke('toggle-favorite')(null, 'netease', '1001', SONG_NETEASE);
-  await invoke('toggle-favorite')(null, 'qq', '1001', SONG_QQ);
+  await invoke('toggle-favorite')('netease', '1001', SONG_NETEASE);
+  await invoke('toggle-favorite')('qq', '1001', SONG_QQ);
 
   const pls = await invoke('get-user-playlists')();
   const fav = pls.find(p => p.id === FAVORITES_ID);
   assert.equal(fav.songs.length, 2);
 
-  const off = await invoke('toggle-favorite')(null, 'netease', '1001', SONG_NETEASE);
+  const off = await invoke('toggle-favorite')('netease', '1001', SONG_NETEASE);
   assert.equal(off.favorited, false);
   assert.equal(off.playlist.songs.length, 1);
   assert.equal(off.playlist.songs[0].source, 'qq');
@@ -133,7 +134,7 @@ test('toggle-favorite: 同一首歌反复切换不会累积重复条目', async 
   fresh();
   await invoke('get-user-playlists')();
   for (let i = 0; i < 5; i++) {
-    await invoke('toggle-favorite')(null, 'kugou', '9', SONG_KUGOU);
+    await invoke('toggle-favorite')('kugou', '9', SONG_KUGOU);
   }
   // 奇数次 → 已收藏，且只有一条
   const pls = await invoke('get-user-playlists')();
@@ -144,13 +145,13 @@ test('toggle-favorite: 同一首歌反复切换不会累积重复条目', async 
 test('delete-user-playlist: 拒绝删除收藏歌单，普通歌单可删', async () => {
   fresh();
   await invoke('get-user-playlists')();
-  const created = await invoke('save-user-playlist')(null, { name: '跑步歌单' });
+  const created = await invoke('save-user-playlist')({ name: '跑步歌单' });
   assert.equal(created.success, true);
 
-  const denied = await invoke('delete-user-playlist')(null, FAVORITES_ID);
+  const denied = await invoke('delete-user-playlist')(FAVORITES_ID);
   assert.equal(denied.success, false);
 
-  const ok = await invoke('delete-user-playlist')(null, created.playlist.id);
+  const ok = await invoke('delete-user-playlist')(created.playlist.id);
   assert.equal(ok.success, true);
 
   const pls = await invoke('get-user-playlists')();
@@ -162,12 +163,12 @@ test('remove-from-user-playlist: 带 source 只删对应平台那条', async () 
   fresh();
   await invoke('get-user-playlists')();
   const fav = (await invoke('get-user-playlists')()).find(p => p.id === FAVORITES_ID);
-  await invoke('save-user-playlist')(null, {
+  await invoke('save-user-playlist')({
     name: '混合', songs: [SONG_NETEASE, SONG_QQ],
   });
   const pl = (await invoke('get-user-playlists')()).find(p => p.name === '混合');
 
-  const r = await invoke('remove-from-user-playlist')(null, pl.id, '1001', 'netease');
+  const r = await invoke('remove-from-user-playlist')(pl.id, '1001', 'netease');
   assert.equal(r.success, true);
   assert.equal(r.playlist.songs.length, 1);
   assert.equal(r.playlist.songs[0].source, 'qq');
@@ -177,11 +178,11 @@ test('remove-from-user-playlist: 带 source 只删对应平台那条', async () 
 test('remove-from-user-playlist: 不带 source 时退回按 id 匹配（兼容旧调用方）', async () => {
   fresh();
   await invoke('get-user-playlists')();
-  const pl = (await invoke('save-user-playlist')(null, {
+  const pl = (await invoke('save-user-playlist')({
     name: '混合2', songs: [SONG_NETEASE, SONG_QQ],
   })).playlist;
 
-  const r = await invoke('remove-from-user-playlist')(null, pl.id, '1001');
+  const r = await invoke('remove-from-user-playlist')(pl.id, '1001');
   assert.equal(r.success, true);
   assert.equal(r.playlist.songs.length, 0);
 });
@@ -191,7 +192,7 @@ test('save-user-playlist: 更新已有歌单不丢失 system 标记', async () =
   await invoke('get-user-playlists')();
   const fav = (await invoke('get-user-playlists')()).find(p => p.id === FAVORITES_ID);
 
-  const r = await invoke('save-user-playlist')(null, {
+  const r = await invoke('save-user-playlist')({
     id: fav.id, name: '我喜欢的', desc: '改名后的收藏', songs: fav.songs,
   });
   assert.equal(r.success, true);

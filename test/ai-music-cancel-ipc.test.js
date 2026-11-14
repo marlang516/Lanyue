@@ -60,11 +60,12 @@ Module._load = originalLoad;
 ipcAiMusic.register();
 
 const { ENVELOPE_KEY } = require(path.join(ROOT, 'src/shared/ipcContract'));
+const { event: TEST_EVENT } = require('./helpers/ipcTrust').install();
 
 async function invoke(channel, ...args) {
   const fn = handlers.get(channel);
   assert.ok(fn, `IPC handler 未注册: ${channel}`);
-  const env = await fn({}, ...args);
+  const env = await fn(TEST_EVENT, ...args);
   return env && env[ENVELOPE_KEY] === 1 ? env.data : env;
 }
 

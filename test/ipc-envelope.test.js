@@ -19,10 +19,19 @@ Module._load = function interceptedLoad(request, parent, isMain) {
   return originalLoad(request, parent, isMain);
 };
 
+const { pathToFileURL } = require('url');
 const { ENVELOPE_KEY, buildContractArg } = require('../src/shared/ipcContract');
 const { handle, getInvokeHandler } = require('../src/main/ipc/register');
+const senderTrust = require('../src/main/ipc/senderTrust');
 
-const call = (channel, event = {}, ...args) => handlers.get(channel)(event, ...args);
+// 来源闸：信封测试走真实 ipcMain 监听器，必须带一个已登记的主窗口 sender。
+senderTrust.configure({ appPath: process.cwd() });
+const frame = { url: pathToFileURL(path.join(__dirname, '../dist/renderer/index.html')).href, parent: null };
+const wc = { id: 1, isDestroyed: () => false, mainFrame: frame };
+senderTrust.trust(wc, 'main');
+const mkEvent = () => ({ sender: wc, senderFrame: frame });
+
+const call = (channel, event = mkEvent(), ...args) => handlers.get(channel)(event, ...args);
 
 test('成功返回值被包成 {env, ok:true, data}', async () => {
   const fn = () => ({ some: 'value' });
@@ -43,7 +52,7 @@ test('handler 抛错被捕获为 {env, ok:false, error}，不再向外抛', asyn
 
 test('参数非法仍是 resolved 值 {error, fatal:true}（零漂移）', async () => {
   handle('scan-local-library', () => 'must-not-run');
-  const env = await call('scan-local-library', {}, { not: 'a string' });
+  const env = await call('scan-local-library', mkEvent(), { not: 'a string' });
   assert.strictEqual(env[ENVELOPE_KEY], 1);
   assert.strictEqual(env.ok, true, '参数拒绝历史上就是 resolved 值，信封不得改变其语义');
   assert.strictEqual(env.data.fatal, true);
