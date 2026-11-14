@@ -363,10 +363,10 @@ export function createPlaybackEngine({
    * 再实现本方法。届时 `playback/crossfade.js`（编排层）与 `audioPool.js`
    * （实例池）已就位，这里只是接线。
    *
-   * @param {object} song
+   * @param {object} _song
    * @returns {Promise<null>} 恒为 null —— 调用方需自行降级到硬切
    */
-  async function crossfadeTo(song) {
+  async function crossfadeTo(_song) {
     warn('crossfadeTo 未实现：引擎尚未接入生产播放路径，降级为硬切');
     return null;
   }

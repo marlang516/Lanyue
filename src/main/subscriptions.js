@@ -38,7 +38,6 @@ const { safeSend: contextSafeSend } = require('./context');
 const { createDomain } = require('./ipc/subscriptions/domain');
 const { createInfra } = require('./ipc/subscriptions/infra');
 
-const PREFS_KEY = 'subscriptions';
 const MAX_NEW_SONGS = 100;          // 单订阅保留的新歌列表上限（防 prefs.json 膨胀）
 const PLAYLIST_LIMIT = 200;
 const SINGER_LIMIT = 50;
@@ -52,8 +51,6 @@ const INITIAL_CHECK_DELAY_MS = 30 * 1000;
 const CHECK_TICK_MS = 60 * 1000;    // 调度器醒来的粒度
 /** 一次"什么都没取到"的检查对用户说的那句话（渲染层直接显示，与 main 侧其它中文文案同源） */
 const EMPTY_CHECK_ERROR = '未取到任何曲目（可能需要登录，或该歌单/歌手页受限）';
-
-const TYPES = new Set(['playlist', 'singer']);
 
 /**
  * 创建订阅服务实例。
@@ -114,7 +111,6 @@ function createSubscriptions(deps = {}) {
     applyCheckToEntry: domainApplyCheckToEntry,
     makeEntry: domainMakeEntry,
     buildKey: domainBuildKey,
-    _isDue: domainIsDue,
     _intervalMs: domainIntervalMs,
   } = domain;
 
