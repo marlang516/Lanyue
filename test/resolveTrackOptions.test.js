@@ -112,7 +112,7 @@ test('allowToggleSource=true：全局开关关着也能换源（覆盖反向生�
 });
 
 test('allowToggleSource 未传：行为与今天逐字一致（回归守卫）', async () => {
-  const { svc, getUrl } = build(
+  const { svc } = build(
     { 'netease:1': failResult(), 'kuwo:9': okResult() },
     {
       fallbackEnabled: () => true,

@@ -21,7 +21,6 @@ const { buildStoryMessages, extractStoryText } = require('../../api/services/son
 
 // 端口注入：由外部（main/index.js）提供 electron 能力，未注入时回退到直取 electron
 let _port = {};
-function setStoryPort(port) { _port = port || {}; }
 
 function _appGetUserDataDir() {
   const app = _port.app;

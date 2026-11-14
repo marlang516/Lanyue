@@ -36,7 +36,6 @@ function stripComments(src) {
 const ENGINE_SRC = read('../src/renderer/js/playback/engine.js');
 const POOL_SRC = read('../src/renderer/js/playback/audioPool.js');
 const BANDS_SRC = read('../src/renderer/js/playback/eqBands.js');
-const EQ_SRC = read('../src/renderer/js/player/eq.js');
 
 // ── 曲线 ────────────────────────────────────────────────
 test('crossfadeCurveAt：线性 0→1，越界钳制，dur<=0 直接到位', () => {

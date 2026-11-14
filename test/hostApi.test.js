@@ -57,7 +57,6 @@ const makeLogger = () => {
   };
 };
 
-const identityRedact = { apply: (v) => v };
 /** 去掉 cookie 字段的脱敏桩 */
 const stripCookieRedact = {
   apply: (v) => (v && typeof v === 'object' && 'cookie' in v

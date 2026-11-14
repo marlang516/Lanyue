@@ -31,10 +31,9 @@ async function getDownloadUrl({ api, id, source, quality }) {
  *
  * @param {Object} deps
  * @param {Object} deps.api - { getProbeSources, searchMusic, getDownloadUrl, recordProbeResult, getSourceHealthMap }
- * @param {Object} [deps.logger]
  * @returns {Promise<{probes:Array, health:Object}>}
  */
-async function probeSources({ api, logger }) {
+async function probeSources({ api }) {
   const PROBE_SOURCES = api.getProbeSources ? api.getProbeSources() : [];
   const KEYWORD = '周杰伦 晴天';
   const withTimeout = (p) =>

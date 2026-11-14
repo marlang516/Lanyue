@@ -17,7 +17,6 @@ const assert = require('node:assert');
 const {
   analyzeUserSource,
   validateManifest,
-  deriveCapabilities,
   BLOCKED_PATTERNS,
 } = require('../src/main/userSourceValidator');
 

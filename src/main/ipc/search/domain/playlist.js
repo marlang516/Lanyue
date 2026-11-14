@@ -7,8 +7,6 @@
  *   - getAlbumSongs 成功返回 api.getAlbumSongs(...) 原样（数组）；失败返回 []
  */
 
-const { validateKeyword } = require('./search');
-
 /**
  * 获取歌单曲目。
  * @param {Object} deps

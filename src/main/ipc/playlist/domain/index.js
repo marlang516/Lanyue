@@ -87,10 +87,10 @@ function savePlaylist(playlists, playlist) {
  * @param {Array} playlists
  * @param {Array} trash
  * @param {string} playlistId
- * @param {number} now
+ * @param {number} _now
  * @returns {{success, playlists, trash, purged?, error?}}
  */
-function deletePlaylist(playlists, trash, playlistId, now) {
+function deletePlaylist(playlists, trash, playlistId, _now) {
   if (!playlistId) return { success: false, error: '缺少歌单ID', playlists, trash };
   const list = Array.isArray(playlists) ? playlists.slice() : [];
   const tr = Array.isArray(trash) ? trash.slice() : [];
