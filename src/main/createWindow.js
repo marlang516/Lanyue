@@ -134,6 +134,20 @@ function createWindow({
     // 开发模式下可能 dist/renderer 还没构建好
     const devUrl = process.env.VITE_DEV_SERVER_URL;
     if (devUrl) {
+      if (app.isPackaged) {
+        logger.warn('[main] 已打包应用忽略 VITE_DEV_SERVER_URL');
+        return;
+      }
+      let parsedDevUrl;
+      try { parsedDevUrl = new URL(devUrl); } catch (_) { parsedDevUrl = null; }
+      if (!parsedDevUrl
+        || parsedDevUrl.protocol !== 'http:'
+        || !['localhost', '127.0.0.1', '[::1]'].includes(parsedDevUrl.hostname)
+        || parsedDevUrl.username
+        || parsedDevUrl.password) {
+        logger.warn('[main] 拒绝非本地开发渲染层 URL');
+        return;
+      }
       logger.log('[main] trying dev server URL:', devUrl);
       win.loadURL(devUrl).catch(e => logger.warn('[main] loadURL also failed:', e));
     }
