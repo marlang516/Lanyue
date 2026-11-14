@@ -26,7 +26,7 @@ const { chatConfigFrom, isConfigToken } = require('../../api/aiProviders');
 const { scrubToolText } = require('../../shared/outboundScrub');
 
 // 端口注入：由外部（main/index.js）提供 electron 能力，未注入时回退到直取 electron
-let _port = {};
+const _port = {};
 
 function _appGetVersion() {
   const app = _port.app;

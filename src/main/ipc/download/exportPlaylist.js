@@ -10,7 +10,7 @@ const { handle } = require('../register');
 const fsa = require('../../../utils/fsAsync');
 
 // 端口注入：由外部（main/index.js）提供 electron 能力，未注入时回退到直取 electron
-let _port = {};
+const _port = {};
 
 function _dialog() {
   const d = _port.dialog;

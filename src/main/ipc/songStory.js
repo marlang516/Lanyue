@@ -20,7 +20,7 @@ const { chatConfigFrom, isConfigToken } = require('../../api/aiProviders');
 const { buildStoryMessages, extractStoryText } = require('../../api/services/songStoryService');
 
 // 端口注入：由外部（main/index.js）提供 electron 能力，未注入时回退到直取 electron
-let _port = {};
+const _port = {};
 
 function _appGetUserDataDir() {
   const app = _port.app;
