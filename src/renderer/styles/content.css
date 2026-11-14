@@ -319,7 +319,17 @@
 /* 首页榜单过滤行（a/b 布局显示；c 门户隐藏——单平台过滤在四平台同屏下语义错位）。
    样式收编进类：曾写在行内 style 上，display:flex 以内联优先级压过了
    布局变体的 display:none（实测 c 布局下过滤行隐不掉）。 */
-.home-filterrow { display: flex; justify-content: flex-end; margin: 6px 0; }
+.home-filterrow { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-2); margin: 6px 0; }
+.home-filterrow input { width: 250px; }
+.home-filterrow input[hidden] { display: none !important; }
+.home-filter-toggle {
+  border: 1px solid var(--stroke-1); border-radius: var(--r-md);
+  padding: var(--sp-1) var(--sp-3); background: var(--elev-1);
+  color: var(--fg-2); font: inherit; font-size: var(--fs-sm); cursor: pointer;
+}
+.home-filter-toggle:hover { color: var(--fg-1); border-color: var(--stroke-2); }
+.home-filter-toggle:focus-visible { outline: 2px solid var(--accent-ui); outline-offset: 2px; }
+.home-filter-toggle.has-filter { color: var(--accent-ui); }
 #homePage[data-discover-layout="b"] .home-filterrow { grid-area: filter; }
 #homePage[data-discover-layout="b"] #homeBlocks { grid-area: blocks; }
 

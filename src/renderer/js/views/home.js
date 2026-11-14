@@ -43,6 +43,28 @@ window.homeSwitchDiscoverLayout = homeSwitchDiscoverLayout;
 // 首页榜单过滤词（会话级；小写化在 filterHomeSection 内统一处理）
 let _homeFilterStr = '';
 
+function setHomeFilterExpanded(expanded) {
+  const input = document.getElementById('homeFilterInput');
+  const toggle = document.getElementById('homeFilterToggle');
+  if (!input || !toggle) return;
+  input.hidden = !expanded;
+  toggle.setAttribute('aria-expanded', String(expanded));
+  const hasFilter = !!String(input.value || '').trim();
+  toggle.textContent = expanded
+    ? '收起筛选'
+    : hasFilter ? '筛选本页榜单（已生效）' : '筛选本页榜单';
+  toggle.classList.toggle('has-filter', hasFilter);
+  if (expanded) input.focus();
+}
+
+function toggleHomeFilter() {
+  const input = document.getElementById('homeFilterInput');
+  if (input) setHomeFilterExpanded(input.hidden);
+}
+
+setHomeFilterExpanded(false);
+window.toggleHomeFilter = toggleHomeFilter;
+
 // ── 分区注册表 ────────────────────────────────────────────
 // 新增一个区块 = 这里加一行；DOM、锚点、懒加载、状态统计自动跟上
 //
@@ -715,6 +737,8 @@ function _rerenderLoadedSections() {
 document.addEventListener('input', (e) => {
   if (e.target && e.target.id === 'homeFilterInput') {
     _homeFilterStr = String(e.target.value || '').trim();
+    const toggle = document.getElementById('homeFilterToggle');
+    if (toggle) toggle.classList.toggle('has-filter', !!_homeFilterStr);
     _rerenderLoadedSections();
   }
 });
