@@ -137,9 +137,24 @@
 
       <!-- 最近播放：已独立成导航页 #recentPage（2026-10-24），发现页不再重复展示 -->
 
-      <!-- 首页榜单即时过滤：只影响渲染，不清数据（会话级） -->
+      <!-- 首页榜单即时过滤：默认收起，展开后只影响渲染，不清数据（会话级） -->
       <div class="home-filterrow">
-        <input class="search-input" id="homeFilterInput" placeholder="过滤本页榜单（歌名/歌手/歌单名）..." style="width:250px;">
+        <button
+          class="home-filter-toggle"
+          id="homeFilterToggle"
+          type="button"
+          aria-controls="homeFilterInput"
+          aria-expanded="false"
+          onclick="toggleHomeFilter()"
+        >筛选本页榜单</button>
+        <input
+          class="search-input"
+          id="homeFilterInput"
+          type="search"
+          aria-label="过滤本页榜单"
+          placeholder="过滤本页榜单（歌名/歌手/歌单名）..."
+          hidden
+        >
       </div>
 
       <!-- 平台 tab 条：互斥切换，一次只显示一个平台（←/→ 循环） -->
