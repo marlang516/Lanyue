@@ -22,21 +22,25 @@ const { readSettingsView } = require('./helpers/settingsViewSource.js');
 /** 主进程内部维护、不经 set-pref 的键（与 quality.test.js 同口径） */
 const MAIN_INTERNAL_KEYS = new Set(['userPlaylists', 'activeDownloadTemplate']);
 
-function walkJs(dir, out = []) {
+function walkRendererSources(dir, out = []) {
   for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, ent.name);
-    if (ent.isDirectory()) walkJs(p, out);
-    else if (ent.name.endsWith('.js')) out.push(p);
+    if (ent.isDirectory()) walkRendererSources(p, out);
+    else if (/\.(js|ts|vue)$/.test(ent.name)) out.push(p);
   }
   return out;
 }
 
-/** 渲染层实际会写进 prefs 的键：字面量 setPref + 设置页 GENERAL_PREFS 登记表（写的是 cfg.key） */
-function rendererWrittenPrefKeys() {
+/** 渲染层实际会读写 prefs 的键：字面量访问 + 设置页 GENERAL_PREFS 登记表。 */
+function rendererAccessedPrefKeys() {
   const keys = new Set();
-  for (const file of walkJs(RENDERER)) {
-    const src = fs.readFileSync(file, 'utf8');
+  for (const file of walkRendererSources(RENDERER)) {
+    const src = fs.readFileSync(file, 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
     for (const m of src.matchAll(/api\.setPref\(\s*'([A-Za-z0-9_]+)'/g)) keys.add(m[1]);
+    for (const m of src.matchAll(/\bsetPref\(\s*'([A-Za-z0-9_]+)'/g)) keys.add(m[1]);
+    for (const m of src.matchAll(/\bgetPref\(\s*'([A-Za-z0-9_]+)'/g)) keys.add(m[1]);
   }
   const block = readSettingsView().match(/const GENERAL_PREFS = \{[\s\S]*?\n\};/);
   assert.ok(block, '未找到设置页 GENERAL_PREFS 登记表（改名或挪走时请同步本测试）');
@@ -44,11 +48,11 @@ function rendererWrittenPrefKeys() {
   return keys;
 }
 
-test('渲染层写的每个 pref 键都在 set-pref 白名单里（否则重启即失效）', () => {
-  const missing = [...rendererWrittenPrefKeys()]
+test('渲染层读写的每个 pref 键都在 set-pref 白名单里（否则读不到或写入后重启失效）', () => {
+  const missing = [...rendererAccessedPrefKeys()]
     .filter((k) => !ALLOWED_PREF_KEYS.has(k) && !MAIN_INTERNAL_KEYS.has(k))
     .sort();
-  assert.deepEqual(missing, [], '这些键能写却被白名单拒绝: ' + missing.join(', '));
+  assert.deepEqual(missing, [], '这些键未进 prefs 白名单: ' + missing.join(', '));
 });
 
 test('7f134d4 补录的 9 个键已在白名单（曾经静默被拒的设置项）', () => {

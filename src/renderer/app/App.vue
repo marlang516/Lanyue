@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted } from 'vue';
 import { ui, bootUi } from './stores/ui';
-import { restoreQueue } from './stores/player';
+import { restorePlaybackPrefs, restoreQueue } from './stores/player';
 import { loadOffset } from './stores/lyrics';
 import AppShell from './components/shell/AppShell.vue';
 import DiscoverView from './views/DiscoverView.vue';
@@ -18,6 +18,7 @@ import NowPlayingView from './views/NowPlayingView.vue';
 
 onMounted(async () => {
   await bootUi();
+  await restorePlaybackPrefs();
   await Promise.all([restoreQueue(), loadOffset()]);
 });
 </script>
