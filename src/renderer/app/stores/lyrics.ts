@@ -92,7 +92,7 @@ export function parseLrc(text: unknown): LyricLine[] {
 export { activeLineIndex } from '../core/lyricMotion.js';
 
 export async function loadOffset(): Promise<void> {
-  const v = await getPref('lyricOffsetMs', 0);
+  const v = await getPref('lyricOffset', 0);
   const n = Number(v);
   lyrics.offsetMs = Number.isFinite(n) ? n : 0;
 }
@@ -100,7 +100,7 @@ export async function loadOffset(): Promise<void> {
 export async function setOffset(ms: number): Promise<void> {
   const n = Number(ms) || 0;
   lyrics.offsetMs = n;
-  await setPref('lyricOffsetMs', n);
+  await setPref('lyricOffset', n);
 }
 
 /**

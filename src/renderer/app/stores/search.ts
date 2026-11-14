@@ -252,7 +252,7 @@ export async function downloadSongs(list: unknown): Promise<DownloadOutcome> {
   if (!songs.length) return { queued: 0, skipped: 0 };
   const [saveDir, quality] = await Promise.all([
     getPref('saveDir', null),
-    getPref('playQuality', 'standard'),
+    getPref('quality', 'standard'),
   ]);
   let queued = 0;
   let skipped = 0;

@@ -18,6 +18,7 @@ import type { ComputedRef } from 'vue';
 import { fileUrlFromPath } from '../../../shared/fileUrl.mjs';
 import { createSkipPrep, prepKey } from '../../js/skipPrep.js';
 import { call, callSafe } from '../core/bridge';
+import { getPref, setPref } from '../core/prefs';
 import { normalizeSong, songKey } from '../core/song';
 import type { Song } from '../core/song';
 import { addRecent } from '../core/recent';
@@ -78,6 +79,17 @@ export const player = reactive<PlayerState>({
   fullscreen: false,
   queueOpen: false,
 });
+
+export async function restorePlaybackPrefs(): Promise<void> {
+  const [quality, volume, rate] = await Promise.all([
+    getPref('quality', 'standard'),
+    getPref('playerVolume', 0.8),
+    getPref('playbackRate', 1),
+  ]);
+  setQuality(String(quality || 'standard'), false);
+  setVolume(Number(volume), false);
+  setRate(Number(rate), false);
+}
 
 export const hasCurrent: ComputedRef<boolean> = computed(() => !!player.current);
 export const currentKey: ComputedRef<string> = computed(() => (player.current ? songKey(player.current) : ''));
@@ -521,23 +533,26 @@ export function seekTo(seconds: number): void {
   player.progress = s;
 }
 
-export function setVolume(v: number): void {
+export function setVolume(v: number, persist = true): void {
   const n = Math.min(1, Math.max(0, Number(v) || 0));
   player.volume = n;
   if (activeEl && !activeEl.muted) activeEl.volume = n;
+  if (persist) void setPref('playerVolume', n);
 }
 
-export function setRate(r: number | string): number {
+export function setRate(r: number | string, persist = true): number {
   const n = Math.min(2, Math.max(0.5, Number(r) || 1));
   player.rate = n;
   if (activeEl) activeEl.playbackRate = n;
+  if (persist) void setPref('playbackRate', n);
   return n;
 }
 
-export function setQuality(q: string | null | undefined): void {
+export function setQuality(q: string | null | undefined, persist = true): void {
   const nextQ = q || 'standard';
   if (nextQ === player.quality) return;
   player.quality = nextQ;
+  if (persist) void setPref('quality', nextQ);
   // 旧音质的缓冲不能拿来播。正在听的这首不打断，邻居按新音质重取。
   prep.invalidate();
   if (activeEl && activeEl.src) armNeighbors(player.queue[player.queueIdx] || null);

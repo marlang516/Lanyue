@@ -79,9 +79,9 @@ export async function loadSettings(): Promise<void> {
       callSafe<Record<string, string>, Record<string, string>>('getCookies', [], {}),
       callSafe<TemplatesResult, TemplatesResult>('getDownloadTemplates', [], { templates: [], active: null }),
       callSafe<string, string>('getDefaultDir', [], ''),
-      getPref('playQuality', 'standard'),
+      getPref('quality', 'standard'),
       getPref('saveDir', ''),
-      getPref('lyricOffsetMs', 0),
+      getPref('lyricOffset', 0),
     ]);
     settings.version = version || '';
     settings.platforms = Array.isArray(platforms) ? platforms : [];
@@ -91,6 +91,7 @@ export async function loadSettings(): Promise<void> {
     settings.defaultDir = defDir || '';
     settings.saveDir = saveDir || '';
     settings.playQuality = quality || 'standard';
+    setQuality(settings.playQuality, false);
     lyrics.offsetMs = Number(off) || 0;
   } catch (_e) { /* 各字段独立兜底 */ } finally {
     settings.loading = false;
@@ -119,18 +120,15 @@ export async function chooseLanguage(code: string): Promise<void> {
 export async function chooseQuality(q: string): Promise<void> {
   setQuality(q);
   settings.playQuality = q;
-  await setPref('playQuality', q);
 }
 
 export async function changeVolume(v: number | string): Promise<void> {
   setVolume(Number(v) / 100);
-  await setPref('volume', Number(v) / 100);
 }
 
 export async function changeRate(v: number | string): Promise<void> {
   const { setRate } = await import('./player');
   setRate(v);
-  await setPref('playRate', Number(v) || 1);
 }
 
 export async function changeLyricOffset(ms: number): Promise<void> {
