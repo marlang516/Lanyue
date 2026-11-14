@@ -3,8 +3,6 @@
  * 纯业务逻辑，不依赖 electron、context.getCtx()、safeSend。
  */
 
-const { validateKeyword } = require('./search');
-
 /**
  * 执行获取歌词业务流程。
  * @param {Object} deps

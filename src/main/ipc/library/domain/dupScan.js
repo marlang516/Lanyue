@@ -4,7 +4,7 @@
  */
 
 function register(deps) {
-  const { fs, localLibrary, dupScan, logger, audioProbe } = deps;
+  const { fs, localLibrary, dupScan, audioProbe } = deps;
   const { bucketBySize, slicePlan, groupByHash, dupGroupView, wastedBytes } = dupScan;
 
   async function findContentDuplicates(dirPath) {

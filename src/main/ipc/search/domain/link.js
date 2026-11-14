@@ -6,8 +6,6 @@
  *   - getSongByLink 直接返回 api.getSongByLink(...) 原样；失败返回 { matched: false, error }
  */
 
-const { validateKeyword } = require('./search');
-
 /**
  * 解析音乐链接。
  * @param {Object} deps

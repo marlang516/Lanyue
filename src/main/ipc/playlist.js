@@ -30,9 +30,7 @@ function register(deps = {}) {
   const cookie = infra.cookie;
 
   const FAVORITES_ID = domain.FAVORITES_ID;
-  const FAVORITES_NAME = domain.FAVORITES_NAME;
   const TRASH_KEY = domain.TRASH_KEY;
-  const songKey = domain.songKey;
 
   // 启动即清过期回收站条目（30 天 TTL，规则在 utils/playlistTrash.js 一家管）
   // prefs 适配器可能暴露 getTrash；回退到直接 prefs.get

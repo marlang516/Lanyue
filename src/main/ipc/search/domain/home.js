@@ -9,8 +9,6 @@
  *     失败返回 { ok: false, section, data: [], error }
  */
 
-const { validateKeyword } = require('./search');
-
 /**
  * 获取首页推荐。
  * @param {Object} deps

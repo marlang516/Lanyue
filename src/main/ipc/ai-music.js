@@ -17,7 +17,6 @@ const { sidecarPathFor } = require('../../utils/relinkRefs');
 
 // 端口注入：由外部（main/index.js）提供 electron 能力，未注入时回退到直取 electron
 let _port = {};
-function setAiMusicPort(port) { _port = port || {}; }
 
 function _appGetPath(name) {
   const app = _port.app;
