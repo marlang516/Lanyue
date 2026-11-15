@@ -42,6 +42,7 @@ interface LyricWindow {
 type PlayAnchor = { progress: number; at: number; rate: number };
 
 const lyricLines = ref<LyricWindow>({ prev: '', cur: '', next: '' });
+const coverGone = ref(false);
 let anchor: PlayAnchor | null = null;
 let followKey = '';
 let raf = 0;
@@ -113,6 +114,7 @@ watch(
   () => publishLines(performance.now()),
   { immediate: true },
 );
+watch(() => player.current?.cover, () => { coverGone.value = false; });
 
 onMounted(() => {
   initDiscover();
@@ -155,8 +157,9 @@ function closePeek() {
   peek.value = { ...peek.value, open: false };
 }
 
-/** 封面加载失败时移除自身（与原内联 handler 等价，额外容忍 target 为空） */
+/** 封面加载失败时摘掉底图，舞台退回极光空底，不再补一块硬封面。 */
 function dropBrokenImg(e: Event): void {
+  coverGone.value = true;
   if (e.target instanceof HTMLElement) e.target.remove();
 }
 
@@ -232,12 +235,13 @@ function openStage(): void {
           v-if="player.current"
           type="button"
           class="stage ly-card"
+          :class="{ bare: !player.current.cover || coverGone }"
           :aria-label="stageLabel"
           :title="stageLabel"
           @click="openStage"
         >
           <img
-            v-if="player.current.cover"
+            v-if="player.current.cover && !coverGone"
             class="wash"
             :src="player.current.cover"
             alt=""
@@ -245,10 +249,6 @@ function openStage(): void {
           />
           <div class="veil"></div>
           <div class="stage-body">
-            <div class="cover" :class="{ ph: !player.current.cover, live: player.playing }">
-              <img v-if="player.current.cover" :src="player.current.cover" alt="" @error="dropBrokenImg" />
-              <Icon v-else name="disc" :size="32" />
-            </div>
             <div class="meta">
               <b>{{ player.current.title }}</b>
               <span>{{ player.current.artist || '未知歌手' }}</span>
@@ -272,11 +272,6 @@ function openStage(): void {
         <div v-else class="stage ly-card idle">
           <div class="veil"></div>
           <div class="stage-body">
-            <div class="mark" aria-hidden="true">
-              <div class="hole">
-                <Icon name="disc" :size="28" />
-              </div>
-            </div>
             <div class="idle-copy">
               <b>未在播放</b>
               <span>从左侧列表点一首开始</span>
@@ -347,7 +342,7 @@ function openStage(): void {
 .skel { gap: var(--sp-4); }
 .skel > div { border-radius: var(--r-md); }
 
-/* ── 侧栏：整列播放舞台（模糊封面 + 三行歌词；空态占满，不再留统计条）── */
+/* ── 侧栏：模糊封面铺满整列，歌词是主体；歌名贴在上沿 ── */
 .side { min-height: 0; min-width: 0; display: flex; flex-direction: column; }
 .stage {
   position: relative; flex: 1 1 auto; min-height: 0; min-width: 0; width: 100%;
@@ -357,20 +352,22 @@ function openStage(): void {
 .stage.idle { cursor: default; }
 .side .stage.ly-card:hover { transform: none; box-shadow: var(--shadow-card); }
 .wash {
-  position: absolute; inset: -18%; width: 136%; height: 136%;
-  object-fit: cover; filter: blur(40px) saturate(1.35); opacity: .72;
+  position: absolute; top: -22%; left: -22%; width: 144%; height: 144%;
+  max-width: none; max-height: none;
+  object-fit: cover; filter: blur(56px) saturate(1.45);
   pointer-events: none;
 }
 .veil {
   position: absolute; inset: 0; pointer-events: none;
   background:
     linear-gradient(180deg,
-      color-mix(in srgb, var(--bg) 12%, transparent) 0%,
-      color-mix(in srgb, var(--bg) 50%, transparent) 42%,
-      color-mix(in srgb, var(--bg) 86%, transparent) 70%,
-      color-mix(in srgb, var(--bg) 92%, transparent) 100%);
+      color-mix(in srgb, var(--bg) 58%, transparent) 0%,
+      color-mix(in srgb, var(--bg) 34%, transparent) 22%,
+      color-mix(in srgb, var(--bg) 34%, transparent) 78%,
+      color-mix(in srgb, var(--bg) 52%, transparent) 100%);
 }
-.stage.idle .veil {
+.stage.idle .veil,
+.stage.bare .veil {
   background:
     radial-gradient(72% 46% at 50% 28%, var(--blob-1), transparent 70%),
     radial-gradient(58% 40% at 84% 80%, var(--blob-2), transparent 72%),
@@ -379,64 +376,51 @@ function openStage(): void {
 }
 .stage-body {
   position: relative; z-index: 1; flex: 1; min-height: 0;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: var(--sp-4); padding: var(--sp-5) var(--sp-4);
+  display: flex; flex-direction: column; justify-content: center;
+  padding: var(--sp-8) var(--sp-5) var(--sp-5);
 }
-.cover {
-  width: min(176px, 72%); aspect-ratio: 1; max-height: 42%;
-  border-radius: var(--r-lg); overflow: hidden; flex: 0 1 auto; min-height: 0;
-  display: flex; align-items: center; justify-content: center;
-  background: var(--glass-3); box-shadow: var(--shadow-pop); color: var(--ink-3);
+.meta {
+  position: absolute; top: var(--sp-4); left: var(--sp-4); right: var(--sp-4);
+  min-width: 0; text-align: left;
 }
-.cover.ph { background: linear-gradient(135deg, var(--glass-2), var(--accent-soft)); }
-.cover.live { box-shadow: var(--glow-accent); }
-.cover img { width: 100%; height: 100%; object-fit: cover; }
-.meta, .idle-copy { width: 100%; min-width: 0; flex-shrink: 0; }
-.meta b, .idle-copy b {
+.meta b, .meta span {
+  display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.meta b { font-size: var(--fs-sm); font-weight: var(--fw-med); color: var(--ink-2); }
+.meta span { margin-top: 2px; font-size: var(--fs-xs); color: var(--ink-3); }
+.idle-copy { width: 100%; min-width: 0; }
+.idle-copy b {
   display: block; font-size: var(--fs-lg); font-weight: var(--fw-bold); letter-spacing: .01em;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.meta span, .idle-copy span {
-  display: block; margin-top: var(--sp-1); font-size: var(--fs-sm); color: var(--ink-2);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.idle-copy span { color: var(--ink-3); }
-.mark {
-  width: 128px; height: 128px; border-radius: 50%; flex: 0 0 auto;
-  background: var(--au-grad-3); box-shadow: var(--glow-accent);
-  display: flex; align-items: center; justify-content: center;
-}
-.hole {
-  width: 78%; height: 78%; border-radius: 50%;
-  background: color-mix(in srgb, var(--glass-3) 88%, var(--bg));
-  display: flex; align-items: center; justify-content: center; color: var(--ink-3);
+.idle-copy span {
+  display: block; margin-top: var(--sp-2); font-size: var(--fs-sm); color: var(--ink-3);
 }
 .lyrics {
-  width: 100%; min-height: 4.8em; flex-shrink: 0;
-  display: flex; flex-direction: column; justify-content: center; gap: 5px;
+  width: 100%; min-height: 0;
+  display: flex; flex-direction: column; justify-content: center; gap: var(--sp-3);
 }
 .line {
-  display: block; min-height: 1.4em; margin: 0;
-  font-size: var(--fs-sm); font-weight: var(--fw-med); line-height: 1.4;
-  color: var(--ink-3); opacity: .78;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+  margin: 0; overflow: hidden; overflow-wrap: break-word;
+  font-size: var(--fs-lg); font-weight: var(--fw-med); line-height: 1.45;
+  color: var(--ink-2); opacity: .72;
   transition: color var(--dur-2) var(--ease), opacity var(--dur-2) var(--ease);
 }
-.line.prev { opacity: .62; }
-.line.next { color: var(--ink-2); opacity: .84; }
-.line.cur { color: var(--ink); font-weight: var(--fw-bold); opacity: 1; }
-.line.gap { opacity: 0; }
-.none { display: block; font-size: var(--fs-sm); color: var(--ink-3); }
-.wait { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 8px; }
-.wait .ly-skeleton { height: 10px; border-radius: var(--r-full); width: 68%; }
-.wait .ly-skeleton:nth-child(2) { width: 84%; height: 12px; }
-.wait .ly-skeleton:nth-child(3) { width: 60%; }
-
-@media (max-height: 820px) {
-  .stage-body { gap: var(--sp-3); padding-block: var(--sp-4); }
-  .cover { width: min(136px, 62%); }
-  .mark { width: 104px; height: 104px; }
+.line.prev { opacity: .55; }
+.line.next { opacity: .68; }
+.line.cur {
+  font-size: var(--fs-2xl); font-weight: var(--fw-bold); line-height: 1.35;
+  color: var(--ink); opacity: 1;
 }
+.line.gap { opacity: 0; }
+.none {
+  display: block; font-size: var(--fs-xl); font-weight: var(--fw-bold); line-height: 1.4;
+  color: var(--ink-2);
+}
+.wait { width: 100%; display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); }
+.wait .ly-skeleton { height: 14px; border-radius: var(--r-full); width: 72%; }
+.wait .ly-skeleton:nth-child(2) { width: 88%; height: 22px; }
+.wait .ly-skeleton:nth-child(3) { width: 64%; }
 @media (prefers-reduced-motion: reduce) {
   .line { transition: none; }
 }
