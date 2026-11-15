@@ -1,16 +1,16 @@
 <script setup lang="ts">
-import { onMounted, ref, computed } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
   discover, DISCOVER_SECTIONS, initDiscover, showPlatform, showSection,
   activeSection, sectionState, platformSections, platformLabel, reloadActive,
 } from '../stores/discover';
 import type { DiscoverSectionState, PlaylistSummary } from '../stores/types';
 import type { SongLike } from '../core/song';
-import { ui } from '../stores/ui';
-import { player, currentKey, playFromList } from '../stores/player';
-import { appendToQueue } from '../stores/player';
+import { player, currentKey, playFromList, appendToQueue } from '../stores/player';
+import { lyrics } from '../stores/lyrics';
+import { activeLineIndex, projectPlayhead } from '../core/lyricMotion.js';
 import { downloadSongs } from '../stores/search';
-import { fmtDuration, platformName } from '../core/format';
+import { platformName } from '../core/format';
 import { toast } from '../core/toast';
 import SongTable from '../components/data/SongTable.vue';
 import PlaylistCard from '../components/data/PlaylistCard.vue';
@@ -33,7 +33,96 @@ const st = computed<DiscoverSectionState>(() => (sec.value
 
 const peek = ref<{ open: boolean; playlist: PlaylistSummary | null }>({ open: false, playlist: null });
 
-onMounted(initDiscover);
+interface LyricWindow {
+  prev: string;
+  cur: string;
+  next: string;
+}
+
+type PlayAnchor = { progress: number; at: number; rate: number };
+
+const lyricLines = ref<LyricWindow>({ prev: '', cur: '', next: '' });
+let anchor: PlayAnchor | null = null;
+let followKey = '';
+let raf = 0;
+let alive = true;
+
+const songKeyNow = computed(() => (
+  player.current ? `${player.current.id}:${player.current.source}` : ''
+));
+/** 切歌后 loadedKey 还没对齐时，不把上一首的句子画在这首的封面上。 */
+const lyricsMatch = computed(() => !!songKeyNow.value && lyrics.loadedKey === songKeyNow.value);
+const stageLabel = computed(() => {
+  const song = player.current;
+  if (!song) return '打开全屏歌词';
+  return `打开全屏歌词：${song.title}，${song.artist || '未知歌手'}`;
+});
+
+function setLines(next: LyricWindow): void {
+  const cur = lyricLines.value;
+  if (cur.prev === next.prev && cur.cur === next.cur && cur.next === next.next) return;
+  lyricLines.value = next;
+}
+
+/**
+ * 窄栏只显示三句：上一句淡、当前句强调、下一句淡。
+ * 播放头与行号都走 lyricMotion，不另起歌词时钟，也不做逐字跳动。
+ * 句子没变就不写响应式，避免每一帧重绘左侧列表。
+ */
+function publishLines(now: number): void {
+  const song = player.current;
+  const key = song ? `${song.id}:${song.source}` : '';
+  if (key !== followKey) {
+    followKey = key;
+    anchor = null;
+  }
+  if (!song) {
+    setLines({ prev: '', cur: '', next: '' });
+    return;
+  }
+  const projected = projectPlayhead(
+    anchor,
+    player.progress,
+    now,
+    Number(player.rate) || 1,
+    !!player.playing,
+  );
+  anchor = projected.anchor;
+  if (lyrics.loadedKey !== key || !lyrics.items.length) {
+    setLines({ prev: '', cur: '', next: '' });
+    return;
+  }
+  const seconds = projected.seconds + (Number(lyrics.offsetMs) || 0) / 1000;
+  const idx = activeLineIndex(lyrics.items, seconds);
+  const items = lyrics.items;
+  const prev = idx > 0 ? (items[idx - 1]?.text ?? '') : '';
+  const cur = idx >= 0 ? (items[idx]?.text ?? '') : '';
+  // 前奏还没到第一句：当前句留空，第一句放在下一句（淡）。
+  const next = idx >= 0 ? (items[idx + 1]?.text ?? '') : (items[0]?.text ?? '');
+  setLines({ prev, cur, next });
+}
+
+function loop(now: number): void {
+  if (!alive) return;
+  if (document.visibilityState !== 'hidden') publishLines(now);
+  raf = requestAnimationFrame(loop);
+}
+
+watch(
+  () => [songKeyNow.value, lyrics.loadedKey, lyrics.items, lyrics.offsetMs, player.progress, player.playing, player.rate],
+  () => publishLines(performance.now()),
+  { immediate: true },
+);
+
+onMounted(() => {
+  initDiscover();
+  raf = requestAnimationFrame(loop);
+});
+
+onBeforeUnmount(() => {
+  alive = false;
+  cancelAnimationFrame(raf);
+});
 
 function onPlay(i: number) {
   playFromList(st.value.data, i);
@@ -69,6 +158,10 @@ function closePeek() {
 /** 封面加载失败时移除自身（与原内联 handler 等价，额外容忍 target 为空） */
 function dropBrokenImg(e: Event): void {
   if (e.target instanceof HTMLElement) e.target.remove();
+}
+
+function openStage(): void {
+  player.fullscreen = true;
 }
 </script>
 
@@ -133,31 +226,62 @@ function dropBrokenImg(e: Event): void {
         </div>
       </section>
 
-      <!-- 侧栏：仅在 A 布局显示 -->
+      <!-- 侧栏：整列一块播放舞台。点击进入现有全屏歌词页。 -->
       <aside class="side">
-        <div class="now ly-card ly-aurora-now">
-          <div class="disc" :class="{ live: player.playing }">
-            <div class="in">
-              <div class="art" :class="{ ph: !player.current?.cover }">
-                <img v-if="player.current?.cover" :src="player.current.cover" alt="" @error="dropBrokenImg" />
-                <Icon v-else name="disc" :size="26" />
-              </div>
+        <button
+          v-if="player.current"
+          type="button"
+          class="stage ly-card"
+          :aria-label="stageLabel"
+          :title="stageLabel"
+          @click="openStage"
+        >
+          <img
+            v-if="player.current.cover"
+            class="wash"
+            :src="player.current.cover"
+            alt=""
+            @error="dropBrokenImg"
+          />
+          <div class="veil"></div>
+          <div class="stage-body">
+            <div class="cover" :class="{ ph: !player.current.cover, live: player.playing }">
+              <img v-if="player.current.cover" :src="player.current.cover" alt="" @error="dropBrokenImg" />
+              <Icon v-else name="disc" :size="32" />
+            </div>
+            <div class="meta">
+              <b>{{ player.current.title }}</b>
+              <span>{{ player.current.artist || '未知歌手' }}</span>
+            </div>
+            <div class="lyrics" aria-hidden="true">
+              <template v-if="lyricsMatch && lyrics.items.length">
+                <span class="line prev">{{ lyricLines.prev }}</span>
+                <span class="line" :class="lyricLines.cur ? 'cur' : 'gap'">{{ lyricLines.cur }}</span>
+                <span class="line next">{{ lyricLines.next }}</span>
+              </template>
+              <span v-else-if="!lyricsMatch || lyrics.loading" class="wait">
+                <i class="ly-skeleton"></i>
+                <i class="ly-skeleton"></i>
+                <i class="ly-skeleton"></i>
+              </span>
+              <span v-else class="none">{{ lyrics.error || '暂无歌词' }}</span>
             </div>
           </div>
-          <div class="now-tx">
-            <b>{{ player.current ? player.current.title : '未在播放' }}</b>
-            <span>{{ player.current ? `${player.current.artist} · ${platformName(player.current.source)}` : '从右侧列表点一首开始' }}</span>
-          </div>
-          <div class="now-meta">
-            <span>{{ fmtDuration(player.progress) }} / {{ fmtDuration(player.duration) }}</span>
-            <span class="ly-tag">{{ player.quality === 'lossless' ? 'FLAC' : player.quality === 'hq' ? '320K' : '128K' }}</span>
-          </div>
-        </div>
+        </button>
 
-        <div class="krow">
-          <div class="kc"><b>{{ DISCOVER_SECTIONS.length }}</b><span>平台</span></div>
-          <div class="kc"><b>{{ st.data.length }}</b><span>本区</span></div>
-          <div class="kc"><b>{{ ui.appVersion || '—' }}</b><span>版本</span></div>
+        <div v-else class="stage ly-card idle">
+          <div class="veil"></div>
+          <div class="stage-body">
+            <div class="mark" aria-hidden="true">
+              <div class="hole">
+                <Icon name="disc" :size="28" />
+              </div>
+            </div>
+            <div class="idle-copy">
+              <b>未在播放</b>
+              <span>从左侧列表点一首开始</span>
+            </div>
+          </div>
         </div>
       </aside>
     </div>
@@ -223,39 +347,99 @@ function dropBrokenImg(e: Event): void {
 .skel { gap: var(--sp-4); }
 .skel > div { border-radius: var(--r-md); }
 
-/* ── 侧栏播放卡片（极光风 Disc 光环）── */
-.side { min-height: 0; display: flex; flex-direction: column; gap: var(--sp-3); overflow-y: auto; }
-.now { padding: var(--sp-5); display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); }
-.disc {
-  width: 168px; height: 168px; border-radius: 50%;
-  background: conic-gradient(from 0deg, var(--au-1), var(--au-2) 30%, var(--au-4) 55%, var(--au-3) 80%, var(--au-1));
-  box-shadow: var(--glow-accent);
-  display: flex; align-items: center; justify-content: center;
-  animation: spin 16s linear infinite;
+/* ── 侧栏：整列播放舞台（模糊封面 + 三行歌词；空态占满，不再留统计条）── */
+.side { min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+.stage {
+  position: relative; flex: 1 1 auto; min-height: 0; min-width: 0; width: 100%;
+  overflow: hidden; display: flex; flex-direction: column;
+  padding: 0; text-align: center; cursor: pointer;
 }
-.disc.live { animation-duration: 8s; }
-@keyframes spin { to { transform: rotate(360deg); } }
-.disc .in {
+.stage.idle { cursor: default; }
+.side .stage.ly-card:hover { transform: none; box-shadow: var(--shadow-card); }
+.wash {
+  position: absolute; inset: -18%; width: 136%; height: 136%;
+  object-fit: cover; filter: blur(40px) saturate(1.35); opacity: .72;
+  pointer-events: none;
+}
+.veil {
+  position: absolute; inset: 0; pointer-events: none;
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--bg) 12%, transparent) 0%,
+      color-mix(in srgb, var(--bg) 50%, transparent) 42%,
+      color-mix(in srgb, var(--bg) 86%, transparent) 70%,
+      color-mix(in srgb, var(--bg) 92%, transparent) 100%);
+}
+.stage.idle .veil {
+  background:
+    radial-gradient(72% 46% at 50% 28%, var(--blob-1), transparent 70%),
+    radial-gradient(58% 40% at 84% 80%, var(--blob-2), transparent 72%),
+    radial-gradient(48% 34% at 12% 88%, var(--blob-3), transparent 74%),
+    linear-gradient(180deg, color-mix(in srgb, var(--glass-2) 72%, transparent), var(--glass));
+}
+.stage-body {
+  position: relative; z-index: 1; flex: 1; min-height: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: var(--sp-4); padding: var(--sp-5) var(--sp-4);
+}
+.cover {
+  width: min(176px, 72%); aspect-ratio: 1; max-height: 42%;
+  border-radius: var(--r-lg); overflow: hidden; flex: 0 1 auto; min-height: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--glass-3); box-shadow: var(--shadow-pop); color: var(--ink-3);
+}
+.cover.ph { background: linear-gradient(135deg, var(--glass-2), var(--accent-soft)); }
+.cover.live { box-shadow: var(--glow-accent); }
+.cover img { width: 100%; height: 100%; object-fit: cover; }
+.meta, .idle-copy { width: 100%; min-width: 0; flex-shrink: 0; }
+.meta b, .idle-copy b {
+  display: block; font-size: var(--fs-lg); font-weight: var(--fw-bold); letter-spacing: .01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.meta span, .idle-copy span {
+  display: block; margin-top: var(--sp-1); font-size: var(--fs-sm); color: var(--ink-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.idle-copy span { color: var(--ink-3); }
+.mark {
+  width: 128px; height: 128px; border-radius: 50%; flex: 0 0 auto;
+  background: var(--au-grad-3); box-shadow: var(--glow-accent);
+  display: flex; align-items: center; justify-content: center;
+}
+.hole {
   width: 78%; height: 78%; border-radius: 50%;
-  background: var(--glass-3); backdrop-filter: blur(8px);
-  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--glass-3) 88%, var(--bg));
+  display: flex; align-items: center; justify-content: center; color: var(--ink-3);
 }
-.art { width: 82%; height: 82%; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; color: var(--ink-3); }
-.art img { width: 100%; height: 100%; object-fit: cover; }
-.art.ph { background: linear-gradient(135deg, var(--glass-2), var(--accent-soft)); }
-.now-tx { text-align: center; min-width: 0; width: 100%; }
-.now-tx b { display: block; font-size: var(--fs-md); font-weight: var(--fw-bold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.now-tx span { display: block; margin-top: 3px; font-size: var(--fs-xs); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.now-meta { width: 100%; display: flex; align-items: center; justify-content: space-between; font-size: var(--fs-xs); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.lyrics {
+  width: 100%; min-height: 4.8em; flex-shrink: 0;
+  display: flex; flex-direction: column; justify-content: center; gap: 5px;
+}
+.line {
+  display: block; min-height: 1.4em; margin: 0;
+  font-size: var(--fs-sm); font-weight: var(--fw-med); line-height: 1.4;
+  color: var(--ink-3); opacity: .78;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: color var(--dur-2) var(--ease), opacity var(--dur-2) var(--ease);
+}
+.line.prev { opacity: .62; }
+.line.next { color: var(--ink-2); opacity: .84; }
+.line.cur { color: var(--ink); font-weight: var(--fw-bold); opacity: 1; }
+.line.gap { opacity: 0; }
+.none { display: block; font-size: var(--fs-sm); color: var(--ink-3); }
+.wait { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.wait .ly-skeleton { height: 10px; border-radius: var(--r-full); width: 68%; }
+.wait .ly-skeleton:nth-child(2) { width: 84%; height: 12px; }
+.wait .ly-skeleton:nth-child(3) { width: 60%; }
 
-/* ── 底部统计卡片（kc）── */
-.krow { display: flex; gap: var(--sp-2); }
-.kc {
-  flex: 1; padding: var(--sp-3) var(--sp-2); text-align: center;
-  border-radius: var(--r-md); background: var(--glass-3); border: 1px solid var(--hairline);
+@media (max-height: 820px) {
+  .stage-body { gap: var(--sp-3); padding-block: var(--sp-4); }
+  .cover { width: min(136px, 62%); }
+  .mark { width: 104px; height: 104px; }
 }
-.kc b { display: block; font-size: var(--fs-md); font-weight: var(--fw-black); color: var(--au-1); }
-.kc span { font-size: var(--fs-2xs); color: var(--ink-3); letter-spacing: .06em; }
+@media (prefers-reduced-motion: reduce) {
+  .line { transition: none; }
+}
 
 /* ── 搜索列表行 hover 向右位移 + active 内发光（极光风行态）── */
 .ly-row {
