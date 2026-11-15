@@ -67,43 +67,124 @@ function checkForUpdatesWithRetry() {
 autoUpdater.autoDownload = false; // 用户确认后下载
 autoUpdater.autoInstallOnAppQuit = false; // 用户确认后安装
 
+// electron-updater 6.8.11 的 doCheckForUpdates 在返回检查结果之前同步
+// emit('update-available', updateInfo)（AppUpdater.onUpdateAvailable）。
+// 监听器若把不可克隆的值交给 webContents.send，DataCloneError 会冒出
+// emit，checkForUpdates() / downloadUpdate() 被拒绝；检查入口的 catch
+// 再把 err.message 原样交给设置页，用户看到的就是
+// "An object could not be cloned."。
+// releaseNotes 不总是字符串：fullChangelog 打开时 GitHubProvider
+// computeReleaseNotes 返回 { version, note }[]。先收成普通值再发，
+// 发送失败只记日志，不许把进行中的检查或下载拖失败。
+
+function cloneSafeVersion(info) {
+  const payload = {};
+  try {
+    if (!info || typeof info !== 'object') return payload;
+    const version = info.version;
+    if (typeof version === 'string' || typeof version === 'number') payload.version = String(version);
+  } catch (_e) { /* version 读不出来就省略，不能让通知把检查拖失败 */ }
+  return payload;
+}
+
+/** 字符串原样保留；{version, note}[] 收成纯字符串字段；其余丢掉。 */
+function cloneSafeReleaseNotes(notes) {
+  if (typeof notes === 'string') return notes;
+  if (!Array.isArray(notes)) return undefined;
+  const out = [];
+  for (const item of notes) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const version = item.version;
+    const note = item.note;
+    if (typeof version !== 'string' && typeof version !== 'number') continue;
+    if (note != null && typeof note !== 'string' && typeof note !== 'number') continue;
+    out.push({ version: String(version), note: note == null ? '' : String(note) });
+  }
+  return out;
+}
+
+function cloneSafeUpdateNotice(info) {
+  try {
+    const payload = cloneSafeVersion(info);
+    const notes = cloneSafeReleaseNotes(info && info.releaseNotes);
+    if (notes !== undefined) payload.releaseNotes = notes;
+    return payload;
+  } catch (_e) {
+    return {};
+  }
+}
+
+function cloneSafeProgress(progressObj) {
+  const src = progressObj && typeof progressObj === 'object' ? progressObj : {};
+  let percent = 0;
+  let bytesPerSecond = 0;
+  try {
+    const p = Number(src.percent);
+    const b = Number(src.bytesPerSecond);
+    if (Number.isFinite(p)) percent = Math.round(p);
+    if (Number.isFinite(b)) bytesPerSecond = b;
+  } catch (_e) { /* 进度读不出来就发 0 */ }
+  return { percent, bytesPerSecond };
+}
+
+function cloneSafeFailure(info) {
+  const payload = { message: '', manualUrl: null };
+  if (!info || typeof info !== 'object') return payload;
+  try {
+    if (typeof info.message === 'string') payload.message = info.message;
+    if (typeof info.manualUrl === 'string') payload.manualUrl = info.manualUrl;
+  } catch (_e) { /* 失败通知本身不许再抛 */ }
+  return payload;
+}
+
+/** 更新事件的唯一出口。通道名保持字面量，契约扫描认的是 safeSend('…')。 */
+function safeSend(channel, payload) {
+  let wins;
+  try {
+    const { BrowserWindow } = require('electron');
+    wins = typeof BrowserWindow.getAllWindows === 'function' ? BrowserWindow.getAllWindows() : [];
+  } catch (err) {
+    logger.warn(`[Updater] 通知渲染层失败 (${channel}): ${err && err.message ? err.message : err}`);
+    return;
+  }
+  if (!Array.isArray(wins)) return;
+  for (const win of wins) {
+    try {
+      if (!win || (typeof win.isDestroyed === 'function' && win.isDestroyed())) continue;
+      const wc = win.webContents;
+      if (!wc || typeof wc.send !== 'function') continue;
+      if (typeof wc.isDestroyed === 'function' && wc.isDestroyed()) continue;
+      if (payload === undefined) wc.send(channel);
+      else wc.send(channel, payload);
+    } catch (err) {
+      logger.warn(`[Updater] 通知渲染层失败 (${channel}): ${err && err.message ? err.message : err}`);
+    }
+  }
+}
+
 autoUpdater.on('checking-for-update', () => {
   logger.log('[Updater] Checking for updates...');
 });
 
 autoUpdater.on('update-available', (info) => {
-  logger.log('[Updater] Update available:', info.version);
-  // 通知所有窗口
-  const { BrowserWindow } = require('electron');
-  for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send('update-available', { version: info.version, releaseNotes: info.releaseNotes });
-  }
+  const payload = cloneSafeUpdateNotice(info);
+  logger.log('[Updater] Update available:', payload.version);
+  safeSend('update-available', payload);
 });
 
 autoUpdater.on('update-not-available', () => {
   logger.log('[Updater] No updates available');
-  const { BrowserWindow } = require('electron');
-  for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send('update-not-available');
-  }
+  safeSend('update-not-available');
 });
 
 autoUpdater.on('download-progress', (progressObj) => {
-  const { BrowserWindow } = require('electron');
-  for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send('update-download-progress', {
-      percent: Math.round(progressObj.percent),
-      bytesPerSecond: progressObj.bytesPerSecond,
-    });
-  }
+  safeSend('update-download-progress', cloneSafeProgress(progressObj));
 });
 
 autoUpdater.on('update-downloaded', (info) => {
-  logger.log('[Updater] Downloaded:', info.version);
-  const { BrowserWindow } = require('electron');
-  for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send('update-downloaded', { version: info.version });
-  }
+  const payload = cloneSafeVersion(info);
+  logger.log('[Updater] Downloaded:', payload.version);
+  safeSend('update-downloaded', payload);
 });
 
 // 用户主动触发标志：初始静默自检的失败只写日志，不打扰用户；
@@ -144,11 +225,7 @@ function manualFailureInfo(err) {
 autoUpdater.on('error', (err) => {
   logger.warn('[Updater] Error:', err.message);
   if (!shouldReportEventError({ userInitiated: _userInitiated, flowInFlight: _flowInFlight })) return;
-  const { BrowserWindow } = require('electron');
-  const info = manualFailureInfo(err);
-  for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send('update-error', info);
-  }
+  safeSend('update-error', cloneSafeFailure(manualFailureInfo(err)));
 });
 
 // ── 镜像兜底 ──────────────────────────────────────────
