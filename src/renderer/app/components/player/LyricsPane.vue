@@ -37,6 +37,8 @@ cursor = { index: frame.value.index, role: frame.value.role, at: bootNow };
 const shownWords = ref<readonly ShownWord[]>([]);
 const wordFrame = ref<WordFrame>({ index: -1, states: [] });
 const bounceAt = ref<boolean[]>([]);
+const prevText = ref('');
+const nextText = ref('');
 let wordsSig = '';
 
 let raf = 0;
@@ -82,8 +84,27 @@ function bounceFlags(states: readonly string[], prev: readonly string[], lineCha
   });
 }
 
-/** 只在活动句上准备词。前奏和间奏把舞台清空。 */
+/** 上一句、下一句只作参照，不参与跳动。前奏没有上一句，间奏的当前槽留空。 */
+function paintContext(lyricFrame: LyricFrame): void {
+  const items = lyrics.items;
+  let prev = '';
+  let next = '';
+  if (lyricFrame.role === 'active' && lyricFrame.index >= 0) {
+    prev = items[lyricFrame.index - 1]?.text || '';
+    next = items[lyricFrame.index + 1]?.text || '';
+  } else if (lyricFrame.role === 'rest' && lyricFrame.index >= 0) {
+    prev = items[lyricFrame.index]?.text || '';
+    next = items[lyricFrame.index + 1]?.text || '';
+  } else if (lyricFrame.role === 'prelude') {
+    next = items[0]?.text || '';
+  }
+  if (prevText.value !== prev) prevText.value = prev;
+  if (nextText.value !== next) nextText.value = next;
+}
+
+/** 只在活动句上准备词。前奏和间奏把当前槽清空。 */
 function paintWords(seconds: number, lyricFrame: LyricFrame): void {
+  paintContext(lyricFrame);
   if (lyricFrame.role !== 'active' || lyricFrame.index < 0) {
     if (shownWords.value.length || bounceAt.value.length) {
       shownWords.value = [];
@@ -231,6 +252,7 @@ onBeforeUnmount(() => {
       :data-lyric-role="frame.role"
       :data-lyric-motion="frame.motion"
     >
+      <p class="context" :class="{ on: prevText }" aria-hidden="true">{{ prevText }}</p>
       <p v-if="frame.role === 'active' && shownWords.length" class="line" aria-live="polite">
         <button
           v-for="(w, i) in shownWords"
@@ -242,6 +264,8 @@ onBeforeUnmount(() => {
           @click="seekWord(w)"
         >{{ w.text }}</button>
       </p>
+      <p v-else class="line slot" aria-hidden="true"></p>
+      <p class="context" :class="{ on: nextText }" aria-hidden="true">{{ nextText }}</p>
     </div>
   </div>
 </template>
@@ -263,20 +287,34 @@ onBeforeUnmount(() => {
 .state .ly-skeleton { border-radius: var(--r-sm); }
 
 .stage {
-  flex: 1; min-height: 0;
-  display: flex; align-items: center; justify-content: center;
+  flex: 1; min-height: 0; width: 100%;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: var(--sp-5);
   padding: var(--sp-4) var(--sp-6);
   overflow: hidden;
 }
+.context {
+  margin: 0;
+  min-height: 1.4em;
+  max-width: min(36em, 92vw);
+  text-align: center;
+  font-size: var(--fs-lg);
+  line-height: 1.45;
+  color: var(--ink-3);
+  opacity: 0;
+}
+.context.on { opacity: .42; }
 .line {
   margin: 0;
-  max-width: 18em;
+  min-height: 1.6em;
+  max-width: min(18em, 94vw);
   text-align: center;
   font-size: var(--fs-hero);
   font-weight: var(--fw-med);
   line-height: 1.45;
   color: var(--ink);
 }
+.line.slot { min-height: 1.6em; }
 
 .word {
   border: 0;
@@ -288,11 +326,11 @@ onBeforeUnmount(() => {
   display: inline-block;
   transform-origin: center bottom;
   opacity: 0;
-  transform: translate3d(0, 0.35em, 0) scale(0.86);
+  transform: translate3d(0, 0.55em, 0) scale(0.72);
 }
 .word.unreached {
   opacity: 0;
-  transform: translate3d(0, 0.35em, 0) scale(0.86);
+  transform: translate3d(0, 0.55em, 0) scale(0.72);
 }
 .word.active {
   opacity: 1;
@@ -311,8 +349,8 @@ onBeforeUnmount(() => {
 .word.sung:hover { color: var(--ink); }
 
 @keyframes word-bounce {
-  0% { opacity: 0; transform: translate3d(0, 0.35em, 0) scale(0.86); }
-  55% { opacity: 1; transform: translate3d(0, -0.14em, 0) scale(1.06); }
+  0% { opacity: 0; transform: translate3d(0, 0.55em, 0) scale(0.72); }
+  46% { opacity: 1; transform: translate3d(0, -0.32em, 0) scale(1.14); }
   100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
 }
 

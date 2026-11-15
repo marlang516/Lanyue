@@ -226,6 +226,12 @@ test('接线：全屏歌词走这份判定，桌面同步不另写二分，逐�
   assert.match(PANE, /displayWords/);
   assert.match(PANE, /projected\.seeked/);
   assert.match(PANE, /frame\.role === 'active'/);
+  assert.match(PANE, /class="context"/);
+  const NOW = fs.readFileSync(path.join(ROOT, 'src/renderer/app/views/NowPlayingView.vue'), 'utf8');
+  assert.doesNotMatch(NOW, /class="art"/, '全屏页不再留左侧封面栏');
+  assert.doesNotMatch(NOW, /class="cover"/);
+  assert.doesNotMatch(NOW, /grid-template-columns:\s*minmax\(280px/);
+  assert.match(NOW, /LyricsPane/);
   assert.match(PANE, /visualSnap \|\| reduced/);
   assert.match(PANE, /visibilityState/);
   assert.match(PANE, /prefers-reduced-motion: reduce/);
@@ -291,7 +297,7 @@ test('resolveWordStates：未到、提前进入、唱完，时长缺失时用下
   assert.strictEqual(resolveWordStates(only, 1 + WORD_UNTIMED_SEC).states[0], 'sung');
 });
 
-test('displayWords：有逐字时间就用，没有则整句一个词，不按字拆', async () => {
+test('displayWords：单字沿用逐字时间，长词和句级 LRC 按字均分', async () => {
   const { displayWords } = await fresh();
   const timed = {
     t: 1,
@@ -300,16 +306,34 @@ test('displayWords：有逐字时间就用，没有则整句一个词，不按�
   };
   assert.strictEqual(displayWords(timed, { t: 3 }, 10).length, 2);
   assert.strictEqual(displayWords(timed, { t: 3 }, 10)[0].text, '你');
+  assert.strictEqual(displayWords(timed, { t: 3 }, 10)[0].t, 1);
+  assert.strictEqual(displayWords(timed, { t: 3 }, 10)[1].t, 1.4);
+
+  const clause = {
+    t: 0,
+    text: '作曲：哇欣',
+    words: [{ t: 0, dur: 4, text: '作曲：哇欣' }],
+  };
+  const parts = displayWords(clause, { t: 9 }, 20);
+  assert.deepStrictEqual(parts.map((w) => w.text), ['作', '曲：', '哇', '欣']);
+  assert.strictEqual(parts[0].t, 0);
+  assert.strictEqual(parts[1].t, 1);
+  assert.strictEqual(parts[3].t, 3);
+  assert.ok(Math.abs(parts[0].dur - 1) < 1e-9, '长词只均分自己的时长，不占到下一句');
 
   const plain = { t: 1, text: '你好世界' };
-  const one = displayWords(plain, { t: 4 }, 99);
-  assert.strictEqual(one.length, 1, '句级 LRC 不拆成四个字');
-  assert.strictEqual(one[0].text, '你好世界');
-  assert.strictEqual(one[0].t, 1);
-  assert.strictEqual(one[0].dur, 3);
-  assert.strictEqual(displayWords(plain, { t: 4 }, 99), one, '同一句同一终点不另造数组');
+  const beats = displayWords(plain, { t: 4 }, 99);
+  assert.deepStrictEqual(beats.map((w) => w.text), ['你', '好', '世', '界']);
+  assert.strictEqual(beats[0].t, 1);
+  assert.ok(Math.abs(beats[0].dur - 0.75) < 1e-9);
+  assert.ok(Math.abs(beats[3].t - 3.25) < 1e-9);
+  assert.strictEqual(displayWords(plain, { t: 4 }, 99), beats, '同一句同一终点不另造数组');
+
+  const mixed = displayWords({ t: 0, text: 'hello world，你好' }, { t: 5 }, 10);
+  assert.deepStrictEqual(mixed.map((w) => w.text), ['hello ', 'world，', '你', '好']);
 
   const tail = displayWords({ t: 8, text: '尾' }, null, 10);
+  assert.strictEqual(tail.length, 1);
   assert.strictEqual(tail[0].dur, 2);
   const unknown = displayWords({ t: 8, text: '尾' }, null, undefined);
   assert.ok(unknown[0].dur > 0);
