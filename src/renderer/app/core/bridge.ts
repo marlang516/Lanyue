@@ -9,7 +9,14 @@
  *  3. 错误不吞：preload 已把信封解包成 reject，调用方自行决定兜底；
  *     只有「读偏好」这类非关键路径才允许静默降级。
  */
+import { toRaw } from 'vue';
 import type { BridgeMethods, BridgeMethodName, BridgeEvents, BridgeEventName } from './bridge.gen';
+
+/**
+ * 函数和 Symbol 不能进结构化克隆。用这个哨兵从对象字段和数组元素里摘掉，
+ * 不要把 Symbol 本身放进即将送过 IPC 的对象。
+ */
+const OMIT = Symbol('ipc-omit');
 
 /**
  * 事件订阅回调。
@@ -41,21 +48,71 @@ function errMessage(e: unknown): string | undefined {
 }
 
 /**
+ * 把一个值收成结构化克隆能接受的普通数据。
+ *
+ * 搜索歌曲进 Vue reactive 之后，pay、_dupOf、_altSource 这类嵌套值会变成代理。
+ * normalizeSong 展开时把代理抄进新对象，再交给 ipcRenderer.invoke 就会抛
+ * DataCloneError（界面上是 "An object could not be cloned."）。
+ * 发现页的歌曲只有基本类型，展开后没有代理，所以同一条播放链路能过。
+ *
+ * 这里深拆代理，只复制可枚举的普通值。函数和 Symbol 丢掉。
+ * 已经见过的对象直接交回正在组装的副本，循环引用不会栈溢出，
+ * 克隆算法自己认识环。pay / _dupOf / _altSource 仍以普通对象通过。
+ */
+function plainValue(value: unknown, seen: WeakMap<object, unknown>): unknown {
+  if (typeof value === 'function' || typeof value === 'symbol') return OMIT;
+  if (value === null || typeof value !== 'object') return value;
+
+  const raw = toRaw(value);
+  if (seen.has(raw)) return seen.get(raw);
+
+  if (Array.isArray(raw)) {
+    const out: unknown[] = [];
+    seen.set(raw, out);
+    for (let i = 0; i < raw.length; i += 1) {
+      const next = plainValue(raw[i], seen);
+      if (next === OMIT) continue;
+      out.push(next);
+    }
+    return out;
+  }
+
+  const out: Record<string, unknown> = {};
+  seen.set(raw, out);
+  for (const key of Object.keys(raw)) {
+    const next = plainValue((raw as Record<string, unknown>)[key], seen);
+    if (next === OMIT) continue;
+    out[key] = next;
+  }
+  return out;
+}
+
+/** 一次调用的全部参数共用一份「已见」表，跨参数的同一对象不会拆成两份。 */
+function cloneForIpc(args: unknown[]): unknown[] {
+  const seen = new WeakMap<object, unknown>();
+  return args.map((arg) => {
+    const next = plainValue(arg, seen);
+    return next === OMIT ? undefined : next;
+  });
+}
+
+/**
  * 统一 IPC 调用。
+ * 参数在交给 musicAPI（以及替代它的桩）之前收成可克隆的普通数据。
  * @param method preload 契约方法名（camelCase）
- * @param args 原样转发给契约方法
  */
 export async function call<T = unknown>(method: BridgeMethodName, ...args: unknown[]): Promise<T> {
+  const plain = cloneForIpc(args);
   const mockMethod = window.__LY_MOCK__?.[method];
   if (typeof mockMethod === 'function') {
-    return (mockMethod as (...a: unknown[]) => unknown)(...args) as T;
+    return (mockMethod as (...a: unknown[]) => unknown)(...plain) as T;
   }
   const a = api();
   const fn = a[method] as ((...args: unknown[]) => unknown) | undefined;
   if (typeof fn !== 'function') {
     throw new Error(`musicAPI.${method} 不在契约白名单`);
   }
-  return fn(...args) as T;
+  return fn(...plain) as T;
 }
 
 /**
