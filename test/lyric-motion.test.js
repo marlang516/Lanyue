@@ -232,6 +232,12 @@ test('接线：全屏歌词走这份判定，桌面同步不另写二分，逐�
   assert.doesNotMatch(NOW, /class="cover"/);
   assert.doesNotMatch(NOW, /grid-template-columns:\s*minmax\(280px/);
   assert.match(NOW, /LyricsPane/);
+  assert.match(NOW, /<section class="ly">/);
+  assert.doesNotMatch(NOW, /class="ly ly-card"/, '歌词区不再套卡片');
+  assert.match(NOW, /cover-drift/);
+  assert.match(NOW, /prefers-reduced-motion: reduce/);
+  assert.match(PANE, /class="dots"/);
+  assert.match(PANE, /name="lift"/);
   assert.match(PANE, /visualSnap \|\| reduced/);
   assert.match(PANE, /visibilityState/);
   assert.match(PANE, /prefers-reduced-motion: reduce/);
@@ -241,10 +247,13 @@ test('接线：全屏歌词走这份判定，桌面同步不另写二分，逐�
   assert.doesNotMatch(PANE, /splitToWords/);
 
   const style = PANE.slice(PANE.lastIndexOf('<style'));
-  const activeBlock = style.match(/\.word\.active\s*\{[^}]*\}/);
+  const activeBlock = style.match(/\.word\.active[^{]*\{[^}]*\}/);
   assert.ok(activeBlock, '缺少 .word.active');
   assert.doesNotMatch(activeBlock[0], /font-weight/, '逐字弹入不改字重');
   assert.match(style, /@keyframes word-bounce/);
+  assert.match(style, /@keyframes word-breath/);
+  assert.match(style, /@keyframes afterglow/);
+  assert.match(style, /@keyframes dot-hop/);
   assert.match(style, /\.word\.unreached\s*\{[^}]*opacity:\s*0/);
   assert.match(style, /\.word\.sung\s*\{[^}]*opacity:\s*\.72/);
   assert.match(style, /\.stage\.snap \.word\.active[\s\S]*?animation:\s*none/);

@@ -37,8 +37,11 @@ cursor = { index: frame.value.index, role: frame.value.role, at: bootNow };
 const shownWords = ref<readonly ShownWord[]>([]);
 const wordFrame = ref<WordFrame>({ index: -1, states: [] });
 const bounceAt = ref<boolean[]>([]);
+const settled = ref<boolean[]>([]);
 const prevText = ref('');
 const nextText = ref('');
+const prevKey = ref('p-none');
+const nextKey = ref('n-none');
 let wordsSig = '';
 
 let raf = 0;
@@ -78,10 +81,20 @@ function sameStates(a: readonly string[], b: readonly string[]): boolean {
  */
 function bounceFlags(states: readonly string[], prev: readonly string[], lineChanged: boolean, snap: boolean): boolean[] {
   return states.map((state, i) => {
-    if (state !== 'active' || snap) return false;
+    if (state !== 'active' || snap || (!lineChanged && settled.value[i])) return false;
     if (lineChanged || prev[i] !== 'active') return true;
     return bounceAt.value[i] === true;
   });
+}
+
+function onBounceEnd(e: AnimationEvent, i: number): void {
+  if (!e.animationName.startsWith('word-bounce')) return;
+  if (reduced.value || visualSnap.value) return;
+  if (wordFrame.value.states[i] !== 'active' || settled.value[i]) return;
+  const next = settled.value.slice();
+  next[i] = true;
+  settled.value = next;
+  bounceAt.value = bounceAt.value.map((on, n) => (n === i ? false : on));
 }
 
 /** 上一句、下一句只作参照，不参与跳动。前奏没有上一句，间奏的当前槽留空。 */
@@ -98,18 +111,31 @@ function paintContext(lyricFrame: LyricFrame): void {
   } else if (lyricFrame.role === 'prelude') {
     next = items[0]?.text || '';
   }
+  const pk = lyricFrame.role === 'active' && lyricFrame.index > 0
+    ? `p${lyricFrame.index - 1}`
+    : lyricFrame.role === 'rest' && lyricFrame.index >= 0
+      ? `p${lyricFrame.index}`
+      : 'p-none';
+  const nk = lyricFrame.role === 'prelude'
+    ? 'n0'
+    : (lyricFrame.role === 'active' || lyricFrame.role === 'rest') && lyricFrame.index >= 0
+      ? `n${lyricFrame.index + 1}`
+      : 'n-none';
   if (prevText.value !== prev) prevText.value = prev;
   if (nextText.value !== next) nextText.value = next;
+  if (prevKey.value !== pk) prevKey.value = pk;
+  if (nextKey.value !== nk) nextKey.value = nk;
 }
 
 /** 只在活动句上准备词。前奏和间奏把当前槽清空。 */
 function paintWords(seconds: number, lyricFrame: LyricFrame): void {
   paintContext(lyricFrame);
   if (lyricFrame.role !== 'active' || lyricFrame.index < 0) {
-    if (shownWords.value.length || bounceAt.value.length) {
+    if (shownWords.value.length || bounceAt.value.length || settled.value.length) {
       shownWords.value = [];
       wordFrame.value = { index: -1, states: [] };
       bounceAt.value = [];
+      settled.value = [];
       wordsSig = '';
     }
     return;
@@ -127,9 +153,12 @@ function paintWords(seconds: number, lyricFrame: LyricFrame): void {
   const prev = lineChanged ? [] : wordFrame.value.states;
   const snap = visualSnap.value || reduced.value;
   const bounce = bounceFlags(nextWords.states, prev, lineChanged, snap);
-  if (sameStates(prev, nextWords.states) && sameFlags(bounceAt.value, bounce)) return;
+  const nextSettled = nextWords.states.map((state, i) => state === 'active' && !lineChanged && settled.value[i] === true);
+  if (lineChanged && settled.value.length) settled.value = [];
+  if (sameStates(prev, nextWords.states) && sameFlags(bounceAt.value, bounce) && sameFlags(settled.value, nextSettled)) return;
   wordFrame.value = nextWords;
   bounceAt.value = bounce;
+  if (!sameFlags(settled.value, nextSettled)) settled.value = nextSettled;
 }
 
 function sameFlags(a: readonly boolean[], b: readonly boolean[]): boolean {
@@ -252,20 +281,37 @@ onBeforeUnmount(() => {
       :data-lyric-role="frame.role"
       :data-lyric-motion="frame.motion"
     >
-      <p class="context" :class="{ on: prevText }" aria-hidden="true">{{ prevText }}</p>
-      <p v-if="frame.role === 'active' && shownWords.length" class="line" aria-live="polite">
-        <button
-          v-for="(w, i) in shownWords"
-          :key="lyrics.loadedKey + ':' + frame.index + ':' + i"
-          type="button"
-          class="word"
-          :class="[wordFrame.states[i] || 'unreached', bounceAt[i] ? 'bounce' : '']"
-          :aria-current="wordFrame.states[i] === 'active' ? 'true' : undefined"
-          @click="seekWord(w)"
-        >{{ w.text }}</button>
-      </p>
-      <p v-else class="line slot" aria-hidden="true"></p>
-      <p class="context" :class="{ on: nextText }" aria-hidden="true">{{ nextText }}</p>
+      <div class="band">
+        <Transition name="lift">
+          <p :key="prevKey" class="context" :class="{ on: !!prevText }" aria-hidden="true">{{ prevText }}</p>
+        </Transition>
+      </div>
+      <div class="band now">
+        <Transition name="lift">
+          <p v-if="frame.role === 'active' && shownWords.length" :key="'l' + frame.index" class="line" aria-live="polite">
+            <button
+              v-for="(w, i) in shownWords"
+              :key="lyrics.loadedKey + ':' + frame.index + ':' + i"
+              type="button"
+              class="word"
+              :class="[wordFrame.states[i] || 'unreached', bounceAt[i] ? 'bounce' : '', settled[i] ? 'live' : '']"
+              :aria-current="wordFrame.states[i] === 'active' ? 'true' : undefined"
+              @click="seekWord(w)"
+              @animationend="onBounceEnd($event, i)"
+            >{{ w.text }}</button>
+          </p>
+          <p v-else :key="frame.role" class="line slot" aria-hidden="true">
+            <span v-if="frame.role === 'prelude' || frame.role === 'rest'" class="dots">
+              <i></i><i></i><i></i>
+            </span>
+          </p>
+        </Transition>
+      </div>
+      <div class="band">
+        <Transition name="lift">
+          <p :key="nextKey" class="context" :class="{ on: !!nextText }" aria-hidden="true">{{ nextText }}</p>
+        </Transition>
+      </div>
     </div>
   </div>
 </template>
@@ -289,16 +335,22 @@ onBeforeUnmount(() => {
 .stage {
   flex: 1; min-height: 0; width: 100%;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: var(--sp-5);
+  gap: var(--sp-6);
   padding: var(--sp-4) var(--sp-6);
   overflow: hidden;
 }
+.band {
+  position: relative;
+  width: min(40em, 94vw);
+  min-height: 1.6em;
+  display: flex; justify-content: center;
+}
+.band.now { width: min(16em, 94vw); min-height: 2.2em; }
 .context {
   margin: 0;
-  min-height: 1.4em;
-  max-width: min(36em, 92vw);
+  max-width: 100%;
   text-align: center;
-  font-size: var(--fs-lg);
+  font-size: var(--fs-xl);
   line-height: 1.45;
   color: var(--ink-3);
   opacity: 0;
@@ -306,15 +358,32 @@ onBeforeUnmount(() => {
 .context.on { opacity: .42; }
 .line {
   margin: 0;
-  min-height: 1.6em;
-  max-width: min(18em, 94vw);
+  max-width: 100%;
   text-align: center;
-  font-size: var(--fs-hero);
+  font-size: clamp(var(--fs-hero), 6.4vw, 4.75rem);
   font-weight: var(--fw-med);
-  line-height: 1.45;
+  line-height: 1.35;
   color: var(--ink);
 }
-.line.slot { min-height: 1.6em; }
+.line.slot { min-height: 1.2em; display: flex; align-items: center; justify-content: center; }
+.dots { display: inline-flex; align-items: center; gap: .55em; height: 1.2em; }
+.dots i {
+  width: .42em; height: .42em; border-radius: 50%;
+  background: var(--ink-2);
+  animation: dot-hop 1.05s var(--ease) infinite;
+}
+.dots i:nth-child(2) { animation-delay: .16s; }
+.dots i:nth-child(3) { animation-delay: .32s; }
+@keyframes dot-hop {
+  0%, 100% { transform: translateY(0); opacity: .35; }
+  50% { transform: translateY(-.42em); opacity: 1; }
+}
+.lift-enter-active, .lift-leave-active {
+  transition: transform var(--dur-2) var(--ease-emph), opacity var(--dur-2) var(--ease);
+}
+.lift-leave-active { position: absolute; left: 0; right: 0; }
+.lift-enter-from { transform: translateY(78%); opacity: .32; }
+.lift-leave-to { transform: translateY(-82%); opacity: .28; }
 
 .word {
   border: 0;
@@ -332,18 +401,26 @@ onBeforeUnmount(() => {
   opacity: 0;
   transform: translate3d(0, 0.55em, 0) scale(0.72);
 }
-.word.active {
+.word.active,
+.word.live {
   opacity: 1;
   color: var(--ink);
   transform: translate3d(0, 0, 0) scale(1);
+  text-shadow:
+    0 0 10px var(--accent-line),
+    0 0 22px color-mix(in srgb, var(--au-1) 46%, transparent);
 }
 .word.bounce {
   animation: word-bounce var(--dur-2) var(--ease-emph);
+}
+.word.live {
+  animation: word-breath 2.8s var(--ease) infinite;
 }
 .word.sung {
   opacity: .72;
   color: var(--ink-2);
   transform: translate3d(0, 0, 0) scale(1);
+  animation: afterglow var(--dur-2) var(--ease);
 }
 .word.active:hover,
 .word.sung:hover { color: var(--ink); }
@@ -353,22 +430,40 @@ onBeforeUnmount(() => {
   46% { opacity: 1; transform: translate3d(0, -0.32em, 0) scale(1.14); }
   100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
 }
+@keyframes word-breath {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(0, -0.1em, 0); }
+}
+@keyframes afterglow {
+  0% { text-shadow: 0 0 16px var(--accent-line); opacity: .95; }
+  100% { text-shadow: 0 0 0 transparent; opacity: .72; }
+}
 
 .stage.snap .word,
 .stage.snap .word.active,
+.stage.snap .word.live,
 .stage.snap .word.sung,
-.stage.snap .word.unreached {
+.stage.snap .word.unreached,
+.stage.snap .dots i,
+.stage.snap .lift-enter-active,
+.stage.snap .lift-leave-active {
   animation: none;
   transition: none;
+  text-shadow: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .word,
   .word.active,
+  .word.live,
   .word.sung,
-  .word.unreached {
+  .word.unreached,
+  .dots i,
+  .lift-enter-active,
+  .lift-leave-active {
     animation: none;
     transition: none;
+    text-shadow: none;
   }
 }
 </style>

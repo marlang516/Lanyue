@@ -154,23 +154,31 @@ async function onDownload() {
   overflow: hidden;
 }
 .bg {
-  position: absolute; inset: -80px;
+  position: absolute; inset: -12%;
   background-size: cover; background-position: center;
-  filter: blur(56px) saturate(150%);
-  opacity: .55; transform: scale(1.08);
+  filter: blur(46px) saturate(165%);
+  opacity: .82;
+  animation: cover-drift 46s var(--ease) infinite alternate;
+}
+@keyframes cover-drift {
+  from { transform: scale(1.12) translate3d(-1.6%, -1%, 0); }
+  to { transform: scale(1.22) translate3d(1.8%, 1.4%, 0); }
 }
 .veil {
   position: absolute; inset: 0;
   background:
-    radial-gradient(44% 50% at 18% 20%, var(--blob-1), transparent 70%),
-    radial-gradient(40% 46% at 82% 16%, var(--blob-2), transparent 70%),
-    linear-gradient(180deg, rgba(242, 244, 249, .55), rgba(242, 244, 249, .9));
+    radial-gradient(44% 50% at 18% 20%, var(--blob-1), transparent 72%),
+    radial-gradient(40% 46% at 82% 16%, var(--blob-2), transparent 72%),
+    linear-gradient(180deg, rgba(242, 244, 249, .18), rgba(242, 244, 249, .4));
 }
 [data-theme="dark"] .veil {
   background:
-    radial-gradient(44% 50% at 18% 20%, var(--blob-1), transparent 70%),
-    radial-gradient(40% 46% at 82% 16%, var(--blob-2), transparent 70%),
-    linear-gradient(180deg, rgba(13, 16, 32, .55), rgba(13, 16, 32, .92));
+    radial-gradient(44% 50% at 18% 20%, var(--blob-1), transparent 72%),
+    radial-gradient(40% 46% at 82% 16%, var(--blob-2), transparent 72%),
+    linear-gradient(180deg, rgba(13, 16, 32, .16), rgba(13, 16, 32, .42));
+}
+@media (prefers-reduced-motion: reduce) {
+  .bg { animation: none; transform: scale(1.12); }
 }
 
 .hd {
