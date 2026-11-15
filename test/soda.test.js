@@ -18,7 +18,7 @@ const api = require('../src/api/index.js');
 
 const {
   mapTrack, pickCover, buildQuery, extractRouterData,
-  sentencesToLrc, fmtLrcTime, estimateBr, CLIENT_PARAMS,
+  sentencesToLrc, sentencesToKaraoke, fmtLrcTime, estimateBr, CLIENT_PARAMS,
 } = soda._internal;
 
 // ── pickCover ─────────────────────────────────────────────
@@ -191,6 +191,20 @@ test('sentencesToLrc: 跳过空文本 / 非法时间 / 非数组输入', () => {
   assert.strictEqual(sentencesToLrc(null), '');
   assert.strictEqual(sentencesToLrc(undefined), '');
   assert.strictEqual(sentencesToLrc([]), '');
+});
+
+test('sentencesToKaraoke: 逐字时间原样保留，天文 endMs 记成 0', () => {
+  const karaoke = sentencesToKaraoke([
+    { startMs: 0, endMs: 5134, text: '作曲：哇欣', words: [{ text: '作曲：哇欣', startMs: 0, endMs: 5134 }] },
+    { startMs: 10268, endMs: 15000, text: '作词：哇欣', words: [] },
+    { startMs: 61615, endMs: 9007199254740991, text: '拜拜', words: [{ text: '拜拜', startMs: 61615, endMs: 9007199254740991 }] },
+  ]);
+  assert.strictEqual(karaoke.lines.length, 3);
+  assert.strictEqual(karaoke.lines[0].words[0].startMs, 0);
+  assert.strictEqual(karaoke.lines[0].words[0].durMs, 5134);
+  assert.deepStrictEqual(karaoke.lines[1].words, []);
+  assert.strictEqual(karaoke.lines[2].words[0].durMs, 0, '末句 MAX_SAFE_INTEGER 不能变成时长');
+  assert.deepStrictEqual(sentencesToKaraoke(null).lines, []);
 });
 
 test('sentencesToLrc: 每一行都带方括号时间轴（渲染层 parseLrc 的硬要求）', () => {

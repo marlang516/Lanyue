@@ -352,14 +352,25 @@ export interface DeleteFileResult {
 
 /* ── 歌词 ─────────────────────────────────────────────────── */
 
-/** 解析后的歌词行（t 为秒） */
-export interface LyricLine {
+/** 一句里的一个词（t / dur 为秒，与行的 t 同一条时间轴） */
+export interface LyricWord {
   t: number;
+  dur: number;
   text: string;
 }
 
-/** 桌面歌词窗口使用的瘦身行 */
-export interface DesktopLyricLine extends LyricLine {
+/** 解析后的歌词行（t 为秒）。words 仅在源本身带逐字时间时出现。 */
+export interface LyricLine {
+  t: number;
+  text: string;
+  words?: LyricWord[];
+}
+
+/**
+ * 桌面歌词窗口使用的瘦身行。
+ * words 仍是字符串数组（桌面逐字高亮的旧字段），与全屏页的 LyricWord 不是同一结构。
+ */
+export interface DesktopLyricLine extends Omit<LyricLine, 'words'> {
   subText: string;
   words: string[];
   wordTimes: number[];

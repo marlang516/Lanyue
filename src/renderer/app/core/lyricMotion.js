@@ -17,6 +17,10 @@
  *     回到报告时间，避免卡顿时歌词自己往前跑。
  *
  * 行号二分全屏页和桌面歌词同步共用，不要在播放器里再写一份。
+ *
+ * 逐字状态用的是调用方已经算好的同一播放秒（含偏移），不是第二只钟。
+ * 有逐字时间就沿用；一个词里有好几个字时，只在这个词自己的时长里均分。
+ * 没有逐字时间时，把这一句的时长均分给拆开的字。标点贴在前一个字上。
  */
 
 /** 与 tokens.css 的 --dur-2（.32s）对齐；改一边必须改另一边。 */
@@ -257,4 +261,249 @@ export function projectPlayhead(anchor, reported, nowMs, rate, playing) {
   }
   const lead = anchor.progress + PLAYHEAD_LEAD_CAP_SEC * spd;
   return { seconds: Math.max(0, Math.min(expected, lead)), anchor, seeked: false };
+}
+
+/** 词在自己的起点前这么久进入「在唱」，给弹入留出时间。 */
+export const WORD_LEAD_SEC = 0.15;
+
+/** 源没给时长、后面也没有下一词时，在唱态保持这么久再收成已唱。 */
+export const WORD_UNTIMED_SEC = 0.4;
+
+const timedWordCache = new WeakMap();
+const lineWordCache = new WeakMap();
+
+/**
+ * 一行上真实的逐字时间。空、或没有一个合法的词，返回 null（调用方改走整句）。
+ * @param {{ words?: readonly {t:number, dur?:number, text?:string}[] } | null | undefined} line
+ * @returns {readonly {t:number, dur:number, text:string}[] | null}
+ */
+function timedWords(line) {
+  if (!line || typeof line !== 'object') return null;
+  const hit = timedWordCache.get(line);
+  if (hit !== undefined) return hit;
+  const src = line.words;
+  if (!Array.isArray(src) || !src.length) {
+    timedWordCache.set(line, null);
+    return null;
+  }
+  const out = [];
+  for (const w of src) {
+    if (!w || typeof w.text !== 'string' || !w.text) continue;
+    const t = Number(w.t);
+    if (!Number.isFinite(t)) continue;
+    const dur = Number(w.dur);
+    out.push({ t, dur: Number.isFinite(dur) && dur > 0 ? dur : 0, text: w.text });
+  }
+  const result = out.length ? out : null;
+  timedWordCache.set(line, result);
+  return result;
+}
+
+/** @param {string} ch */
+function isSpace(ch) {
+  return ch === ' ' || ch === '\t' || ch === '\n' || ch === '\u3000';
+}
+
+/** 汉字、假名、谚文各自一拍。 */
+/** @param {string} ch */
+function isCjk(ch) {
+  const c = ch.codePointAt(0) || 0;
+  return (c >= 0x3400 && c <= 0x9fff)
+    || (c >= 0xf900 && c <= 0xfaff)
+    || (c >= 0x3040 && c <= 0x30ff)
+    || (c >= 0x31f0 && c <= 0x31ff)
+    || (c >= 0xac00 && c <= 0xd7af);
+}
+
+/** @param {string} ch */
+function isWordChar(ch) {
+  if (!ch) return false;
+  return /[A-Za-z0-9]/.test(ch) || (ch >= '\u00C0' && ch <= '\u024F');
+}
+
+/** 夹在字母数字中间的撇号、连字符留在词里，不当成单独一拍。 */
+/** @param {string} ch */
+function isInnerMark(ch) {
+  return ch === "'" || ch === '\u2019' || ch === '-' || ch === '\u2010';
+}
+
+/**
+ * 一句或一个词拆成要跳的拍。
+ * 汉字一字一拍，英文和数字按词，标点贴在前一个字上（句首标点贴到后一个字）。
+ * @param {string} text
+ * @returns {string[]}
+ */
+function splitBeats(text) {
+  const chars = Array.from(String(text || ''));
+  /** @type {string[]} */
+  const beats = [];
+  let latin = '';
+  let lead = '';
+
+  /** @param {string} token */
+  function pushBeat(token) {
+    beats.push(lead + token);
+    lead = '';
+  }
+  function flushLatin() {
+    if (!latin) return;
+    pushBeat(latin);
+    latin = '';
+  }
+
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i];
+    if (isSpace(ch)) {
+      flushLatin();
+      if (beats.length) beats[beats.length - 1] += ch;
+      else lead += ch;
+      continue;
+    }
+    if (isCjk(ch)) {
+      flushLatin();
+      pushBeat(ch);
+      continue;
+    }
+    const next = chars[i + 1] || '';
+    if (isWordChar(ch) || (latin && isInnerMark(ch) && isWordChar(next))) {
+      latin += lead + ch;
+      lead = '';
+      continue;
+    }
+    flushLatin();
+    if (beats.length) beats[beats.length - 1] += ch;
+    else lead += ch;
+  }
+  flushLatin();
+  if (lead) {
+    if (beats.length) beats[beats.length - 1] += lead;
+    else if (/\S/.test(lead)) beats.push(lead);
+  }
+  return beats.filter((b) => /\S/.test(b));
+}
+
+/**
+ * 把一段时间均分给拆开的拍。
+ * @param {string} text
+ * @param {number} start
+ * @param {number} span
+ * @returns {{t:number, dur:number, text:string}[]}
+ */
+function spreadBeats(text, start, span) {
+  const beats = splitBeats(text);
+  const width = span > 0 ? span : 0.05;
+  if (!beats.length) {
+    return text ? [{ t: start, dur: width, text }] : [];
+  }
+  const slice = width / beats.length;
+  return beats.map((token, i) => ({ t: start + slice * i, dur: slice, text: token }));
+}
+
+/**
+ * 真实逐字时间。已经是一个字的不拆；一个词里有多个字时，只均分这个词自己的时长。
+ * @param {readonly {t:number, dur:number, text:string}[]} words
+ * @returns {{t:number, dur:number, text:string}[]}
+ */
+function expandTimed(words) {
+  /** @type {{t:number, dur:number, text:string}[]} */
+  const out = [];
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    const beats = splitBeats(w.text);
+    if (beats.length <= 1) {
+      out.push(beats.length === 1 && beats[0] === w.text ? w : { t: w.t, dur: w.dur, text: beats[0] || w.text });
+      continue;
+    }
+    let span = w.dur;
+    if (!(span > 0)) {
+      const next = words[i + 1];
+      const nextT = next ? Number(next.t) : Number.NaN;
+      span = Number.isFinite(nextT) && nextT > w.t ? nextT - w.t : WORD_UNTIMED_SEC;
+    }
+    const slice = span / beats.length;
+    for (let j = 0; j < beats.length; j++) {
+      out.push({ t: w.t + slice * j, dur: slice, text: beats[j] });
+    }
+  }
+  return out;
+}
+
+/**
+ * 这一句的终点：下一句起点，否则曲长，否则句末保持。
+ * @param {{t:number}} line
+ * @param {{t:number} | null | undefined} nextLine
+ * @param {number | undefined} duration
+ * @returns {number}
+ */
+function lineEnd(line, nextLine, duration) {
+  const start = finite(line.t, 0);
+  const nextT = nextLine ? Number(nextLine.t) : Number.NaN;
+  const songEnd = Number(duration);
+  if (Number.isFinite(nextT) && nextT > start) return nextT;
+  if (Number.isFinite(songEnd) && songEnd > start) return songEnd;
+  return start + LYRIC_SUNG_HOLD_SEC;
+}
+
+/**
+ * 这一句在舞台上要跳的字。
+ * 有逐字时间就用那一份（长词再拆开）；没有就把整句时长均分给每个字。
+ * @param {{t:number, text?:string, words?: readonly {t:number, dur?:number, text?:string}[]} | null | undefined} line
+ * @param {{t:number} | null | undefined} nextLine
+ * @param {number | undefined} duration 曲长（秒）
+ * @returns {readonly {t:number, dur:number, text:string}[]}
+ */
+export function displayWords(line, nextLine, duration) {
+  if (!line) return [];
+  const timed = timedWords(line);
+  const end = lineEnd(line, nextLine, duration);
+  const cached = lineWordCache.get(line);
+  if (cached && cached.end === end && cached.timed === timed) return cached.words;
+  const start = finite(line.t, 0);
+  const words = timed
+    ? expandTimed(timed)
+    : spreadBeats(typeof line.text === 'string' ? line.text : '', start, Math.max(0.05, end - start));
+  lineWordCache.set(line, { end, timed, words });
+  return words;
+}
+
+/**
+ * 一个词的在唱结束时刻。dur 为 0 时用下一词起点，仍没有就用 WORD_UNTIMED_SEC。
+ * @param {readonly {t:number, dur?:number}[]} words
+ * @param {number} index
+ * @returns {number}
+ */
+function wordActiveEnd(words, index) {
+  const start = finite(words[index] && words[index].t, 0);
+  const dur = finite(Number(words[index] && words[index].dur), 0);
+  if (dur > 0) return start + dur;
+  const next = words[index + 1];
+  const nextT = next ? Number(next.t) : Number.NaN;
+  if (Number.isFinite(nextT) && nextT > start) return nextT;
+  return start + WORD_UNTIMED_SEC;
+}
+
+/**
+ * 每个词相对播放秒的状态。seconds 必须已经含用户偏移，与 resolveLyricFrame 同一份。
+ * unreached 还没到，active 正在唱（含提前量），sung 这句里已经唱过。
+ * @param {readonly {t:number, dur?:number}[] | null | undefined} words
+ * @param {number} seconds
+ * @returns {{ index: number, states: ('unreached'|'active'|'sung')[] }}
+ */
+export function resolveWordStates(words, seconds) {
+  if (!Array.isArray(words) || !words.length) return { index: -1, states: [] };
+  const t = finite(seconds, 0);
+  /** @type {('unreached'|'active'|'sung')[]} */
+  const states = new Array(words.length);
+  let index = -1;
+  for (let i = 0; i < words.length; i++) {
+    const start = finite(words[i] && words[i].t, 0);
+    const end = wordActiveEnd(words, i);
+    /** @type {'unreached'|'active'|'sung'} */
+    let state = 'sung';
+    if (t < start - WORD_LEAD_SEC) state = 'unreached';
+    else if (t < end) state = 'active';
+    states[i] = state;
+    if (state === 'active') index = i;
+  }
+  return { index, states };
 }
