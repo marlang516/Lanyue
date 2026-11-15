@@ -181,7 +181,8 @@ async function init() {
     if (typeof api.onQueuePausedChanged === 'function') {
       api.onQueuePausedChanged((payload) => {
         if (typeof window.applyQueuePausedUi === 'function') {
-          window.applyQueuePausedUi(!!(payload && payload.paused));
+          const paused = payload && typeof payload === 'object' ? payload.paused : payload;
+          window.applyQueuePausedUi(!!paused);
         }
       });
     }

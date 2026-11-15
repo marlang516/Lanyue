@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { ui, toggleTheme, togglePalette, openSearch } from '../../stores/ui';
-import { callSafe } from '../../core/bridge';
+import { ui, toggleTheme, togglePalette, openSearch, openDownloadDir } from '../../stores/ui';
 import Icon from '../common/Icon.vue';
 import WindowControls from './WindowControls.vue';
 
@@ -19,10 +18,6 @@ function focusSearch(): void {
 }
 
 defineExpose({ focusSearch });
-
-function openDownloadDir() {
-  callSafe('openFolder', [''], null);
-}
 </script>
 
 <template>

@@ -147,7 +147,7 @@ function updateTrayMenu(playState = { isPlaying: false, title: '', artist: '' })
         // 同步渲染层按钮状态（queue-updated 不携带 paused，走独立事件）
         const mainWindow = _getMainWindow();
         if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('queue-paused-changed', { paused: mi.checked });
+          mainWindow.webContents.send('queue-paused-changed', mi.checked);
         }
       },
     },

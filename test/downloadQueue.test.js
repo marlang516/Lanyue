@@ -391,6 +391,23 @@ test('loadPersistedQueue: 恢复任务并迁移状态', async () => {
     assert.strictEqual(q[2].status, 'error', '超 24h pending → error');
     assert.strictEqual(q[3].status, 'done', 'done 保留');
     assert.strictEqual(q[4].status, 'error', 'error 保留');
+    const saved = JSON.parse(fs.readFileSync(path.join(dir, 'queue.json'), 'utf8'));
+    assert.strictEqual(saved[0].status, 'error', 'downloading→error 必须写回磁盘');
+    assert.strictEqual(saved[1].status, 'pending', '未迁移的 pending 保持原样');
+    assert.strictEqual(saved[2].status, 'error', '超时 pending→error 必须写回磁盘');
+  } finally { restore(); }
+});
+
+test('flush: 没有挂着的防抖定时器也落盘', () => {
+  const { engine, dir, restore } = buildEngine();
+  try {
+    engine.getQueue().push({ id: '1', source: 'q', title: 't', taskId: 'x', status: 'done' });
+    engine.dispose();
+    const fp = path.join(dir, 'queue.json');
+    assert.ok(fs.existsSync(fp), '退出时即使不在防抖窗口内也要写盘');
+    const data = JSON.parse(fs.readFileSync(fp, 'utf8'));
+    assert.strictEqual(data.length, 1);
+    assert.strictEqual(data[0].id, '1');
   } finally { restore(); }
 });
 
