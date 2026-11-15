@@ -17,7 +17,7 @@ import { reactive, computed, watch } from 'vue';
 import type { ComputedRef } from 'vue';
 import { fileUrlFromPath } from '../../../shared/fileUrl.mjs';
 import { createSkipPrep, prepKey } from '../../js/skipPrep.js';
-import { call, callSafe } from '../core/bridge';
+import { call, callSafe, on } from '../core/bridge';
 import { getPref, setPref } from '../core/prefs';
 import { normalizeSong, songKey } from '../core/song';
 import type { Song } from '../core/song';
@@ -307,6 +307,11 @@ function fmtClock(s: number): string {
 
 let _lastSyncAt = 0;
 let _lastSyncedKey = '';
+/**
+ * 与任何 songKey 都不同（无歌时的键是空串）。
+ * 窗口刚打开时用它清游标，下一次同步一定会带上标题、封面和整份歌词。
+ */
+const OUTPUT_UNSYNCED = '\u0000';
 
 function currentLineText(): string {
   const idx = activeLineIndex(lyricsState.items, player.progress + lyricsState.offsetMs / 1000);
@@ -407,6 +412,31 @@ function syncOutputs(force = false): void {
 
   if (changed) _lastSyncedKey = key;
   updateMediaSession(song, changed);
+}
+
+/**
+ * 桌面歌词 / 迷你播放器刚打开时要全量状态。
+ * 只推进度时透明窗口看起来像按钮没反应。
+ */
+export function forceSyncOutputs(): void {
+  _lastSyncedKey = OUTPUT_UNSYNCED;
+  syncOutputs(true);
+}
+
+let _outputSyncReady = false;
+
+/**
+ * 订阅一次：窗口打开后的全量回推，以及迷你播放器上的上一首 / 下一首 / 播放。
+ * 主进程在页面 load 完成时才来要状态，订晚了首帧就只剩进度。
+ */
+export function initOutputSync(): void {
+  if (_outputSyncReady) return;
+  _outputSyncReady = true;
+  on('onSyncDesktopLyric', () => forceSyncOutputs());
+  on('onSyncMiniPlayer', () => forceSyncOutputs());
+  on('onMiniNext', () => next());
+  on('onMiniPrev', () => prev());
+  on('onMiniTogglePlay', () => togglePlay());
 }
 
 // 歌词异步到达：强制重推整份歌词给桌面歌词窗口
