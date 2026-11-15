@@ -5,7 +5,7 @@
  *   - qqMusic: qq-music-api 第三方 SDK
  *   - qqGetSign: qq-music-api/util/sign.js 签名工具
  *   - request: 通用 HTTP 请求函数
- *   - cookie 工具: extractQQUin / extractQQMusickey / detectQQCookieType
+ *   - cookie 工具: detectQQCookieType / pickCookieField
  */
 
 const qqMusic = require('qq-music-api');
@@ -14,8 +14,7 @@ const request = require('../request');
 const { asSong } = require('../songShape');
 const { AppError } = require('../../shared/errors');
 const {
-  extractQQUin,
-  extractQQMusickey,
+  pickCookieField,
   detectQQCookieType,
 } = require('../../utils/cookie');
 const logger = require('../../utils/logger');
@@ -378,14 +377,17 @@ QUALITY_MAP.sd = QUALITY_MAP.standard;
  * @returns {Promise<{url,ext}|{error,code,fatal}>}
  */
 async function qqGetUrl(id, quality, cookie = '') {
-  const uin = extractQQUin(cookie) || '0';
+  const auth = detectQQCookieType(cookie);
+  // wxuin 的前导 o 不能当 musicid 送出去，否则微信侧 VIP 对不上。
+  const uin = auth.musicId && auth.musicId !== '0' ? auth.musicId : '0';
   const q = QUALITY_MAP[quality] || QUALITY_MAP.sd;
-  const qqmusicKey = extractQQMusickey(cookie);
+  const qqmusicKey = auth.musickey;
   const mediaId = id;
   const file = `${q.s}${id}${mediaId}${q.e}`;
   const guid = Math.floor(Math.random() * 10000000).toString();
 
-  // vkey 请求体
+  // vkey 请求体。ct:19 是 PC 公参，这里的 tmeLoginType 用数字：
+  // 1 = 微信，2 = QQ（与换票请求一致）。未登录不带这个字段。
   const dataObj = {
     req_0: {
       module: 'vkey.GetVkeyServer',
@@ -408,6 +410,9 @@ async function qqGetUrl(id, quality, cookie = '') {
       authst: qqmusicKey,    // 新版 QQ 鉴权签名（VIP/FLAC 必备）
     },
   };
+  if (auth.tmeLoginType === 1 || auth.tmeLoginType === 2) {
+    dataObj.comm.tmeLoginType = auth.tmeLoginType;
+  }
   // vkey 的 data 必须走 **JSON body**（Content-Type: application/json）。
   // 实测（2026-09-21，本机真实 Cookie + 生产 request 通路）：同一条 payload 以
   // x-www-form-urlencoded 的 `data=<编码串>` 送出时 musicu.fcg 压根不解析——恒回
@@ -447,10 +452,20 @@ async function qqGetUrl(id, quality, cookie = '') {
       }
       return { url: baseUrl + info.purl, ext: q.ext };
     }
-    // 细化失败原因（result=104003 通常是 VIP/auth 失败）
+    // 104003：没有播放密钥时是登录态不完整；密钥和登录类型都带上了仍是 104003，
+    // 就是这首歌当前账号没有权限，不能再说成 qqmusic_key 过期。
     const errCode = info?.result;
     if (errCode === 104003) {
-      return { ...AppError.authExpired('QQ音乐'), error: 'QQ音乐鉴权失败（cookie 中的 qqmusic_key 过期或失效，请重新登录）' };
+      if (qqmusicKey && (auth.tmeLoginType === 1 || auth.tmeLoginType === 2)) {
+        return {
+          ...AppError.vipRequired('QQ音乐'),
+          error: '这首歌当前账号没有播放权限（vkey 104003）。登录类型和 musickey 已经带上。',
+        };
+      }
+      return {
+        ...AppError.authExpired('QQ音乐'),
+        error: 'QQ音乐鉴权失败（cookie 中没有 qm_keyst / qqmusic_key，请重新登录）',
+      };
     }
     return AppError.vipRequired('QQ音乐');
   } catch (e) {
@@ -464,18 +479,37 @@ async function qqGetUrl(id, quality, cookie = '') {
  * 用 QQConnectLogin 接口尝试获取一个新的登录 key
  * @returns {Promise<string>} 新的 musickey，或空字符串
  */
-async function _tryRefreshMusickey(cookie, uin) {
-  const data = {
-    req1: {
-      module: 'QQConnectLogin.LoginServer',
-      method: 'QQLogin',
-      param: {
-        expired_in: 7776000,
-        musicid: uin || '0',
-        musickey: '',   // 传空，让服务器分配一个新的
-      },
-    },
-  };
+async function _tryRefreshMusickey(cookie, uin, wechat) {
+  // 微信走 music.login.LoginServer.Login，comm.tmeLoginType 用字符串 "1"
+  // （换票请求的通用公参）。QQ 号仍走原来的 QQLogin。
+  const data = wechat
+    ? {
+        comm: { tmeLoginType: '1' },
+        req1: {
+          module: 'music.login.LoginServer',
+          method: 'Login',
+          param: {
+            openid: pickCookieField(cookie, 'wxopenid'),
+            refresh_token: pickCookieField(cookie, 'wxrefresh_token'),
+            str_musicid: uin || '0',
+            musickey: '',
+            unionid: pickCookieField(cookie, 'wxunionid'),
+            refresh_key: pickCookieField(cookie, 'refresh_key'),
+            loginMode: 2,
+          },
+        },
+      }
+    : {
+        req1: {
+          module: 'QQConnectLogin.LoginServer',
+          method: 'QQLogin',
+          param: {
+            expired_in: 7776000,
+            musicid: uin || '0',
+            musickey: '',   // 传空，让服务器分配一个新的
+          },
+        },
+      };
   const sign = qqGetSign(data);
   const url =
     `https://u6.y.qq.com/cgi-bin/musics.fcg` +
@@ -527,24 +561,11 @@ async function qqGetSongDetail(mid) {
 
 async function qqVerifyCookie(cookie) {
   const detect = detectQQCookieType(cookie);
+  const musicId = detect.musicId && detect.musicId !== '0' ? detect.musicId : '';
+  const loginType = detect.isWechatLogin ? 'wechat' : 'qq';
 
-  // 微信登录：明确告知用户
-  if (detect.isWechatLogin && !detect.isQQLogin) {
-    return {
-      valid: false,
-      type: 'wechat',
-      reason: '检测到「微信登录」Cookie，QQ音乐VIP解锁率较低',
-      fields: detect.fields,
-      missing: detect.missing,
-      suggestions: [
-        '1. 退出当前登录，在 y.qq.com 改用「QQ号+密码」重新登录',
-        '2. 微信登录的VIP绑定在微信侧，QQ音乐API无法识别',
-      ],
-    };
-  }
-
-  // 必要字段缺失：没有 uin 就直接拒绝（这是未登录的明确标志）
-  if (!detect.uin) {
+  // 必要字段缺失：没有账号 id 就直接拒绝（这是未登录的明确标志）
+  if (!musicId) {
     return {
       valid: false,
       type: 'unknown',
@@ -554,14 +575,25 @@ async function qqVerifyCookie(cookie) {
     };
   }
 
-  // 有 uin 但没有 musickey：说明是刚登录的 Cookie（musickey 要播歌后才会有）
-  // 这种情况允许保存，但不标记为完整 VIP 登录
   const hasMusickey = detect.fields.qqmusic_key || detect.fields.qm_keyst;
+
+  // 微信且已有播放密钥：QQLogin 是 QQ 号换票，不能用来否定微信登录。
+  if (detect.isWechatLogin && hasMusickey) {
+    return {
+      valid: true,
+      type: 'wechat',
+      uin: musicId,
+      freshMusickey: '',
+      fields: detect.fields,
+      message: '微信登录 Cookie 有效',
+    };
+  }
+
+  // 有账号但没有 musickey：允许保存，并按登录类型尝试刷新播放密钥。
   if (!hasMusickey) {
-    // 尝试从 u6 接口拿一个临时 musickey（即使失败也不阻止保存）
     let freshMusickey = '';
     try {
-      freshMusickey = await _tryRefreshMusickey(cookie, detect.uin);
+      freshMusickey = await _tryRefreshMusickey(cookie, musicId, detect.isWechatLogin);
     } catch (e) {
       // 忽略刷新失败
     }
@@ -570,35 +602,38 @@ async function qqVerifyCookie(cookie) {
       // 返回新 musickey，由 IPC 调用方写回 cookie store
       return {
         valid: true,
-        type: 'qq',
-        uin: detect.uin,
+        type: loginType,
+        uin: musicId,
         freshMusickey,
         fields: detect.fields,
-        message: 'QQ 登录 Cookie 有效（已刷新 musickey）',
+        message: detect.isWechatLogin
+          ? '微信登录 Cookie 有效（已刷新 musickey）'
+          : 'QQ 登录 Cookie 有效（已刷新 musickey）',
         cookieRefreshed: true,
       };
     }
 
-    // 没有 musickey 也刷新不到：仍然算登录成功，但提示需要先播歌
     return {
       valid: true,
-      type: 'qq',
-      uin: detect.uin,
+      type: loginType,
+      uin: musicId,
       freshMusickey: '',
       fields: detect.fields,
-      message: 'QQ 登录 Cookie 有效，但 musickey 需播放歌曲后自动刷新（非 VIP 账号可直接使用）',
+      message: detect.isWechatLogin
+        ? '微信登录 Cookie 有效，但还没有 qm_keyst / qqmusic_key。请重新登录并等到播放密钥出现。'
+        : 'QQ 登录 Cookie 有效，但 musickey 需播放歌曲后自动刷新（非 VIP 账号可直接使用）',
     };
   }
 
-  // 有 musickey，走完整验证流程
-  const musickey = extractQQMusickey(cookie);
+  // QQ 号且有 musickey，走原来的 QQLogin 验证
+  const musickey = detect.musickey;
   const data = {
     req1: {
       module: 'QQConnectLogin.LoginServer',
       method: 'QQLogin',
       param: {
         expired_in: 7776000,
-        musicid: detect.uin,
+        musicid: musicId,
         musickey,
       },
     },
@@ -624,7 +659,7 @@ async function qqVerifyCookie(cookie) {
       return {
         valid: true,
         type: 'qq',
-        uin: detect.uin,
+        uin: musicId,
         freshMusickey: freshKey,
         fields: detect.fields,
         message: 'QQ 登录 Cookie 有效（已通过 QQConnectLogin 接口验证）',

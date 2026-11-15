@@ -76,8 +76,24 @@ function normalizeQQCookie(cookie) {
  * @returns {string}
  */
 function extractQQUin(cookie) {
-  // 同时取 uin 和 wxuin，优先 uin
+  // 同时取 uin 和 wxuin，优先 uin。wxuin 可能带前导 o，原样返回。
   return pickCookieField(cookie, 'uin', 'wxuin');
+}
+
+/**
+ * 把 cookie 里的账号字段收成 musicid。
+ * wxuin 的前导 o 不是账号编号；再去掉多余的前导 0，只剩 0 时保留 0。
+ *
+ * @param {string} raw
+ * @returns {string}
+ */
+function normalizeQQMusicId(raw) {
+  if (raw == null) return '';
+  let s = String(raw).trim();
+  if (!s) return '';
+  if (/^o\d+$/.test(s)) s = s.slice(1);
+  s = s.replace(/^0+(?=\d)/, '');
+  return s;
 }
 
 /**
@@ -121,6 +137,9 @@ function refreshQQMusickey(cookieStr, newKey) {
  *   isWechatLogin: boolean,
  *   hasUin: boolean,
  *   uin: string,
+ *   musicId: string,
+ *   musickey: string,
+ *   tmeLoginType: 0 | 1 | 2,
  *   missing: string[]
  * }}
  */
@@ -139,26 +158,44 @@ function detectQQCookieType(cookie) {
     skey: hasCookieField(cookie, 'skey'),
   };
 
-  // 真正的登录类型判断：
-  //   tmeLoginType=1 → QQ号登录（PC QQ）  优先以此为准
-  //   tmeLoginType=2 或 login_type=2 → 微信登录（仅在 tmeLoginType 不存在时判定）
-  const isQQLogin = hasCookieValue(cookie, 'tmeLoginType', '1');
-  const isWechatLogin = !isQQLogin && (
-    hasCookieValue(cookie, 'tmeLoginType', '2') ||
-    hasCookieValue(cookie, 'login_type', '2')
-  );
+  // 发给 comm.tmeLoginType 的值：1 = 微信，2 = QQ。
+  // 换票请求和登录成功后写入的 cookie 都是这个方向（ylw1997 wx-login、
+  // whatsqqmusic 会话字段、sansenjian 微信登录 cookie 均为 tmeLoginType=1；
+  // QQ 换票覆盖 "2"）。musickey 以 W_X 开头视为微信，Q_H_L 开头视为 QQ；
+  // whatsqqmusic 的 login_with_cookie 只信这个前缀，不信 cookie 里的数字。
+  // y.qq.com 扫码页跳转参数相反：微信二维码是 wx_redirect.html?login_type=2，
+  // QQ OAuth 是 login_type=1。那是页面参数，不是会话 cookie。
+  // 本文件旧注释把 tmeLoginType=1 当成 QQ，仓库里没有抓到的 cookie 能支持它。
+  const musickey = extractQQMusickey(cookie);
+  const hasWxIdentity = fields.wxuin || fields.wxopenid || fields.wxunionid || fields.wxrefresh_token;
+  const typeField = pickCookieField(cookie, 'tmeLoginType', 'login_type');
+
+  let isWechatLogin = false;
+  let isQQLogin = false;
+  if (musickey.startsWith('W_X')) isWechatLogin = true;
+  else if (musickey.startsWith('Q_H_L')) isQQLogin = true;
+  else if (hasWxIdentity) isWechatLogin = true;
+  else if (typeField === '1') isWechatLogin = true;
+  else if (typeField === '2') isQQLogin = true;
 
   const uin = extractQQUin(cookie);
+  const musicId = normalizeQQMusicId(pickCookieField(cookie, 'uin', 'qqmusic_uin', 'wxuin'));
+  const loggedIn = musicId !== '' && musicId !== '0';
+  if (!isWechatLogin && !isQQLogin && loggedIn) isQQLogin = true;
+
   const missing = [];
-  if (!uin) missing.push('uin (或wxuin)');
+  if (!loggedIn) missing.push('uin (或wxuin)');
   if (!fields.qqmusic_key && !fields.qm_keyst) missing.push('qqmusic_key');
 
   return {
     fields,
     isQQLogin,
     isWechatLogin,
-    hasUin: !!uin,
+    hasUin: loggedIn,
     uin,
+    musicId,
+    musickey,
+    tmeLoginType: isWechatLogin ? 1 : (isQQLogin ? 2 : 0),
     missing,
   };
 }
@@ -169,6 +206,7 @@ module.exports = {
   hasCookieValue,
   normalizeQQCookie,
   extractQQUin,
+  normalizeQQMusicId,
   extractQQMusickey,
   refreshQQMusickey,
   detectQQCookieType,

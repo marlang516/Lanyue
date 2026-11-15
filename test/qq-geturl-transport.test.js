@@ -134,6 +134,109 @@ test('回包连 req_0 都没有 → PLATFORM_CHANGED，不再冒充「需要VIP�
     '无 req_0 属协议/接口级失败（请求被顶回、平台没解析），说成 VIP_REQUIRED 会把用户支去瞎折腾 Cookie');
 });
 
+test('QQ 号 cookie 的 vkey comm 带数字 tmeLoginType=2，uin 原样', async () => {
+  calls.length = 0;
+  responder = () => okResponse();
+  await qq.qqGetUrl(MID, 'standard', 'uin=123456789; qm_keyst=Q_H_L_SECRET');
+  const body = JSON.parse(calls[0].opts.body);
+  assert.strictEqual(body.comm.tmeLoginType, 2);
+  assert.strictEqual(body.comm.uin, '123456789');
+  assert.strictEqual(body.comm.authst, 'Q_H_L_SECRET');
+  assert.strictEqual(body.req_0.param.uin, '123456789');
+  assert.strictEqual(body.req_0.param.loginflag, 1);
+});
+
+test('微信 cookie 的 vkey comm 带数字 tmeLoginType=1，uin 去掉 wxuin 的 o 前缀', async () => {
+  calls.length = 0;
+  responder = () => okResponse();
+  const cookie = 'wxuin=o115292150478421314; uin=o115292150478421314; qm_keyst=W_X_SECRET; tmeLoginType=1';
+  await qq.qqGetUrl(MID, 'hq', cookie);
+  const { url, opts } = calls[0];
+  const body = JSON.parse(opts.body);
+  assert.strictEqual(body.comm.tmeLoginType, 1);
+  assert.strictEqual(body.comm.uin, '115292150478421314');
+  assert.strictEqual(body.comm.authst, 'W_X_SECRET');
+  assert.strictEqual(body.req_0.param.uin, '115292150478421314');
+  assert.ok(!url.includes('o115292150478421314'), '查询串里的 loginUin 不能带 wxuin 的 o');
+  assert.ok(url.includes('loginUin=115292150478421314'));
+  assert.ok(!url.includes('W_X_SECRET'), 'musickey 仍然只留在 body');
+});
+
+test('未登录的 vkey 不带 tmeLoginType', async () => {
+  calls.length = 0;
+  responder = () => okResponse();
+  await qq.qqGetUrl(MID, 'standard', '');
+  const body = JSON.parse(calls[0].opts.body);
+  assert.strictEqual(body.comm.uin, '0');
+  assert.strictEqual(Object.hasOwn(body.comm, 'tmeLoginType'), false);
+  assert.strictEqual(body.comm.authst, '');
+});
+
+test('有 musickey 时 vkey 104003 表示没有播放权限，不说密钥过期', async () => {
+  calls.length = 0;
+  responder = () => ({
+    code: 0,
+    req_0: {
+      code: 0,
+      data: {
+        sip: ['https://dl.stream.qqmusic.qq.com/'],
+        midurlinfo: [{ songmid: MID, purl: '', result: 104003 }],
+      },
+    },
+  });
+  const r = await qq.qqGetUrl(MID, 'hq', 'uin=123456789; qm_keyst=Q_H_L_SECRET');
+  assert.ok(!r.url);
+  assert.strictEqual(r.code, 'VIP_REQUIRED');
+  assert.ok(r.error.includes('104003'));
+  assert.ok(!r.error.includes('过期'), r.error);
+  assert.ok(!r.error.includes('失效'), r.error);
+});
+
+test('没有播放密钥时 vkey 104003 仍要求重新登录', async () => {
+  calls.length = 0;
+  responder = () => ({
+    code: 0,
+    req_0: {
+      code: 0,
+      data: {
+        sip: ['https://dl.stream.qqmusic.qq.com/'],
+        midurlinfo: [{ songmid: MID, purl: '', result: 104003 }],
+      },
+    },
+  });
+  const r = await qq.qqGetUrl(MID, 'standard', 'uin=123456789');
+  assert.strictEqual(r.code, 'AUTH_EXPIRED');
+  assert.ok(r.error.includes('qm_keyst') || r.error.includes('qqmusic_key'));
+  assert.ok(!r.error.includes('过期或失效'), r.error);
+});
+
+test('微信 cookie 已有播放密钥时 verifyCookie 接受，不再要求改用 QQ 号', async () => {
+  calls.length = 0;
+  responder = () => { throw new Error('不应再打 QQLogin'); };
+  const r = await qq.qqVerifyCookie('wxuin=o115292150478421314; qm_keyst=W_X_SECRET; tmeLoginType=1');
+  assert.strictEqual(r.valid, true);
+  assert.strictEqual(r.type, 'wechat');
+  assert.strictEqual(r.uin, '115292150478421314');
+  assert.strictEqual(calls.length, 0);
+  assert.ok(!r.reason);
+  assert.ok(!r.suggestions);
+});
+
+test('微信登录缺少播放密钥时用 LoginServer.Login 刷新，失败也算登录成功', async () => {
+  calls.length = 0;
+  responder = () => ({});
+  const r = await qq.qqVerifyCookie('wxuin=o115292150478421314; tmeLoginType=1');
+  assert.strictEqual(r.valid, true);
+  assert.strictEqual(r.type, 'wechat');
+  assert.ok(!r.freshMusickey);
+  assert.strictEqual(calls.length, 1);
+  const data = JSON.parse(decodeURIComponent(new URL(calls[0].url).searchParams.get('data')));
+  assert.strictEqual(data.comm.tmeLoginType, '1');
+  assert.strictEqual(data.req1.module, 'music.login.LoginServer');
+  assert.strictEqual(data.req1.method, 'Login');
+  assert.strictEqual(data.req1.param.str_musicid, '115292150478421314');
+});
+
 test('req_0 正常但 purl 为空、result 非 0 → 仍是 VIP_REQUIRED（改动不许做成一刀切）', async () => {
   calls.length = 0;
   responder = () => ({

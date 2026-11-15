@@ -10,6 +10,7 @@
  */
 
 const { BrowserWindow } = require('electron');
+const { pickCookieField } = require('../utils/cookie');
 const logger = require('../utils/logger');
 
 // 各平台登录配置
@@ -21,8 +22,9 @@ const LOGIN_CONFIGS = {
     detectFields: ['uin', 'wxuin'],
     // 抓取 Cookie 的域名（覆盖主域 + 子域）
     cookieDomains: ['.qq.com', '.y.qq.com', '.open.weixin.qq.com'],
-    // 登录后需要额外等待让 musickey 刷新的时间（ms）
-    musickeyDelay: 3000,
+    // uin 出现后继续等到 qm_keyst / qqmusic_key。固定睡 3 秒经常在密钥写入前关窗，
+    // 缺播放密钥时 vkey 会回 104003。
+    keyWaitMs: 15000,
   },
   netease: {
     loginUrl: 'https://music.163.com',
@@ -62,6 +64,31 @@ const LOGIN_CONFIGS = {
  * 注意后缀匹配用的是**带前导点**的 d（'.qq.com'）：'evilqq.com'.endsWith('.qq.com')
  * 为 false，'evil-douyinvod.com' 这类前缀碰撞不成立，别把判据"优化"成 startsWith。
  */
+/**
+ * QQ 登录窗何时可以关窗抓 cookie。
+ * 身份字段（uin / wxuin）先到，播放密钥（qm_keyst / qqmusic_key）往往晚到。
+ * 密钥一出现就抓；一直没有则等到 keyWaitMs 再抓，避免窗口永不关闭。
+ *
+ * @param {Array<{name: string, value: string}>} cookies
+ * @param {{ waitedMs?: number, keyWaitMs?: number }} [opts]
+ * @returns {{ capture: boolean, reason: string }}
+ */
+function qqLoginCaptureDecision(cookies, { waitedMs = 0, keyWaitMs = 15000 } = {}) {
+  const header = (cookies || [])
+    .filter(c => c && c.name && c.value)
+    .map(c => `${c.name}=${c.value}`)
+    .join('; ');
+  const uin = pickCookieField(header, 'uin');
+  const wxuin = pickCookieField(header, 'wxuin');
+  const hasIdentity = (uin && uin.length > 3) || (wxuin && wxuin.length > 3);
+  if (!hasIdentity) return { capture: false, reason: 'no-identity' };
+  if (pickCookieField(header, 'qm_keyst', 'qqmusic_key')) {
+    return { capture: true, reason: 'playback-key' };
+  }
+  if (waitedMs >= keyWaitMs) return { capture: true, reason: 'key-timeout' };
+  return { capture: false, reason: 'wait-playback-key' };
+}
+
 function hostAllowed(u, config) {
   if (u.protocol !== 'https:') return false;
   const host = u.hostname;
@@ -140,6 +167,7 @@ async function openLoginWindow(platform, parentWindow) {
   return new Promise((resolve) => {
     let resolved = false;
     let checkCount = 0;
+    let identityAt = 0;
     let timeoutId = null;
     const checkInterval = setInterval(async () => {
       if (loginWin.isDestroyed()) {
@@ -159,30 +187,33 @@ async function openLoginWindow(platform, parentWindow) {
           allCookies.some(c => c.name === field && c.value && c.value.length > 3)
         );
 
-        if (hasLoginField && !resolved) {
+        let shouldCapture = hasLoginField;
+        let captureReason = 'login-field';
+        if (platform === 'qq') {
+          if (hasLoginField) {
+            if (!identityAt) identityAt = Date.now();
+          } else {
+            identityAt = 0;
+          }
+          const decision = qqLoginCaptureDecision(allCookies, {
+            waitedMs: identityAt ? Date.now() - identityAt : 0,
+            keyWaitMs: config.keyWaitMs,
+          });
+          shouldCapture = decision.capture;
+          captureReason = decision.reason;
+        }
+
+        if (shouldCapture && !resolved) {
           resolved = true;
           clearInterval(checkInterval);
           if (timeoutId) clearTimeout(timeoutId);
-
-          // QQ 音乐：登录后额外等一会儿，让 musickey 有时间刷新
-          if (platform === 'qq' && config.musickeyDelay) {
-            await new Promise(r => setTimeout(r, config.musickeyDelay));
-            // 重新拉一次 cookie（这次 musickey 应该已经在了）
-            const freshCookies = [];
-            for (const domain of config.cookieDomains) {
-              const cookies = await ses.cookies.get({ domain });
-              freshCookies.push(...cookies);
-            }
-            allCookies.length = 0;
-            allCookies.push(...freshCookies);
-          }
 
           const cookieStr = allCookies
             .filter(c => c.value)
             .map(c => `${c.name}=${c.value}`)
             .join('; ');
 
-          logger.log('[loginWindow] 登录成功，捕获', allCookies.length, '个 Cookie（共检查', checkCount, '次）');
+          logger.log('[loginWindow] 登录成功，捕获', allCookies.length, '个 Cookie（共检查', checkCount, '次，', captureReason, '）');
           loginWin.close();
           resolve({
             success: true,
@@ -217,4 +248,4 @@ async function openLoginWindow(platform, parentWindow) {
   });
 }
 
-module.exports = { openLoginWindow, LOGIN_CONFIGS, hostAllowed };
+module.exports = { openLoginWindow, LOGIN_CONFIGS, hostAllowed, qqLoginCaptureDecision };

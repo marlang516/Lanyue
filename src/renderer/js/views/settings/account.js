@@ -300,7 +300,6 @@ export function showVerifyResult(platform, result) {
 
   if (result.valid) {
     let line = `✅ 验证成功！用户：${result.nickname || '未知'}`;
-    if (result.type === 'wechat-with-qq') line += '\n⚠️ 检测到微信登录，VIP 歌曲可能仍无法下载（VIP 绑定在微信侧）';
     if (result.message) line += '\n' + result.message;
     el.textContent = line;
     el.className = 'cookie-verify-result ok';
