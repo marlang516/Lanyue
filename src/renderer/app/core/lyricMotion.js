@@ -17,6 +17,9 @@
  *     回到报告时间，避免卡顿时歌词自己往前跑。
  *
  * 行号二分全屏页和桌面歌词同步共用，不要在播放器里再写一份。
+ *
+ * 逐字状态用的是调用方已经算好的同一播放秒（含偏移），不是第二只钟。
+ * 没有逐字时间时，整句当成一个词；不按字数均分。
  */
 
 /** 与 tokens.css 的 --dur-2（.32s）对齐；改一边必须改另一边。 */
@@ -257,4 +260,107 @@ export function projectPlayhead(anchor, reported, nowMs, rate, playing) {
   }
   const lead = anchor.progress + PLAYHEAD_LEAD_CAP_SEC * spd;
   return { seconds: Math.max(0, Math.min(expected, lead)), anchor, seeked: false };
+}
+
+/** 词在自己的起点前这么久进入「在唱」，给弹入留出时间。 */
+export const WORD_LEAD_SEC = 0.15;
+
+/** 源没给时长、后面也没有下一词时，在唱态保持这么久再收成已唱。 */
+export const WORD_UNTIMED_SEC = 0.4;
+
+const timedWordCache = new WeakMap();
+const lineWordCache = new WeakMap();
+
+/**
+ * 一行上真实的逐字时间。空、或没有一个合法的词，返回 null（调用方改走整句）。
+ * @param {{ words?: readonly {t:number, dur?:number, text?:string}[] } | null | undefined} line
+ * @returns {readonly {t:number, dur:number, text:string}[] | null}
+ */
+function timedWords(line) {
+  if (!line || typeof line !== 'object') return null;
+  const hit = timedWordCache.get(line);
+  if (hit !== undefined) return hit;
+  const src = line.words;
+  if (!Array.isArray(src) || !src.length) {
+    timedWordCache.set(line, null);
+    return null;
+  }
+  const out = [];
+  for (const w of src) {
+    if (!w || typeof w.text !== 'string' || !w.text) continue;
+    const t = Number(w.t);
+    if (!Number.isFinite(t)) continue;
+    const dur = Number(w.dur);
+    out.push({ t, dur: Number.isFinite(dur) && dur > 0 ? dur : 0, text: w.text });
+  }
+  const result = out.length ? out : null;
+  timedWordCache.set(line, result);
+  return result;
+}
+
+/**
+ * 这一句在舞台上要画的词。
+ * 源带了逐字时间就用那一份；否则整句是一个词，时长收到下一句（或曲长）。
+ * @param {{t:number, text?:string, words?: readonly {t:number, dur?:number, text?:string}[]} | null | undefined} line
+ * @param {{t:number} | null | undefined} nextLine
+ * @param {number | undefined} duration 曲长（秒）
+ * @returns {readonly {t:number, dur:number, text:string}[]}
+ */
+export function displayWords(line, nextLine, duration) {
+  const timed = timedWords(line);
+  if (timed) return timed;
+  if (!line) return [];
+  const start = finite(line.t, 0);
+  const nextT = nextLine ? Number(nextLine.t) : Number.NaN;
+  const songEnd = Number(duration);
+  const end = Number.isFinite(nextT) && nextT > start
+    ? nextT
+    : (Number.isFinite(songEnd) && songEnd > start ? songEnd : start + LYRIC_SUNG_HOLD_SEC);
+  const cached = lineWordCache.get(line);
+  if (cached && cached.end === end) return cached.words;
+  const words = [{ t: start, dur: Math.max(0.05, end - start), text: typeof line.text === 'string' ? line.text : '' }];
+  lineWordCache.set(line, { end, words });
+  return words;
+}
+
+/**
+ * 一个词的在唱结束时刻。dur 为 0 时用下一词起点，仍没有就用 WORD_UNTIMED_SEC。
+ * @param {readonly {t:number, dur?:number}[]} words
+ * @param {number} index
+ * @returns {number}
+ */
+function wordActiveEnd(words, index) {
+  const start = finite(words[index] && words[index].t, 0);
+  const dur = finite(Number(words[index] && words[index].dur), 0);
+  if (dur > 0) return start + dur;
+  const next = words[index + 1];
+  const nextT = next ? Number(next.t) : Number.NaN;
+  if (Number.isFinite(nextT) && nextT > start) return nextT;
+  return start + WORD_UNTIMED_SEC;
+}
+
+/**
+ * 每个词相对播放秒的状态。seconds 必须已经含用户偏移，与 resolveLyricFrame 同一份。
+ * unreached 还没到，active 正在唱（含提前量），sung 这句里已经唱过。
+ * @param {readonly {t:number, dur?:number}[] | null | undefined} words
+ * @param {number} seconds
+ * @returns {{ index: number, states: ('unreached'|'active'|'sung')[] }}
+ */
+export function resolveWordStates(words, seconds) {
+  if (!Array.isArray(words) || !words.length) return { index: -1, states: [] };
+  const t = finite(seconds, 0);
+  /** @type {('unreached'|'active'|'sung')[]} */
+  const states = new Array(words.length);
+  let index = -1;
+  for (let i = 0; i < words.length; i++) {
+    const start = finite(words[i] && words[i].t, 0);
+    const end = wordActiveEnd(words, i);
+    /** @type {'unreached'|'active'|'sung'} */
+    let state = 'sung';
+    if (t < start - WORD_LEAD_SEC) state = 'unreached';
+    else if (t < end) state = 'active';
+    states[i] = state;
+    if (state === 'active') index = i;
+  }
+  return { index, states };
 }

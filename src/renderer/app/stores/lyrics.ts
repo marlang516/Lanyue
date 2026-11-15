@@ -14,6 +14,7 @@ import type {
   DesktopLyricLine,
   LocalLrcResult,
   LyricLine,
+  LyricWord,
   OnlineLrcResult,
 } from './types';
 
@@ -85,6 +86,67 @@ export function parseLrc(text: unknown): LyricLine[] {
     .sort((a, b) => a.t - b.t);
 }
 
+function lrcTextOf(raw: unknown): string {
+  if (typeof raw === 'string') return raw;
+  if (!raw || typeof raw !== 'object') return '';
+  const rec = raw as { lrc?: unknown; content?: unknown };
+  if (typeof rec.lrc === 'string' && rec.lrc) return rec.lrc;
+  if (typeof rec.content === 'string') return rec.content;
+  return typeof rec.lrc === 'string' ? rec.lrc : '';
+}
+
+/**
+ * 酷狗 KRC / 汽水 karaoke → 带 words 的行。
+ * 没有 karaoke、或解出来是空的，返回 null，调用方改走 parseLrc。
+ * 词的时间是源上的 startMs/durMs，不按字数均分。
+ */
+function linesFromKaraoke(raw: unknown): LyricLine[] | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const karaoke = (raw as { karaoke?: unknown }).karaoke;
+  if (!karaoke || typeof karaoke !== 'object') return null;
+  const lines = (karaoke as { lines?: unknown }).lines;
+  if (!Array.isArray(lines) || !lines.length) return null;
+  const out: LyricLine[] = [];
+  for (const line of lines) {
+    if (!line || typeof line !== 'object') continue;
+    const startMs = Number((line as { startMs?: unknown }).startMs);
+    if (!Number.isFinite(startMs)) continue;
+    const srcWords = Array.isArray((line as { words?: unknown }).words)
+      ? (line as { words: unknown[] }).words
+      : [];
+    const words: LyricWord[] = [];
+    for (const w of srcWords) {
+      if (!w || typeof w !== 'object') continue;
+      const text = String((w as { text?: unknown }).text ?? '');
+      if (!text) continue;
+      const wt = Number((w as { startMs?: unknown }).startMs);
+      if (!Number.isFinite(wt)) continue;
+      const durMs = Number((w as { durMs?: unknown }).durMs);
+      words.push({
+        t: Math.max(0, wt / 1000),
+        dur: Number.isFinite(durMs) && durMs > 0 ? durMs / 1000 : 0,
+        text,
+      });
+    }
+    const joined = words.map((w) => w.text).join('');
+    const text = joined || String((line as { text?: unknown }).text ?? '').trim();
+    if (!text) continue;
+    const item: LyricLine = { t: Math.max(0, startMs / 1000), text };
+    if (words.length) item.words = words;
+    out.push(item);
+  }
+  out.sort((a, b) => a.t - b.t);
+  return out.length ? out : null;
+}
+
+/**
+ * 歌词回包 → 行。有逐字 karaoke 就用它，否则把 lrc / content 交给 parseLrc。
+ * loadFor 的在线与本地两条都走这里。
+ */
+export function linesFromLyricResult(raw: unknown): LyricLine[] {
+  return linesFromKaraoke(raw) ?? parseLrc(lrcTextOf(raw));
+}
+
 /**
  * 当前播放位置对应的歌词行（-1 表示还没到第一句）。
  * 实现在 core/lyricMotion.js：全屏交接和桌面歌词同步必须共用这一份二分。
@@ -120,23 +182,24 @@ export async function loadFor(song: SongLike | null | undefined): Promise<void> 
   lyrics.loadedKey = key;
   lyrics.items = [];
   try {
-    let lrc = '';
+    let raw: unknown = null;
     if (song.filePath) {
       const r = await callSafe<LocalLrcResult | null>('readLocalLrc', [song.filePath], null);
-      lrc = (r && (r.lrc || r.content)) || '';
-      if (!lrc && song.embeddedLyrics) lrc = song.embeddedLyrics as string;
+      const lrc = (r && (r.lrc || r.content)) || '';
+      raw = lrc ? r : (typeof song.embeddedLyrics === 'string' ? song.embeddedLyrics : r);
     } else {
       const r = await callSafe<OnlineLrcResult | null>(
         'getLyrics', [song.id, song.source, song.title, song.artist], null,
       );
-      lrc = (r && r.lrc) || '';
-      if (!lrc && r && r.error) lyrics.error = r.error;
+      raw = r;
+      if (!(r && r.lrc) && r && r.error) lyrics.error = r.error;
     }
     if (lyrics.loadedKey !== key) return;   // 期间已切歌
-    const items = parseLrc(lrc);
+    const items = linesFromLyricResult(raw);
     if (!items.length) {
       lyrics.error = lyrics.error || '暂无歌词';
     } else {
+      lyrics.error = '';
       lyrics.items = items;
     }
   } catch (e) {
@@ -162,7 +225,7 @@ export function clearLyrics(): void {
   lyrics.loadedKey = '';
 }
 
-/** 桌面歌词窗口需要的瘦身字段 */
+/** 桌面歌词仍只要行文本。逐字时间留在全屏页，这里继续交空数组。 */
 export function forDesktop(): DesktopLyricLine[] {
   return lyrics.items.map((l) => ({ t: l.t, text: l.text, subText: '', words: [], wordTimes: [] }));
 }

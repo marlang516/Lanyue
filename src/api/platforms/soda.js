@@ -30,8 +30,9 @@
  *
  * 歌词  同一个分享页：audioWithLyricsOption.lyrics.sentences[]
  *       → 每句 { startMs, endMs, text, words: [{ text, startMs, endMs }] }
- *       本实现按句输出标准 LRC（逐字时间轴 words 不消费 —— 渲染层格式未验证，
- *       保守用通用按句格式，避免整段歌词被 parseLrc 丢弃）。
+ *       标准 LRC 仍按句输出（parseLrc 只认方括号时间轴）。
+ *       句子自带的 words 另收成 karaoke，与酷狗 KRC 同一形状交给渲染层；
+ *       没有逐字时间的句子不编造。末句 endMs 为 MAX_SAFE_INTEGER 时时长记 0。
  *
  * ── 三个必须知道的限制 ──────────────────────────────────────
  *   1. `duration` 单位不一致：**搜索**返回毫秒（track.duration），**分享页**
@@ -282,6 +283,33 @@ function sentencesToLrc(sentences) {
     .join('\n');
 }
 
+/**
+ * 句子上已经带的逐字时间，收成与酷狗 KRC 相同的 karaoke。
+ * 不补、不均分。endMs 不是有限的正时长（含末句 MAX_SAFE_INTEGER）时 durMs 为 0，
+ * 交给渲染层用下一词的起点收口。
+ * @param {Array<{startMs?:number,text?:string,words?:Array<{text?:string,startMs?:number,endMs?:number}>}>} sentences
+ * @returns {{ meta: Object, lines: Array<{startMs:number,durMs:number,text:string,words:Array<{text:string,startMs:number,durMs:number}>}> }}
+ */
+function sentencesToKaraoke(sentences) {
+  const lines = [];
+  for (const s of (Array.isArray(sentences) ? sentences : [])) {
+    const startMs = Number(s && s.startMs);
+    const text = String((s && s.text) || '').replace(/\s+/g, ' ').trim();
+    if (!Number.isFinite(startMs) || startMs < 0 || !text) continue;
+    const words = [];
+    for (const w of (Array.isArray(s && s.words) ? s.words : [])) {
+      const wtext = String((w && w.text) || '');
+      const wt = Number(w && w.startMs);
+      if (!wtext || !Number.isFinite(wt) || wt < 0) continue;
+      const we = Number(w && w.endMs);
+      const durMs = Number.isFinite(we) && we > wt && we < 1e11 ? we - wt : 0;
+      words.push({ text: wtext, startMs: wt, durMs });
+    }
+    lines.push({ startMs, durMs: 0, text, words });
+  }
+  return { meta: {}, lines };
+}
+
 /** 由体积与时长估算码率（分享页给的是秒，正好可用） */
 function estimateBr(sizeBytes, durationSec) {
   if (!sizeBytes || !durationSec) return null;
@@ -372,13 +400,18 @@ async function sodaGetUrl(id, _quality = 'standard') {
 /**
  * 获取歌词（与取流共用同一个分享页，靠短时缓存避免重复请求）
  * @param {string} id - track id
- * @returns {Promise<string>} 标准 LRC 文本；失败返回空串（上层会回落网易云/酷狗）
+ * @returns {Promise<string|{lrc:string,karaoke?:Object}>} 无逐字时间时仍是 LRC 字符串
  */
 async function sodaGetLyrics(id) {
   if (!id) return '';
   try {
     const share = await fetchShare(id);
-    return sentencesToLrc(share && share.lyrics);
+    const sentences = share && share.lyrics;
+    const lrc = sentencesToLrc(sentences);
+    if (!lrc) return '';
+    const karaoke = sentencesToKaraoke(sentences);
+    if (karaoke.lines.some((line) => line.words.length)) return { lrc, karaoke };
+    return lrc;
   } catch (e) {
     logger.warn('[soda] 歌词获取失败:', e.message);
     return '';
@@ -417,6 +450,6 @@ module.exports = {
   // 内部纯函数：仅作单测断言入口，不属于对外契约
   _internal: {
     mapTrack, pickCover, buildQuery, extractRouterData,
-    sentencesToLrc, fmtLrcTime, estimateBr, CLIENT_PARAMS,
+    sentencesToLrc, sentencesToKaraoke, fmtLrcTime, estimateBr, CLIENT_PARAMS,
   },
 };

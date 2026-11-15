@@ -9,6 +9,13 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
+const { register } = require('node:module');
+const { pathToFileURL } = require('node:url');
+
+// lyrics.ts 的无后缀 import（./bridge）在 node --test 里解析不到，复用播放器时序那条钩子。
+register(pathToFileURL(path.join(__dirname, 'esm-ts-resolve.mjs')).href, {
+  parentURL: pathToFileURL(__filename).href,
+});
 
 const ROOT = path.join(__dirname, '..');
 const PANE = fs.readFileSync(
@@ -207,36 +214,190 @@ test('几百行歌词重复求帧仍便宜，不靠每帧重排', async () => {
   assert.ok(Date.now() - t0 < 500, `2000 帧耗时 ${Date.now() - t0}ms`);
 });
 
-test('接线：全屏歌词走这份判定，桌面同步不另写二分，样式不改字重', () => {
+test('接线：全屏歌词走这份判定，桌面同步不另写二分，逐字只在活动句上弹', () => {
   assert.match(LYRICS_TS, /export \{ activeLineIndex \} from '\.\.\/core\/lyricMotion\.js'/);
+  assert.match(LYRICS_TS, /linesFromLyricResult\(raw\)/);
+  assert.match(LYRICS_TS, /words: \[\]/, '桌面歌词继续交空的 words，不把逐字时间送过去');
   assert.match(PLAYER_TS, /activeLineIndex/);
   assert.doesNotMatch(PLAYER_TS, /while \(lo <= hi\)/, '播放器里不能再复制一份行号二分');
   assert.match(PANE, /resolveLyricFrame/);
   assert.match(PANE, /projectPlayhead/);
-  assert.match(PANE, /lineClasses/);
-  assert.match(PANE, /ResizeObserver/);
+  assert.match(PANE, /resolveWordStates/);
+  assert.match(PANE, /displayWords/);
+  assert.match(PANE, /projected\.seeked/);
+  assert.match(PANE, /frame\.role === 'active'/);
+  assert.match(PANE, /visualSnap \|\| reduced/);
   assert.match(PANE, /visibilityState/);
   assert.match(PANE, /prefers-reduced-motion: reduce/);
   assert.match(PANE, /aria-current/);
   assert.match(PANE, /暂无歌词/);
+  assert.match(PANE, /seekWord/);
+  assert.doesNotMatch(PANE, /splitToWords/);
 
   const style = PANE.slice(PANE.lastIndexOf('<style'));
-  const onBlock = style.match(/\.line\.on\s*\{[^}]*\}/);
-  assert.ok(onBlock, '缺少 .line.on');
-  assert.doesNotMatch(onBlock[0], /font-weight/, '强调不改字重，否则每句都重排');
-  assert.match(onBlock[0], /scale\(1\.04\)/);
-  assert.match(style, /@keyframes lyric-arrive/);
-  assert.match(style, /0%\s*\{[^}]*scale\(1\)/);
-  assert.match(style, /100%\s*\{[^}]*scale\(1\.04\)/);
+  const activeBlock = style.match(/\.word\.active\s*\{[^}]*\}/);
+  assert.ok(activeBlock, '缺少 .word.active');
+  assert.doesNotMatch(activeBlock[0], /font-weight/, '逐字弹入不改字重');
+  assert.match(style, /@keyframes word-bounce/);
+  assert.match(style, /\.word\.unreached\s*\{[^}]*opacity:\s*0/);
+  assert.match(style, /\.word\.sung\s*\{[^}]*opacity:\s*\.72/);
+  assert.match(style, /\.stage\.snap \.word\.active[\s\S]*?animation:\s*none/);
   assert.match(style, /var\(\s*--dur-2\s*\)/);
   assert.match(style, /var\(\s*--ease-emph\s*\)/);
-  assert.match(style, /var\(\s*--accent-soft\s*\)/);
-  assert.match(style, /var\(\s*--au-1\s*\)/);
-  assert.match(style, /var\(\s*--au-2\s*\)/);
   assert.doesNotMatch(style, /#[0-9a-fA-F]{3,8}/, '歌词样式不写死色值，随浅色/深色令牌走');
   assert.match(TOKENS, /--dur-2:\s*\.32s/);
   assert.match(
     fs.readFileSync(path.join(ROOT, 'src/renderer/app/core/lyricMotion.js'), 'utf8'),
     /LYRIC_HANDOFF_MS = 320/,
   );
+});
+
+test('resolveWordStates：未到、提前进入、唱完，时长缺失时用下一词', async () => {
+  const { resolveWordStates, WORD_LEAD_SEC, WORD_UNTIMED_SEC } = await fresh();
+  const words = [
+    { t: 1, dur: 0.5, text: '你' },
+    { t: 1.5, dur: 0.5, text: '好' },
+  ];
+  assert.deepStrictEqual(resolveWordStates([], 1), { index: -1, states: [] });
+  assert.deepStrictEqual(resolveWordStates(words, 1 - WORD_LEAD_SEC - 0.01).states, ['unreached', 'unreached']);
+
+  const lead = resolveWordStates(words, 1 - WORD_LEAD_SEC);
+  assert.strictEqual(lead.states[0], 'active', '到点前 WORD_LEAD_SEC 进入在唱');
+  assert.strictEqual(lead.states[1], 'unreached');
+  assert.strictEqual(lead.index, 0);
+
+  const mid = resolveWordStates(words, 1.2);
+  assert.deepStrictEqual(mid.states, ['active', 'unreached']);
+
+  const overlap = resolveWordStates(words, 1.5 - WORD_LEAD_SEC);
+  assert.strictEqual(overlap.states[0], 'active');
+  assert.strictEqual(overlap.states[1], 'active', '下一词提前进入时上一词还没唱完');
+  assert.strictEqual(overlap.index, 1, '在唱的下标取最后一个');
+
+  const done = resolveWordStates(words, 2.1);
+  assert.deepStrictEqual(done.states, ['sung', 'sung']);
+  assert.strictEqual(done.index, -1);
+
+  const open = [
+    { t: 1, dur: 0, text: '你' },
+    { t: 1.8, dur: 0.2, text: '好' },
+  ];
+  assert.strictEqual(resolveWordStates(open, 1.2).states[0], 'active', '没给时长就唱到下一词起点');
+  assert.strictEqual(resolveWordStates(open, 1.8).states[0], 'sung');
+  assert.strictEqual(resolveWordStates(open, 1.8).states[1], 'active');
+
+  const only = [{ t: 1, dur: 0, text: '你' }];
+  assert.strictEqual(resolveWordStates(only, 1.2).states[0], 'active');
+  assert.strictEqual(resolveWordStates(only, 1 + WORD_UNTIMED_SEC).states[0], 'sung');
+});
+
+test('displayWords：有逐字时间就用，没有则整句一个词，不按字拆', async () => {
+  const { displayWords } = await fresh();
+  const timed = {
+    t: 1,
+    text: '你好',
+    words: [{ t: 1, dur: 0.4, text: '你' }, { t: 1.4, dur: 0.4, text: '好' }],
+  };
+  assert.strictEqual(displayWords(timed, { t: 3 }, 10).length, 2);
+  assert.strictEqual(displayWords(timed, { t: 3 }, 10)[0].text, '你');
+
+  const plain = { t: 1, text: '你好世界' };
+  const one = displayWords(plain, { t: 4 }, 99);
+  assert.strictEqual(one.length, 1, '句级 LRC 不拆成四个字');
+  assert.strictEqual(one[0].text, '你好世界');
+  assert.strictEqual(one[0].t, 1);
+  assert.strictEqual(one[0].dur, 3);
+  assert.strictEqual(displayWords(plain, { t: 4 }, 99), one, '同一句同一终点不另造数组');
+
+  const tail = displayWords({ t: 8, text: '尾' }, null, 10);
+  assert.strictEqual(tail[0].dur, 2);
+  const unknown = displayWords({ t: 8, text: '尾' }, null, undefined);
+  assert.ok(unknown[0].dur > 0);
+});
+
+test('linesFromLyricResult / loadFor：酷狗与汽水保留逐字，纯 LRC 不造词', async () => {
+  const { linesFromLyricResult, loadFor, lyrics, clearLyrics } = await import(
+    '../src/renderer/app/stores/lyrics.ts'
+  );
+  const { sentencesToKaraoke, sentencesToLrc } = require('../src/api/platforms/soda.js')._internal;
+
+  const kugou = linesFromLyricResult({
+    lrc: '[00:02.25]词：周杰伦',
+    karaoke: {
+      meta: { ti: '晴天' },
+      lines: [{
+        startMs: 2250,
+        durMs: 800,
+        words: [
+          { text: '词', startMs: 2250, durMs: 400 },
+          { text: '：周杰伦', startMs: 2650, durMs: 400 },
+        ],
+      }],
+    },
+  });
+  assert.strictEqual(kugou[0].t, 2.25);
+  assert.strictEqual(kugou[0].text, '词：周杰伦');
+  assert.strictEqual(kugou[0].words[0].t, 2.25);
+  assert.strictEqual(kugou[0].words[0].dur, 0.4);
+  assert.strictEqual(kugou[0].words[1].text, '：周杰伦');
+
+  const sentences = [
+    { startMs: 0, endMs: 5134, text: '作曲：哇欣', words: [{ text: '作曲：哇欣', startMs: 0, endMs: 5134 }] },
+    { startMs: 10268, endMs: 15000, text: '作词：哇欣', words: [{ text: '作', startMs: 10268, endMs: 11000 }, { text: '词：哇欣', startMs: 11000, endMs: 15000 }] },
+  ];
+  const soda = linesFromLyricResult({
+    lrc: sentencesToLrc(sentences),
+    karaoke: sentencesToKaraoke(sentences),
+  });
+  assert.strictEqual(soda.length, 2);
+  assert.strictEqual(soda[0].words.length, 1);
+  assert.strictEqual(soda[0].words[0].dur, 5.134);
+  assert.strictEqual(soda[1].words[1].t, 11);
+  assert.strictEqual(soda[1].words[1].text, '词：哇欣');
+
+  const plain = linesFromLyricResult('[00:01.00]你好世界\n[00:04.00]第二句');
+  assert.strictEqual(plain.length, 2);
+  assert.strictEqual(plain[0].text, '你好世界');
+  assert.strictEqual(plain[0].words, undefined, '句级 LRC 不发明 words');
+  assert.strictEqual(plain[1].t, 4);
+
+  const prevWindow = global.window;
+  global.window = { __LY_MOCK__: {} };
+  try {
+    global.window.__LY_MOCK__.getLyrics = async () => ({
+      lrc: '[00:02.25]词：周杰伦',
+      karaoke: {
+        lines: [{
+          startMs: 2250,
+          durMs: 800,
+          words: [{ text: '词', startMs: 2250, durMs: 400 }, { text: '：周杰伦', startMs: 2650, durMs: 400 }],
+        }],
+      },
+    });
+    await loadFor({ id: 'k1', source: 'kugou', title: '晴天' });
+    assert.strictEqual(lyrics.items[0].words.length, 2);
+    assert.strictEqual(lyrics.items[0].words[0].text, '词');
+
+    global.window.__LY_MOCK__.getLyrics = async () => ({
+      lrc: sentencesToLrc(sentences),
+      karaoke: sentencesToKaraoke(sentences),
+    });
+    await loadFor({ id: 's1', source: 'soda', title: '汽' });
+    assert.strictEqual(lyrics.items[0].words[0].text, '作曲：哇欣');
+    assert.strictEqual(lyrics.error, '');
+
+    global.window.__LY_MOCK__.getLyrics = async () => ({ lrc: '[00:01.00]你好世界' });
+    await loadFor({ id: 'n1', source: 'netease', title: '海' });
+    assert.strictEqual(lyrics.items[0].text, '你好世界');
+    assert.strictEqual(lyrics.items[0].words, undefined);
+
+    global.window.__LY_MOCK__.readLocalLrc = async () => ({ lrc: '[00:01.50]本地一句' });
+    await loadFor({ id: 'loc', source: 'local', title: '本地', filePath: '/tmp/a.mp3' });
+    assert.strictEqual(lyrics.items[0].text, '本地一句');
+    assert.strictEqual(lyrics.items[0].words, undefined);
+  } finally {
+    clearLyrics();
+    if (prevWindow === undefined) delete global.window;
+    else global.window = prevWindow;
+  }
 });
