@@ -160,11 +160,11 @@ function onHeart(): void {
 
       <div class="vol">
         <Icon :name="player.volume === 0 ? 'volumeMute' : 'volume'" :size="15" />
-        <input
-          type="range" min="0" max="100" :value="Math.round(player.volume * 100)"
-          :style="{ '--vol': Math.round(player.volume * 100) + '%' }"
-          aria-label="音量" @input="onVolume"
-        />
+        <div class="vol-slider">
+          <i class="vol-track" aria-hidden="true"></i>
+          <i class="vol-fill" aria-hidden="true" :style="{ width: Math.round(player.volume * 100) + '%' }"></i>
+          <input type="range" min="0" max="100" :value="Math.round(player.volume * 100)" aria-label="音量" @input="onVolume" />
+        </div>
       </div>
 
       <button class="ly-icon-btn" title="歌词" aria-label="歌词" @click="openNow">
@@ -256,25 +256,29 @@ function onHeart(): void {
 .rate { width: 58px; }
 .vol { display: flex; align-items: center; gap: 6px; color: var(--ink-3); flex-shrink: 0; }
 /* 轨道保持 4px，输入框本身加高，方便按住拖动。音量换算仍是 value/100。 */
+.vol-slider { position: relative; width: 140px; min-width: 140px; height: 28px; flex-shrink: 0; }
+.vol-track, .vol-fill {
+  position: absolute; left: 0; top: 50%; height: 4px; margin-top: -2px;
+  border-radius: var(--r-full); pointer-events: none;
+}
+.vol-track { right: 0; background: var(--hairline-2); }
+.vol-fill { background: var(--au-1); z-index: 1; }
 .vol input {
+  position: relative; z-index: 2;
   -webkit-appearance: none; appearance: none;
   width: 140px; min-width: 140px; height: 28px; flex-shrink: 0;
   margin: 0; padding: 0; background: transparent; cursor: pointer;
 }
 .vol input:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; border-radius: var(--r-full); }
 .vol input::-webkit-slider-runnable-track {
-  height: 4px; border-radius: var(--r-full);
-  background: linear-gradient(to right, var(--au-1) 0 var(--vol, 80%), var(--hairline-2) var(--vol, 80%) 100%);
+  height: 4px; background: transparent; border: 0;
 }
 .vol input::-webkit-slider-thumb {
   -webkit-appearance: none; appearance: none;
   width: 12px; height: 12px; margin-top: -4px; border: 0; border-radius: 50%;
   background: #fff; box-shadow: 0 0 0 2px var(--au-1); cursor: pointer;
 }
-.vol input::-moz-range-track {
-  height: 4px; border: 0; border-radius: var(--r-full); background: var(--hairline-2);
-}
-.vol input::-moz-range-progress { height: 4px; border-radius: var(--r-full); background: var(--au-1); }
+.vol input::-moz-range-track { height: 4px; background: transparent; border: 0; }
 .vol input::-moz-range-thumb {
   width: 12px; height: 12px; border: 0; border-radius: 50%;
   background: #fff; box-shadow: 0 0 0 2px var(--au-1); cursor: pointer;
@@ -286,6 +290,6 @@ function onHeart(): void {
   .mini-select.rate { display: none; }
 }
 @media (max-width: 820px) {
-  .vol input { display: none; }
+  .vol-slider, .vol input { display: none; }
 }
 </style>
