@@ -2,7 +2,7 @@
 import { onMounted } from 'vue';
 import { ui, bootUi } from './stores/ui';
 import { initDownloads } from './stores/download';
-import { restorePlaybackPrefs, restoreQueue } from './stores/player';
+import { initOutputSync, restorePlaybackPrefs, restoreQueue } from './stores/player';
 import { loadOffset } from './stores/lyrics';
 import AppShell from './components/shell/AppShell.vue';
 import DiscoverView from './views/DiscoverView.vue';
@@ -20,7 +20,9 @@ import NowPlayingView from './views/NowPlayingView.vue';
 onMounted(async () => {
   // did-finish-load 的队列快照只发一次。订阅必须在任何 await 之前，
   // 否则用户后来才打开下载页时，启动前就在跑的队列是空的。
+  // 桌面歌词 / 迷你播放器同理：窗口打开后来要全量状态，订晚了首帧是空的。
   initDownloads();
+  initOutputSync();
   await bootUi();
   await restorePlaybackPrefs();
   await Promise.all([restoreQueue(), loadOffset()]);
