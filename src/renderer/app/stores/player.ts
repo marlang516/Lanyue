@@ -116,6 +116,10 @@ function createBoundAudio(): HTMLAudioElement {
   // 不是当前元素的事件一律丢掉，否则预热会把界面打成「已暂停」。
   a.addEventListener('timeupdate', () => {
     if (a !== activeEl) return;
+    // 切歌失败时 current 已换成新歌，元素仍是上一首。进度不能再跟那首走。
+    const owned = keyOfEl.get(a) ?? null;
+    const curKey = player.current ? prepKey(player.current, player.quality) : null;
+    if (owned !== curKey) return;
     player.progress = a.currentTime || 0;
     if (Number.isFinite(a.duration) && a.duration > 0) player.duration = a.duration;
     syncOutputs();
@@ -321,6 +325,9 @@ function updateMediaSession(song: Song | null, changed: boolean): void {
       });
     } catch (_e) { /* 部分环境不支持 artwork */ }
   }
+  try {
+    navigator.mediaSession.playbackState = player.playing ? 'playing' : (song ? 'paused' : 'none');
+  } catch (_e) { /* 部分环境不允许写 playbackState */ }
 }
 
 let _mediaHandlersBound = false;
@@ -451,6 +458,11 @@ export async function playSong(song: unknown): Promise<void> {
     if (played) {
       addRecent(s);
       armNeighbors(null);
+    } else {
+      // 取流失败时 activate 还没换元素，上一首会在新标题下面继续出声。
+      if (activeEl) activeEl.pause();
+      player.playing = false;
+      player.progress = 0;
     }
   } catch (e) {
     if (reqId === _reqSeq && !isBenignPlayError(e)) {

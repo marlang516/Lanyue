@@ -8,6 +8,7 @@
 import { reactive } from 'vue';
 import { callSafe } from '../core/bridge';
 import { getPref, setPref } from '../core/prefs';
+import { toast } from '../core/toast';
 import { restoreLanguage, loadLanguage, i18n } from '../core/i18n';
 import type { CommandItem, NavItem, ThemeMode } from './types';
 
@@ -93,6 +94,24 @@ export async function setLanguage(code: string): Promise<void> {
 }
 
 /**
+ * 打开当前下载目录。空路径会被主进程直接拒绝，所以先读 saveDir，
+ * 再退到 getDefaultDir；两处都没有才提示，不再发 openFolder('')。
+ */
+export async function openDownloadDir(): Promise<void> {
+  const saved = await getPref('saveDir', '');
+  let target = typeof saved === 'string' ? saved.trim() : '';
+  if (!target) {
+    const fallback = await callSafe<string, string>('getDefaultDir', [], '');
+    target = typeof fallback === 'string' ? fallback.trim() : '';
+  }
+  if (!target) {
+    toast.warn('尚未设置保存目录');
+    return;
+  }
+  await callSafe('openFolder', [target], null);
+}
+
+/**
  * 命令面板数据源。
  * run 里只做「当前外壳就能完成」的动作；业务命令由各视图后续注册。
  */
@@ -105,7 +124,7 @@ export const COMMANDS: readonly CommandItem[] = Object.freeze([
   { id: 'go-playlist', title: '前往：歌单', sub: 'Playlists', keys: 'playlist 歌单 收藏', run: () => setView('playlist') },
   { id: 'go-settings', title: '前往：设置', sub: 'Settings', keys: 'settings 设置 偏好', run: () => setView('settings') },
   { id: 'toggle-theme', title: '切换主题：浅色 / 深色', sub: 'Theme', keys: 'theme 主题 深色 浅色 dark light', run: () => toggleTheme() },
-  { id: 'open-download-dir', title: '打开下载目录', sub: 'Folder', keys: 'folder 打开 目录 下载', run: () => callSafe('openFolder', [''], null) },
+  { id: 'open-download-dir', title: '打开下载目录', sub: 'Folder', keys: 'folder 打开 目录 下载', run: () => { void openDownloadDir(); } },
 ]);
 
 export function matchCommands(keyword: unknown): CommandItem[] {

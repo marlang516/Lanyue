@@ -374,7 +374,7 @@ function createDownloadQueueEngine({
      * events.dispose()（清事件侧可能残留的合并 timer / 节流采样；本步实现是
      * 前沿节流、不排 timer，但清理链必须包含它，且必须在 flush 之前 —— 事件侧
      * 若还有迟到推送，不得再排一次防抖写盘），最后 persistence.flush()（清防抖
-     * timer + 立即落盘）。三者都幂等，连续调用 dispose() 不抛错、不重复写盘。
+     * timer + 立即落盘）。三者都幂等，连续调用 dispose() 不抛错。flush 每次都再写一遍当前队列。
      */
     dispose() {
       scheduler.stop();

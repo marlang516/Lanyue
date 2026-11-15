@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted } from 'vue';
 import { ui, bootUi } from './stores/ui';
+import { initDownloads } from './stores/download';
 import { restorePlaybackPrefs, restoreQueue } from './stores/player';
 import { loadOffset } from './stores/lyrics';
 import AppShell from './components/shell/AppShell.vue';
@@ -17,6 +18,9 @@ import PlayQueueDrawer from './components/player/PlayQueueDrawer.vue';
 import NowPlayingView from './views/NowPlayingView.vue';
 
 onMounted(async () => {
+  // did-finish-load 的队列快照只发一次。订阅必须在任何 await 之前，
+  // 否则用户后来才打开下载页时，启动前就在跑的队列是空的。
+  initDownloads();
   await bootUi();
   await restorePlaybackPrefs();
   await Promise.all([restoreQueue(), loadOffset()]);

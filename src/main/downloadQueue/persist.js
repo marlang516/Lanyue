@@ -152,6 +152,7 @@ function createPersistence({
       //         pending 不到 1 天 / error / done -> 保留
       const now = Date.now();
       let dropped = 0;
+      let migrated = 0;
       for (const raw of list) {
         if (downloadQueue.length >= MAX_RESTORED_TASKS) { dropped++; continue; }
         // 逐条校验：一条脏记录只丢它自己，绝不中止整批恢复
@@ -161,10 +162,12 @@ function createPersistence({
           // 异常关闭：downloading → error（与运行期同一条迁移规则）
           transition(item, 'error', '应用异常关闭');
           item.error = '应用异常关闭，请重试';
+          migrated++;
         } else if (item.status === 'pending' && item.addedAt && (now - item.addedAt > STALE_PENDING_MS)) {
           // 排队超时：pending → error
           transition(item, 'error', '排队超时');
           item.error = '排队超过 24 小时未启动，已标记失败（可重试）';
+          migrated++;
         }
         downloadQueue.push(item);
       }
@@ -174,28 +177,26 @@ function createPersistence({
       if (downloadQueue.length) {
         logger.log(`[Queue] 从磁盘恢复 ${downloadQueue.length} 个任务`);
       }
+      // 迁移只改了内存。没有 pending 时没人再触发落盘，下次启动会把
+      // queue.json 里的 downloading 再迁一次。有迁移就立刻写回。
+      if (migrated) persistQueue({ immediate: true });
     } catch (e) {
       logger.warn('队列加载失败:', e.message);
     }
   }
 
   /**
-   * 退出清理：把防抖窗口内的队列**立即**落盘。
+   * 退出清理：立刻把当前队列落盘（与 prefs.flush 一样，不看防抖定时器还在不在）。
    *
-   * 为什么需要：persistQueue 是 500ms 防抖 —— 若退出时刚好在防抖窗口内，
-   * 最后一次队列变更会丢（用户看到「下完的任务重启后不见了」）。
+   * 防抖回调里的 writeQueueNow 失败时定时器已经清掉。只在「定时器还挂着」
+   * 时才写，退出就会把那次失败的变更留在内存里。
    */
   function flush() {
     if (queuePersistTimer) {
       clearTimeout(queuePersistTimer);
       queuePersistTimer = null;
-      try {
-        trimDone();
-        atomicWriteJson(QUEUE_FILE(), getQueue());
-      } catch (e) {
-        logger.warn('[DownloadQueue] 退出落盘失败:', e.message);
-      }
     }
+    writeQueueNow();
   }
 
   return {

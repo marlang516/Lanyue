@@ -169,23 +169,30 @@ function register(options = {}) {
 
       const { data } = payload;
       const results = [];
+      // 顶层字段已经 repairIds 后入库。data.prefs 里还有同一份未修复的副本
+      // （导出走 getAll），再 set 一次会把非法 id 写回去。只跳过已经入库的键；
+      // 顶层缺席时 prefs 里那份仍是唯一副本，不能丢。
+      const replacedByRepair = new Set();
 
       // 恢复歌单 / 模板 / 活动模板（真实存储键）
       // 备份文件是外部数据：id 修复后再入库（渲染层拿 id 拼 onclick）
       if (Array.isArray(data.userPlaylists)) {
         const playlists = repairIds(data.userPlaylists, 'pl');
         prefs.set('userPlaylists', playlists);
+        replacedByRepair.add('userPlaylists');
         results.push(`歌单: ${playlists.length} 个`);
       }
 
       if (Array.isArray(data.downloadTemplates)) {
         const templates = repairIds(data.downloadTemplates, 'tpl');
         prefs.set('downloadTemplates', templates);
+        replacedByRepair.add('downloadTemplates');
         results.push(`下载模板: ${templates.length} 个`);
       }
 
       if (data.activeTemplate !== undefined) {
         prefs.set('activeDownloadTemplate', data.activeTemplate);
+        replacedByRepair.add('activeDownloadTemplate');
       }
 
       // 恢复下载历史（真实存储在 history.json；旧版备份里存在 prefs 里的
@@ -211,8 +218,12 @@ function register(options = {}) {
       // 通用设置：只接受白名单键（导入文件内容不可信，防止注入未知键）
       if (data.prefs && typeof data.prefs === 'object') {
         const { kept, droppedDirs } = pickImportablePrefs(data.prefs);
-        for (const [key, value] of Object.entries(kept)) prefs.set(key, value);
-        const applied = Object.keys(kept).length;
+        let applied = 0;
+        for (const [key, value] of Object.entries(kept)) {
+          if (replacedByRepair.has(key)) continue;
+          prefs.set(key, value);
+          applied++;
+        }
         if (applied) results.push(`通用设置: ${applied} 项`);
         if (droppedDirs) results.push(`目录设置: ${droppedDirs} 项被忽略（需在设置中重新选择）`);
       }
@@ -224,6 +235,8 @@ function register(options = {}) {
         message += `\n数据版本: v${migrated.fromVersion}→v${migrated.toVersion}`;
       }
 
+      // set 是 300ms 防抖。成功返回之后立刻退出会把这次导入留在内存里。
+      prefs.flush();
       return {
         success: true,
         message,
@@ -303,7 +316,12 @@ function register(options = {}) {
         history.flush();
       },
     });
-    if (result.success) prefs.set('webdavLastSyncAt', Date.now());
+    if (result.success) {
+      prefs.set('webdavLastSyncAt', Date.now());
+      // lastSyncAt 也走防抖。flush 必须在它之后，否则同步成功的歌单先落盘、
+      // 这个时间戳仍可能停在内存里。
+      prefs.flush();
+    }
     return result;
   });
 }
