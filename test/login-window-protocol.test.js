@@ -32,7 +32,7 @@ Module._load = function interceptedLoad(request, parent, isMain) {
   if (request === 'electron') return { BrowserWindow: class {} };
   return originalLoad(request, parent, isMain);
 };
-const { hostAllowed, LOGIN_CONFIGS } = require(path.join(__dirname, '../src/main/loginWindow'));
+const { hostAllowed, LOGIN_CONFIGS, qqLoginCaptureDecision } = require(path.join(__dirname, '../src/main/loginWindow'));
 Module._load = originalLoad;
 
 const allow = (url, platform = 'qq') => hostAllowed(new URL(url), LOGIN_CONFIGS[platform]);
@@ -112,6 +112,41 @@ test('非 http(s) 协议一律被拒（file:/javascript:/data: 内网读取）',
   ]) {
     assert.equal(allow(url, 'qq'), false, `${url} 必须被拒`);
   }
+});
+
+test('QQ 登录：有 uin 但没有播放密钥时先等，密钥出现或超时才抓', () => {
+  const identity = [{ name: 'wxuin', value: 'o115292150478421314' }];
+  assert.deepStrictEqual(
+    qqLoginCaptureDecision(identity, { waitedMs: 0, keyWaitMs: 15000 }),
+    { capture: false, reason: 'wait-playback-key' },
+  );
+  assert.deepStrictEqual(
+    qqLoginCaptureDecision(identity, { waitedMs: 14999, keyWaitMs: 15000 }),
+    { capture: false, reason: 'wait-playback-key' },
+  );
+  const withKey = identity.concat([{ name: 'qm_keyst', value: 'W_X_secret' }]);
+  assert.deepStrictEqual(
+    qqLoginCaptureDecision(withKey, { waitedMs: 0, keyWaitMs: 15000 }),
+    { capture: true, reason: 'playback-key' },
+  );
+  assert.deepStrictEqual(
+    qqLoginCaptureDecision(identity.concat([{ name: 'qqmusic_key', value: 'W_X_secret' }]), { waitedMs: 100, keyWaitMs: 15000 }),
+    { capture: true, reason: 'playback-key' },
+  );
+  assert.deepStrictEqual(
+    qqLoginCaptureDecision(identity, { waitedMs: 15000, keyWaitMs: 15000 }),
+    { capture: true, reason: 'key-timeout' },
+  );
+  assert.deepStrictEqual(
+    qqLoginCaptureDecision([], { waitedMs: 99999, keyWaitMs: 15000 }),
+    { capture: false, reason: 'no-identity' },
+  );
+  assert.strictEqual(LOGIN_CONFIGS.qq.keyWaitMs, 15000);
+  assert.strictEqual(LOGIN_CONFIGS.qq.musickeyDelay, undefined);
+  const fs = require('node:fs');
+  const src = fs.readFileSync(path.join(__dirname, '../src/main/loginWindow.js'), 'utf8');
+  assert.ok(src.includes('qqLoginCaptureDecision('), '登录窗必须用等到播放密钥的判据，不能关窗前只睡一段固定时间');
+  assert.ok(!src.includes('musickeyDelay'), '固定 musickeyDelay 会在 qm_keyst 写入前关窗');
 });
 
 test('judge 一处：will-navigate 与 setWindowOpenHandler 用的是同一个 hostAllowed', () => {
