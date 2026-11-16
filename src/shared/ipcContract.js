@@ -89,6 +89,23 @@ const CHANNELS = {
   'get-lyrics':     { invoke: MAIN, args: [['id', t.any()], ['source', t.str(32)], ['title', t.str(200)], ['artist', t.str(200)]] },
   'get-home-section':         { invoke: MAIN, args: [['section', t.str(64)]] },
   'get-home-recommendations': { invoke: MAIN },
+  // 心动模式：队列播完时按「当前歌 + 红心」生成续播候选（只读，不写队列）
+  'generate-heartbeat': {
+    invoke: MAIN,
+    args: [['opts', t.shape({
+      fields: {
+        currentSong: t.shape({
+          fields: {
+            id: t.any(), title: t.str(500), artist: t.str(500), album: t.str(500), source: t.str(32),
+          },
+          required: [],
+        }),
+        exclude: t.arr(500),
+        limit: t.int(30, 60),
+      },
+      required: [],
+    })]],
+  },
   'get-platforms':  { invoke: MAIN },
   'get-source-health': { invoke: MAIN },
   'probe-sources':  { invoke: MAIN },
@@ -328,6 +345,7 @@ const METHODS = {
   // 推荐
   getHomeSection: 'get-home-section',
   getHomeRecommendations: 'get-home-recommendations',
+  generateHeartbeat: 'generate-heartbeat',
   getPlaylistSongs: 'get-playlist-songs',
   // 下载
   getDownloadUrl: 'get-download-url',
@@ -489,6 +507,8 @@ function shapeFieldMatches(spec, v) {
     case 'enum': return typeof v === 'string' && spec.values.includes(v);
     case 'obj': return v !== null && typeof v === 'object' && !Array.isArray(v);
     case 'arr': return Array.isArray(v);
+    // 嵌套 shape：递归校验，非法时 coerceShape 返回新的错误对象，合法时原样返回
+    case 'shape': return coerceShape(spec, v) === v;
     default: return false;
   }
 }

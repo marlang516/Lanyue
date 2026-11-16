@@ -24,6 +24,7 @@ import { getLyricOverride } from './lyricEditor.js';
 import { createResumeSeeker } from './player/resumeSeek.js';
 import { createProgressWriter } from './player/progressStore.js';
 import { rememberAltSource } from './altSource.js';
+import { refillPlayQueue } from './heartbeat.js';
 import { slimAltSource } from '../../shared/altSource.mjs';
 import { fileUrlFromPath } from '../../shared/fileUrl.mjs';
 
@@ -451,8 +452,18 @@ export async function nextSong() {
   } else if (loopMode === 1) {
     playIdx = (playIdx + 1) % playQueue.length;
   } else {
-    // 不循环模式：到末尾则停止
+    // 不循环模式：到末尾时先试心动模式（设置里可选，默认关）。
+    // 续播是「追加 + 播下一首」；没追加到就保持旧行为：停下来。
     if (playIdx >= playQueue.length - 1) {
+      let added = 0;
+      try { added = await refillPlayQueue(); } catch (_e) { added = 0; }
+      if (added > 0) {
+        const grown = getState('playQueue');
+        const nextIdx = playIdx + 1;
+        setState('playIdx', nextIdx);
+        await playSongByIdx(nextIdx, grown[nextIdx]);
+        return;
+      }
       updatePlayStatsOnStop();
       audio.pause();
       audio.currentTime = 0;

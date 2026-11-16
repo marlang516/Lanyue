@@ -308,6 +308,8 @@
   "settings.general.subCheckIntervalHint": "How often subscribed playlists/artists are checked for new songs (1–168 hours)",
   "settings.general.playbackBehaviorTitle": "Playback Behaviour",
   "settings.general.playProgressMemory": "Remember play progress (resume after restart)",
+  "settings.general.heartbeat": "Heartbeat mode: keep playing similar songs when the queue ends",
+  "heartbeat.added": "Heartbeat: added {n} songs",
   "settings.general.dlPathTemplateTitle": "Download Path Template",
   "settings.general.newTemplate": "NewTemplate",
   "settings.general.refresh": " Refresh",

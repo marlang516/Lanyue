@@ -23,8 +23,9 @@ contextBridge.exposeInMainWorld('miniAPI', {
     if (SEND.has(channel)) ipcRenderer.send(channel, ...args);
   },
   on(channel, callback) {
-    if (RECEIVE.has(channel)) {
-      ipcRenderer.on(channel, (_, data) => callback(data));
-    }
+    if (!RECEIVE.has(channel)) return () => {};
+    const handler = (_, data) => callback(data);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
   },
 });
