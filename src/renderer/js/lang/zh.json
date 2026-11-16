@@ -308,6 +308,8 @@
   "settings.general.subCheckIntervalHint": "后台每隔多久检查一次已订阅的歌单/歌手有无新歌（1–168 小时）",
   "settings.general.playbackBehaviorTitle": "播放行为",
   "settings.general.playProgressMemory": "记忆播放进度（关闭后下次从断点继续）",
+  "settings.general.heartbeat": "心动模式：队列播完后自动续播相似歌曲",
+  "heartbeat.added": "心动模式：已追加 {n} 首",
   "settings.general.dlPathTemplateTitle": "下载路径模板",
   "settings.general.newTemplate": "新建模板",
   "settings.general.refresh": "刷新",

@@ -16,7 +16,7 @@ function registerAllIpcHandlers(deps = {}) {
     ipcWindow, ipcSearch, ipcDownload, ipcCookie, ipcLibrary, ipcPrefs, ipcCheckLocal,
     ipcHistory, ipcAiMusic, ipcSongStory, ipcTasteProfile, ipcProvider, ipcPlaylist,
     ipcDownloadTemplates, ipcCloudSync, ipcSubscriptions, ipcMcp, ipcAssistant,
-    ipcSmartPlaylist, ipcPlaylistAudit, createSubscriptions,
+    ipcSmartPlaylist, ipcPlaylistAudit, ipcHeartbeat, createSubscriptions,
     downloadQueueEngine, libraryWatcher, downloadProgressPort,
     safeSend, persistPlayQueue, loadPersistedPlayQueue,
     api, history, logger, prefs, trayMod, globalShortcuts,
@@ -57,7 +57,9 @@ function registerAllIpcHandlers(deps = {}) {
   });
   const playlistDomain = require('./playlist/domain');
   const { createInfra: createPlaylistInfra } = require('./playlist/infra');
-  ipcPlaylist.register({ domain: playlistDomain, infra: createPlaylistInfra() });
+  // 同一份 infra 同时给歌单域与心动模式（红心歌单读同一份 prefs）
+  const playlistInfra = createPlaylistInfra();
+  ipcPlaylist.register({ domain: playlistDomain, infra: playlistInfra });
   ipcCookie.register();
   // 曲库域：目录监听与投递通道显式注入（M2-T5 起不再经 context 中转）
   ipcLibrary.register({ port: { shell, dialog }, safeSend, setLibraryWatchDir });
@@ -106,6 +108,16 @@ function registerAllIpcHandlers(deps = {}) {
 
   // 智能歌单只读曲库、只出一次网，写库仍走 save-user-playlist，所以排在助手之后即可
   ipcSmartPlaylist.register();
+
+  // 心动模式：红心歌单作种子，网关复用 api/recommendations 单例（与首页推荐同源）
+  ipcHeartbeat.register({
+    getFavorites: () => {
+      const playlists = playlistDomain.ensureFavorites(playlistInfra.prefs.loadUserPlaylists());
+      const fav = playlists.find((p) => p && p.id === playlistDomain.FAVORITES_ID);
+      return fav && Array.isArray(fav.songs) ? fav.songs : [];
+    },
+    gateway: require('../../api/recommendations'),
+  });
 
   // 品味解读（候选方向 2）：设置页「品味画像」，读 playStats 出网一次
   ipcTasteProfile.register();

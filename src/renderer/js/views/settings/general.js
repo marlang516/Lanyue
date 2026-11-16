@@ -17,6 +17,8 @@ export const GENERAL_PREFS = {
   clipboardWatch: { key: 'clipboardWatch', default: false,        el: 'settingClipboardWatch' },
   subscriptionCheckIntervalHours: { key: 'subscriptionCheckIntervalHours', default: 6, el: 'settingSubCheckInterval' },
   playProgressMemory: { key: 'playProgressMemory', default: false, el: 'settingPlayProgressMemory' },
+  // 心动模式（2026-11）：队列自然播完时用「当前歌 + 红心」续播相似歌，默认关
+  heartbeatEnabled: { key: 'heartbeatEnabled', default: false, el: 'settingHeartbeatEnabled' },
   globalShortcuts: { key: 'globalShortcuts', default: true, el: 'settingGlobalShortcuts' },
   shortcutPlayPause: { key: 'shortcutPlayPause', default: 'MediaPlayPause', el: 'settingShortcutPlayPause' },
   shortcutPrev: { key: 'shortcutPrev', default: 'MediaPreviousTrack', el: 'settingShortcutPrev' },

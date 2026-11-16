@@ -44,9 +44,30 @@ const DIR_PREF_KEYS = new Set(['saveDir', 'localDirPath', 'aiMusicSaveDir', 'con
 
 const _approved = new Set();
 
+/**
+ * 注册表上限（P2-15，2026-10-13 复审）。
+ *
+ * 每次用户通过原生选器换一个目录，approve() 就多一项；旧实现只增不删，
+ * 于 isApprovedDir 的闸 1 词法快筛与闸 2 的 realpathDeep 都随会话增长线性变慢，
+ * 而且多数旧目录早已不再使用。
+ *
+ * 保留「最近批准的 64 个」（Set 迭代序 = 插入序，重复 approve 会刷新到末尾）。
+ * 淘汰只会**收窄**允许面（fail-closed）：被淘汰的目录下一次使用时用户会重新选择，
+ * 而不会因此多出一条可写路径。
+ */
+const MAX_APPROVED_DIRS = 64;
+
 function approve(p) {
   const r = normalize(p);
-  if (r) _approved.add(r);
+  if (!r) return r;
+  // 重复批准刷新到末尾：保留最近被使用的目录
+  if (_approved.has(r)) _approved.delete(r);
+  _approved.add(r);
+  while (_approved.size > MAX_APPROVED_DIRS) {
+    const oldest = _approved.values().next().value;
+    if (oldest === r) break; // 防御：不应发生，避免把自己踢掉
+    _approved.delete(oldest);
+  }
   return r;
 }
 
@@ -79,4 +100,5 @@ module.exports = {
   realpathDeep,
   normalize,
   DIR_PREF_KEYS,
+  MAX_APPROVED_DIRS,
 };

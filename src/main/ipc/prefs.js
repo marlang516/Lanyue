@@ -54,6 +54,8 @@ const ALLOWED_PREF_KEYS = new Set([
   'autoLyric', 'autoCover',
   // 播放行为
   'lyricFontSize', 'lyricOffset', 'playProgressMemory', 'playerVolume',
+  // 心动模式开关（设置→播放写，heartbeat.js 在队尾续播前读；默认关）
+  'heartbeatEnabled',
   // 迁移标记：记忆播放进度默认改为关闭的一次性迁移标记（渲染层 app.js 读写，
   // 不在白名单的话 set-pref 会拒写，导致迁移每次启动都空跑一次）
   'playProgressMemoryMigrated',

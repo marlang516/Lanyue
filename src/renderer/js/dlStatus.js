@@ -18,8 +18,15 @@ export function songDlKey(s) {
   return `${s.source}:${s.id}`;
 }
 
-/** done 事件回调（列表重渲染用），可注册多个 */
-export function addDlChangeListener(fn) { if (typeof fn === 'function') _listeners.push(fn); }
+/** done 事件回调（列表重渲染用），可注册多个。返回退订函数。 */
+export function addDlChangeListener(fn) {
+  if (typeof fn !== 'function') return () => {};
+  _listeners.push(fn);
+  return () => {
+    const i = _listeners.indexOf(fn);
+    if (i >= 0) _listeners.splice(i, 1);
+  };
+}
 
 function _fire() {
   for (const fn of _listeners) {

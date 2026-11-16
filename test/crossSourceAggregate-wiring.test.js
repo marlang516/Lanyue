@@ -102,7 +102,10 @@ test('主进程：playlist 模块确实被装载（否则 handler 白写）', ()
   const reg = ASSEMBLY.match(/ipcPlaylist\.register\(\s*\{([\s\S]*?)\}\s*\)/);
   assert.ok(reg, 'ipc/index.js 应以注入式调用 ipcPlaylist.register({ domain, infra })');
   assert.match(reg[1], /domain:\s*playlistDomain/, 'register 未注入 playlist domain');
-  assert.match(reg[1], /infra:\s*createPlaylistInfra\(\)/, 'register 未注入 playlist infra');
+  assert.match(reg[1], /infra:\s*playlistInfra/, 'register 未注入 playlist infra');
+  // 同一位实例同时供歌单域与心动模式使用（红心种子与歌单读写同一份 prefs 适配）
+  assert.match(ASSEMBLY, /const playlistInfra = createPlaylistInfra\(\)/,
+    'ipc/index.js 应把 playlist infra 创建一次并复用');
   // 注入的两个标识符必须真的定义出来（拼错名字 ⇒ 启动即 ReferenceError）
   assert.match(ASSEMBLY, /const playlistDomain = require\('\.\/playlist\/domain'\)/,
     'ipc/index.js 缺 playlistDomain 定义');

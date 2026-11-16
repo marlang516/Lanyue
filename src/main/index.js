@@ -48,6 +48,7 @@ const ipcMcp = require('./ipc/mcp');
 const ipcAssistant = require('./ipc/ai-assistant');
 const ipcSmartPlaylist = require('./ipc/smart-playlist');
 const ipcPlaylistAudit = require('./ipc/playlistAudit');
+const ipcHeartbeat = require('./ipc/heartbeat');
 const { registerAllIpcHandlers: registerAllIpc } = require('./ipc');
 const subscriptions = require('./subscriptions');
 const { createSubscriptions } = require('./subscriptions');
@@ -337,7 +338,7 @@ app.whenReady().then(async () => {
     ipcWindow, ipcSearch, ipcDownload, ipcCookie, ipcLibrary, ipcPrefs, ipcCheckLocal,
     ipcHistory, ipcAiMusic, ipcSongStory, ipcTasteProfile, ipcProvider, ipcPlaylist,
     ipcDownloadTemplates, ipcCloudSync, ipcSubscriptions, ipcMcp, ipcAssistant,
-    ipcSmartPlaylist, ipcPlaylistAudit, createSubscriptions,
+    ipcSmartPlaylist, ipcPlaylistAudit, ipcHeartbeat, createSubscriptions,
     downloadQueueEngine, libraryWatcher, downloadProgressPort,
     safeSend, persistPlayQueue, loadPersistedPlayQueue,
     api, history, logger, prefs, trayMod, globalShortcuts,

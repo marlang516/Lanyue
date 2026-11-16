@@ -56,9 +56,14 @@ for (const [name, channel] of Object.entries(contract.methods)) {
   _musicApiBase[name] = makeApiMethod(channel);
 }
 
-// 从 EVENTS 批量生成订阅方法
+// 从 EVENTS 批量生成订阅方法。返回值是退订函数：视图/模块销毁时调用它，
+// 避免窗口重建或模块重复执行时监听器线性增长（2026-10-13 复审 P2-16）。
 for (const [name, channel] of Object.entries(contract.events)) {
-  _musicApiBase[name] = (cb) => ipcRenderer.on(channel, (_, d) => cb(d));
+  _musicApiBase[name] = (cb) => {
+    const handler = (_, d) => cb(d);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  };
 }
 
 contextBridge.exposeInMainWorld('musicAPI', _musicApiBase);
@@ -66,9 +71,10 @@ contextBridge.exposeInMainWorld('musicAPI', _musicApiBase);
 // ── ipcRenderer 向后兼容（供 updater.js / settings.js 使用）────────
 contextBridge.exposeInMainWorld('ipcRenderer', {
   on(channel, callback) {
-    if (SAFE_CHANNELS_RECEIVE.has(channel)) {
-      ipcRenderer.on(channel, (_, data) => callback(data));
-    }
+    if (!SAFE_CHANNELS_RECEIVE.has(channel)) return () => {};
+    const handler = (_, data) => callback(data);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
   },
   invoke(channel, ...args) {
     if (SAFE_CHANNELS_INVOKE.has(channel)) {
@@ -92,9 +98,10 @@ contextBridge.exposeInMainWorld('miniAPI', {
     }
   },
   on(channel, callback) {
-    if (SAFE_CHANNELS_RECEIVE.has(channel)) {
-      ipcRenderer.on(channel, (_, data) => callback(data));
-    }
+    if (!SAFE_CHANNELS_RECEIVE.has(channel)) return () => {};
+    const handler = (_, data) => callback(data);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
   },
   windowClose() { ipcRenderer.send('window-close'); },
   windowMinimize() { ipcRenderer.send('window-minimize'); },
