@@ -8,7 +8,7 @@ import type { DiscoverSectionState, PlaylistSummary } from '../stores/types';
 import type { SongLike } from '../core/song';
 import { player, currentKey, playFromList, appendToQueue } from '../stores/player';
 import { lyrics } from '../stores/lyrics';
-import { activeLineIndex, projectPlayhead } from '../core/lyricMotion.js';
+import { activeLineIndex, lyricDisplaySeconds, projectPlayhead } from '../core/lyricMotion.js';
 import { downloadSongs } from '../stores/search';
 import { platformName } from '../core/format';
 import { toast } from '../core/toast';
@@ -93,7 +93,7 @@ function publishLines(now: number): void {
     setLines({ prev: '', cur: '', next: '' });
     return;
   }
-  const seconds = projected.seconds + (Number(lyrics.offsetMs) || 0) / 1000;
+  const seconds = lyricDisplaySeconds(projected.seconds, lyrics.offsetMs);
   const idx = activeLineIndex(lyrics.items, seconds);
   const items = lyrics.items;
   const prev = idx > 0 ? (items[idx - 1]?.text ?? '') : '';

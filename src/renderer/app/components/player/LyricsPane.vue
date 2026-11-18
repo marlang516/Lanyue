@@ -7,6 +7,8 @@ import {
   displayWords,
   glowFromCoverPixels,
   lineFitScale,
+  lyricDisplaySeconds,
+  lyricPlaySeconds,
   projectPlayhead,
   resolveLyricFrame,
   resolveWordSweep,
@@ -30,7 +32,7 @@ let anchor: PlayAnchor | null = projectPlayhead(
 let cursor: LyricCursor | null = null;
 const frame = ref<LyricFrame>(resolveLyricFrame(
   lyrics.items,
-  anchor.progress + (Number(lyrics.offsetMs) || 0) / 1000,
+  lyricDisplaySeconds(anchor.progress, lyrics.offsetMs),
   null,
   bootNow,
   frameOpts(),
@@ -238,12 +240,14 @@ function publish(now: number, retarget: boolean): void {
     anchor, player.progress, now, Number(player.rate) || 1, !!player.playing,
   );
   anchor = projected.anchor;
-  const seconds = projected.seconds + (Number(lyrics.offsetMs) || 0) / 1000;
+  // 行号用带提前量的秒，逐字用同一播放秒再由 WORD_LEAD 提前，两处不要叠两次。
+  const playSeconds = lyricPlaySeconds(projected.seconds, lyrics.offsetMs);
+  const displaySeconds = lyricDisplaySeconds(projected.seconds, lyrics.offsetMs);
   if (projected.seeked) armSnap();
-  const next = resolveLyricFrame(lyrics.items, seconds, retarget ? null : cursor, now, frameOpts());
+  const next = resolveLyricFrame(lyrics.items, displaySeconds, retarget ? null : cursor, now, frameOpts());
   const held = !retarget && !!cursor && cursor.index === next.index && cursor.role === next.role;
   if (!held) commit(next, now);
-  paintWords(seconds, held ? frame.value : next);
+  paintWords(playSeconds, held ? frame.value : next);
 }
 
 function loop(now: number): void {

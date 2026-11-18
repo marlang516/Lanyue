@@ -19,9 +19,9 @@
  * 行号二分全屏页和桌面歌词同步共用，不要在播放器里再写一份。
  *
  * 逐字状态用的是调用方已经算好的同一播放秒（含偏移），不是第二只钟。
- * 光带也吃这一秒和这个字自己的起止：起音时扫过，然后停在正在唱的字上，
- * 不把整段音长都用来铺满（否则亮点会落在这个字唱完之后）。长音停得更亮，
- * 快词在自己的时长里扫完。有逐字时间就沿用；一个词里有好几个字时，
+ * 光带也吃这一秒和这个字自己的起止，并提前 WORD_LEAD_SEC：时间戳到达时
+ * 这个字已经亮住，而不是等唱完才铺满。长音停得更亮，快词在自己的时长里
+ * 扫完。有逐字时间就沿用；一个词里有好几个字时，
  * 只在这个词自己的时长里均分。没有逐字时间时，把这一句的时长均分给
  * 拆开的字。标点贴在前一个字上。
  */
@@ -266,8 +266,32 @@ export function projectPlayhead(anchor, reported, nowMs, rate, playing) {
   return { seconds: Math.max(0, Math.min(expected, lead)), anchor, seeked: false };
 }
 
-/** 词在自己的起点前这么久进入「在唱」，给弹入留出时间。 */
+/**
+ * 高亮比歌词时间戳早这么多。
+ * 媒体图里的声音比 audio.currentTime 大约早 30ms，只等到时间戳再亮，
+ * 人声已经出来了。行号和逐字都用这一段，不再另加延迟。
+ */
 export const WORD_LEAD_SEC = 0.15;
+
+/**
+ * 歌词时间轴上的播放秒（含用户偏移），还没加提前量。
+ * @param {number} playSeconds
+ * @param {number} [offsetMs]
+ * @returns {number}
+ */
+export function lyricPlaySeconds(playSeconds, offsetMs) {
+  return finite(playSeconds, 0) + (Number(offsetMs) || 0) / 1000;
+}
+
+/**
+ * 用来选当前句的秒。比播放秒早 WORD_LEAD_SEC，和逐字的提前量同一段。
+ * @param {number} playSeconds
+ * @param {number} [offsetMs]
+ * @returns {number}
+ */
+export function lyricDisplaySeconds(playSeconds, offsetMs) {
+  return lyricPlaySeconds(playSeconds, offsetMs) + WORD_LEAD_SEC;
+}
 
 /** 源没给时长、后面也没有下一词时，在唱态保持这么久再收成已唱。 */
 export const WORD_UNTIMED_SEC = 0.4;
@@ -531,7 +555,7 @@ function clamp01(n) {
 }
 
 /**
- * 一个字在这一秒的光带。elapsed 为负表示还在开唱前提前量里，光带不动。
+ * 一个字在这一秒的光带。提前量里就开始扫，时间戳到达时这个字已经亮住。
  * @param {number} dur
  * @param {number} elapsed
  * @param {'unreached'|'active'|'sung'} state
@@ -540,7 +564,7 @@ function clamp01(n) {
 function glowAmounts(dur, elapsed, state) {
   const fast = dur > 0 && dur <= SWEEP_FAST_SEC;
   const held = dur >= SWEEP_HELD_SEC;
-  if (state === 'unreached' || elapsed < 0) {
+  if (state === 'unreached' || elapsed < -WORD_LEAD_SEC) {
     return { sweep: 0, band: 0, bloom: 0, linger: false };
   }
   if (state === 'sung') {
@@ -549,27 +573,21 @@ function glowAmounts(dur, elapsed, state) {
     else if (fast) bloom = 0.26;
     return { sweep: 1, band: 0, bloom, linger: false };
   }
-  if (held) {
-    const cross = Math.min(SWEEP_CROSS_SEC, dur);
-    if (elapsed < cross) {
-      const p = cross > 0 ? elapsed / cross : 1;
-      return { sweep: p, band: p, bloom: 0.62 + 0.18 * p, linger: false };
-    }
-    const remain = Math.max(0.05, dur - cross);
-    const lingerP = clamp01((elapsed - cross) / remain);
-    return { sweep: 1, band: 0.5, bloom: 0.8 + 0.2 * lingerP, linger: true };
+  // into = 0 在提前量起点，into = WORD_LEAD_SEC 在时间戳上。扫完正好赶上人声。
+  const into = elapsed + WORD_LEAD_SEC;
+  const attackLen = fast ? Math.min(WORD_LEAD_SEC, Math.max(0.04, dur)) : WORD_LEAD_SEC;
+  if (into < attackLen) {
+    const p = attackLen > 0 ? Math.max(0, into) / attackLen : 1;
+    return {
+      sweep: p,
+      band: p,
+      bloom: fast ? 0.46 : 0.62 + 0.18 * p,
+      linger: false,
+    };
   }
-  const p = dur > 0 ? clamp01(elapsed / dur) : 1;
-  if (fast) return { sweep: p, band: p, bloom: 0.46, linger: false };
-  // 普通音节如果按整段时长慢慢铺满，亮点会落在这个字唱完的时候，听起来就晚一拍。
-  // 光带只在起音时扫过，剩下的时间停在这个字上，和音频里正在唱的字对齐。
-  const cross = Math.min(SWEEP_CROSS_SEC, Math.max(0.08, dur * 0.35));
-  if (elapsed < cross) {
-    const attack = cross > 0 ? elapsed / cross : 1;
-    return { sweep: attack, band: attack, bloom: 0.62 + 0.18 * attack, linger: false };
-  }
-  const remain = Math.max(0.05, dur - cross);
-  const lingerP = clamp01((elapsed - cross) / remain);
+  const lingerP = clamp01(Math.max(0, elapsed) / Math.max(0.05, dur));
+  if (fast) return { sweep: 1, band: 1, bloom: 0.46, linger: false };
+  if (held) return { sweep: 1, band: 0.5, bloom: 0.8 + 0.2 * lingerP, linger: true };
   return { sweep: 1, band: 0.5, bloom: 0.72 + 0.06 * lingerP, linger: true };
 }
 

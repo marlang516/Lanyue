@@ -224,6 +224,8 @@ test('接线：全屏歌词走这份判定，桌面同步不另写二分，光�
   assert.match(PANE, /projectPlayhead/);
   assert.match(PANE, /resolveWordStates|resolveWordSweep/);
   assert.match(PANE, /resolveWordSweep/);
+  assert.match(PANE, /lyricDisplaySeconds/);
+  assert.match(PANE, /lyricPlaySeconds/);
   assert.match(PANE, /lineFitScale/);
   assert.match(PANE, /glowFromCoverPixels/);
   assert.match(PANE, /displayWords/);
@@ -276,6 +278,7 @@ test('接线：全屏歌词走这份判定，桌面同步不另写二分，光�
   assert.match(TOKENS, /--lyric-glow:/);
   assert.match(TOKENS, /--lyric-hot:/);
   const DISC = fs.readFileSync(path.join(ROOT, 'src/renderer/app/views/DiscoverView.vue'), 'utf8');
+  assert.match(DISC, /lyricDisplaySeconds/);
   const discStyle = DISC.slice(DISC.lastIndexOf('<style'));
   const discLine = discStyle.match(/\.line\s*\{[^}]*\}/);
   assert.ok(discLine, '播放舞台歌词行');
@@ -370,8 +373,8 @@ test('displayWords：单字沿用逐字时间，长词和句级 LRC 按字均分
   assert.ok(unknown[0].dur > 0);
 });
 
-test('resolveWordSweep：光带跟同一播放秒，长音停留更亮，快词扫过不停留', async () => {
-  const { resolveWordSweep, resolveWordStates } = await fresh();
+test('resolveWordSweep：提前量里开始扫，时间戳上这个字已经亮住', async () => {
+  const { resolveWordSweep, resolveWordStates, WORD_LEAD_SEC } = await fresh();
   const words = [
     { t: 1, dur: 0.12, text: '快' },
     { t: 1.12, dur: 0.4, text: '中' },
@@ -381,60 +384,69 @@ test('resolveWordSweep：光带跟同一播放秒，长音停留更亮，快词�
   assert.deepStrictEqual(before.states, ['unreached', 'unreached', 'unreached']);
   assert.deepStrictEqual(before.sweep, [0, 0, 0]);
   assert.deepStrictEqual(before.bloom, [0, 0, 0]);
-  assert.deepStrictEqual(before.linger, [false, false, false]);
   assert.strictEqual(before.index, resolveWordStates(words, 0.5).index);
 
-  const lead = resolveWordSweep(words, 0.9);
-  assert.strictEqual(lead.states[0], 'active', '提前量仍由原来的逐字状态给出');
-  assert.strictEqual(lead.sweep[0], 0, '光带要等这个字真正开唱，不在提前量里先扫');
-  assert.strictEqual(lead.bloom[0], 0);
+  const tooEarly = resolveWordSweep(words, 1 - WORD_LEAD_SEC - 0.02);
+  assert.strictEqual(tooEarly.bloom[0], 0, '提前量之前不亮');
 
-  const fastMid = resolveWordSweep(words, 1.06);
-  assert.strictEqual(fastMid.states[0], 'active');
-  assert.ok(Math.abs(fastMid.sweep[0] - 0.5) < 1e-9);
-  assert.ok(fastMid.bloom[0] > 0 && fastMid.bloom[0] < 0.55, '快词有光，但几乎不加强');
-  assert.strictEqual(fastMid.linger[0], false);
-  assert.strictEqual(fastMid.sweep[1], 0, '下一字还在提前量里，光带不动');
+  const lead = resolveWordSweep(words, 0.9);
+  assert.strictEqual(lead.states[0], 'active');
+  assert.ok(lead.sweep[0] > 0.3 && lead.sweep[0] < 0.6, '提前量里光带已经在走');
+  assert.strictEqual(lead.linger[0], false);
+  assert.ok(lead.bloom[0] > 0 && lead.bloom[0] < 0.55);
+
+  const atVocal = resolveWordSweep(words, 1);
+  assert.strictEqual(atVocal.sweep[0], 1, '人声到这个字的时间戳时，字已经亮住');
+  assert.strictEqual(atVocal.linger[0], false, '快词不停留成大光');
+  assert.ok(atVocal.bloom[0] < 0.55);
 
   const fastSung = resolveWordSweep(words, 1.12);
   assert.strictEqual(fastSung.states[0], 'sung');
-  assert.strictEqual(fastSung.sweep[0], 1);
-  assert.ok(fastSung.bloom[0] > 0 && fastSung.bloom[0] < fastMid.bloom[0], '唱过留下更弱的余光');
+  assert.ok(fastSung.bloom[0] > 0 && fastSung.bloom[0] < atVocal.bloom[0], '唱过留下更弱的余光');
 
   const syllable = words[1];
-  const justSung = resolveWordSweep(words, syllable.t - 0.02);
-  assert.strictEqual(justSung.sweep[1], 0, '这个字开唱前光带不动');
-  assert.strictEqual(justSung.bloom[1], 0);
-  const early = resolveWordSweep(words, syllable.t + 0.05);
-  assert.strictEqual(early.states[1], 'active');
-  assert.ok(early.sweep[1] > 0 && early.sweep[1] < 1, '起音时光带已经在这个字上走');
+  const arriving = resolveWordSweep(words, syllable.t - 0.05);
+  assert.strictEqual(arriving.states[1], 'active');
+  assert.ok(arriving.sweep[1] > 0.5 && arriving.sweep[1] < 1, '时间戳之前光带已经扫过大半');
+  const onTime = resolveWordSweep(words, syllable.t);
+  assert.strictEqual(onTime.sweep[1], 1);
+  assert.strictEqual(onTime.linger[1], true, '人声到达时普通字已经停在亮态');
   const mid = resolveWordSweep(words, syllable.t + 0.22);
   assert.strictEqual(mid.states[1], 'active');
-  assert.strictEqual(mid.linger[1], true, '普通音节唱到中段，亮的仍是这个字，而不是等它唱完');
   assert.strictEqual(mid.sweep[1], 1);
-  assert.ok(mid.bloom[1] > fastMid.bloom[0]);
+  assert.ok(mid.bloom[1] > atVocal.bloom[0]);
 
   const heldEarly = resolveWordSweep(words, 1.67);
   const heldLate = resolveWordSweep(words, 2.72);
   assert.strictEqual(heldEarly.states[2], 'active');
-  assert.strictEqual(heldEarly.linger[2], false);
-  assert.ok(heldEarly.sweep[2] > 0.35 && heldEarly.sweep[2] < 0.5);
-  assert.strictEqual(heldLate.linger[2], true, '长音光带扫过后停在字上');
-  assert.strictEqual(heldLate.sweep[2], 1);
-  assert.ok(Math.abs(heldLate.band[2] - 0.5) < 1e-9, '停留时光带还在字中间');
-  assert.ok(heldLate.bloom[2] > heldEarly.bloom[2]);
-  assert.ok(heldLate.bloom[2] > fastMid.bloom[0]);
+  assert.strictEqual(heldEarly.sweep[2], 1, '长音在人声之后保持整字照亮');
+  assert.strictEqual(heldEarly.linger[2], true);
+  assert.ok(Math.abs(heldEarly.band[2] - 0.5) < 1e-9);
+  assert.strictEqual(heldLate.linger[2], true);
+  assert.ok(heldLate.bloom[2] > heldEarly.bloom[2], '长音越唱越亮');
   assert.deepStrictEqual(resolveWordSweep(words, 2.72), heldLate, '同一秒结果稳定，没有第二只钟');
 
   const heldSung = resolveWordSweep(words, 3.12);
   assert.strictEqual(heldSung.states[2], 'sung');
   assert.strictEqual(heldSung.linger[2], false);
-  assert.ok(heldSung.bloom[2] > fastSung.bloom[0], '长音余光比快词更留得住');
-  assert.ok(heldSung.bloom[2] < heldLate.bloom[2], '余光弱于正在停留的那一下');
+  assert.ok(heldSung.bloom[2] > fastSung.bloom[0]);
+  assert.ok(heldSung.bloom[2] < heldLate.bloom[2]);
 
   assert.deepStrictEqual(resolveWordSweep([], 1), {
     index: -1, states: [], sweep: [], band: [], bloom: [], linger: [],
   });
+});
+
+test('lyricDisplaySeconds：当前句和逐字共用同一段提前量', async () => {
+  const { lyricPlaySeconds, lyricDisplaySeconds, WORD_LEAD_SEC, activeLineIndex } = await fresh();
+  assert.strictEqual(lyricPlaySeconds(10, 0), 10);
+  assert.strictEqual(lyricPlaySeconds(10, 500), 10.5);
+  assert.strictEqual(lyricDisplaySeconds(10, 0), 10 + WORD_LEAD_SEC);
+  assert.strictEqual(lyricDisplaySeconds(10, -200), 10 - 0.2 + WORD_LEAD_SEC);
+  const lines = [{ t: 2, text: '甲' }, { t: 5, text: '乙' }];
+  const play = 2 - WORD_LEAD_SEC;
+  assert.strictEqual(activeLineIndex(lines, play), -1, '播放秒还没到这句');
+  assert.strictEqual(activeLineIndex(lines, lyricDisplaySeconds(play, 0)), 0, '提前量到了就换当前句');
 });
 
 test('lineFitScale：一行放得下就不缩，放不下按宽度缩成一行', async () => {
