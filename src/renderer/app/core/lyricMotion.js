@@ -19,8 +19,10 @@
  * 行号二分全屏页和桌面歌词同步共用，不要在播放器里再写一份。
  *
  * 逐字状态用的是调用方已经算好的同一播放秒（含偏移），不是第二只钟。
- * 有逐字时间就沿用；一个词里有好几个字时，只在这个词自己的时长里均分。
- * 没有逐字时间时，把这一句的时长均分给拆开的字。标点贴在前一个字上。
+ * 光带也吃这一秒和这个字自己的起止：长音扫过之后停在字上并加重，
+ * 快词在自己的时长里扫完。有逐字时间就沿用；一个词里有好几个字时，
+ * 只在这个词自己的时长里均分。没有逐字时间时，把这一句的时长均分给
+ * 拆开的字。标点贴在前一个字上。
  */
 
 /** 与 tokens.css 的 --dur-2（.32s）对齐；改一边必须改另一边。 */
@@ -506,4 +508,138 @@ export function resolveWordStates(words, seconds) {
     if (state === 'active') index = i;
   }
   return { index, states };
+}
+
+/** 短于等于这时长的字只做一次快扫，光几乎不加重。 */
+export const SWEEP_FAST_SEC = 0.18;
+
+/** 长于等于这时长的音，光带扫过后停在字上并继续变亮。 */
+export const SWEEP_HELD_SEC = 0.7;
+
+/** 长音用这么久把光带扫过整字，剩下的时间停住。 */
+export const SWEEP_CROSS_SEC = 0.36;
+
+/**
+ * @param {number} n
+ * @returns {number}
+ */
+function clamp01(n) {
+  if (n <= 0) return 0;
+  if (n >= 1) return 1;
+  return n;
+}
+
+/**
+ * 一个字在这一秒的光带。elapsed 为负表示还在开唱前提前量里，光带不动。
+ * @param {number} dur
+ * @param {number} elapsed
+ * @param {'unreached'|'active'|'sung'} state
+ * @returns {{sweep:number, band:number, bloom:number, linger:boolean}}
+ */
+function glowAmounts(dur, elapsed, state) {
+  const fast = dur > 0 && dur <= SWEEP_FAST_SEC;
+  const held = dur >= SWEEP_HELD_SEC;
+  if (state === 'unreached' || elapsed < 0) {
+    return { sweep: 0, band: 0, bloom: 0, linger: false };
+  }
+  if (state === 'sung') {
+    let bloom = 0.4;
+    if (held) bloom = 0.58;
+    else if (fast) bloom = 0.26;
+    return { sweep: 1, band: 0, bloom, linger: false };
+  }
+  if (held) {
+    const cross = Math.min(SWEEP_CROSS_SEC, dur);
+    if (elapsed < cross) {
+      const p = cross > 0 ? elapsed / cross : 1;
+      return { sweep: p, band: p, bloom: 0.62 + 0.18 * p, linger: false };
+    }
+    const remain = Math.max(0.05, dur - cross);
+    const lingerP = clamp01((elapsed - cross) / remain);
+    return { sweep: 1, band: 0.5, bloom: 0.8 + 0.2 * lingerP, linger: true };
+  }
+  const p = dur > 0 ? clamp01(elapsed / dur) : 1;
+  if (fast) return { sweep: p, band: p, bloom: 0.46, linger: false };
+  return { sweep: p, band: p, bloom: 0.52 + 0.22 * p, linger: false };
+}
+
+/**
+ * 光带扫到哪、有多亮。seconds 与 resolveWordStates 是同一播放秒。
+ * sweep 是已经照亮的比例，band 是亮带中心，linger 表示长音停在字上。
+ * @param {readonly {t:number, dur?:number}[] | null | undefined} words
+ * @param {number} seconds
+ * @returns {{
+ *   index: number,
+ *   states: ('unreached'|'active'|'sung')[],
+ *   sweep: number[],
+ *   band: number[],
+ *   bloom: number[],
+ *   linger: boolean[],
+ * }}
+ */
+export function resolveWordSweep(words, seconds) {
+  const base = resolveWordStates(words, seconds);
+  const n = base.states.length;
+  const sweep = new Array(n);
+  const band = new Array(n);
+  const bloom = new Array(n);
+  const linger = new Array(n);
+  const t = finite(seconds, 0);
+  const list = Array.isArray(words) ? words : [];
+  for (let i = 0; i < n; i++) {
+    const start = finite(list[i] && list[i].t, 0);
+    const dur = Math.max(0, wordActiveEnd(list, i) - start);
+    const glow = glowAmounts(dur, t - start, base.states[i]);
+    sweep[i] = glow.sweep;
+    band[i] = glow.band;
+    bloom[i] = glow.bloom;
+    linger[i] = glow.linger;
+  }
+  return { index: base.index, states: base.states, sweep, band, bloom, linger };
+}
+
+/**
+ * 把一整句缩进可用宽度。放得下就保持 1，避免无谓缩小。
+ * @param {number} neededPx
+ * @param {number} availablePx
+ * @returns {number}
+ */
+export function lineFitScale(neededPx, availablePx) {
+  const needed = Number(neededPx);
+  const available = Number(availablePx);
+  if (!(needed > 0) || !(available > 0)) return 1;
+  if (needed <= available) return 1;
+  return available / needed;
+}
+
+/**
+ * 从封面小样里挑一抹还能当光的颜色。
+ * 近黑、近白、近灰丢掉。没有可用样本就返回空串，调用方用强调色令牌。
+ * @param {ArrayLike<number> | null | undefined} rgba
+ * @returns {string}
+ */
+export function glowFromCoverPixels(rgba) {
+  if (!rgba || typeof rgba.length !== 'number') return '';
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  let w = 0;
+  for (let i = 0; i + 3 < rgba.length; i += 4) {
+    const pr = Number(rgba[i]);
+    const pg = Number(rgba[i + 1]);
+    const pb = Number(rgba[i + 2]);
+    const a = Number(rgba[i + 3]);
+    if (!(a >= 128)) continue;
+    const max = Math.max(pr, pg, pb);
+    const min = Math.min(pr, pg, pb);
+    if (max < 28 || min > 236) continue;
+    const sat = max - min;
+    if (sat < 18) continue;
+    r += pr * sat;
+    g += pg * sat;
+    b += pb * sat;
+    w += sat;
+  }
+  if (!(w > 0)) return '';
+  return `rgb(${Math.round(r / w)}, ${Math.round(g / w)}, ${Math.round(b / w)})`;
 }

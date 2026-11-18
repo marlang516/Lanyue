@@ -66,7 +66,7 @@ function setLines(next: LyricWindow): void {
 }
 
 /**
- * 窄栏只显示三句：上一句淡、当前句强调、下一句淡。
+ * 窄栏只显示三句：上一句淡、当前句强调、下一句淡，每句保持一行。
  * 播放头与行号都走 lyricMotion，不另起歌词时钟，也不做逐字跳动。
  * 句子没变就不写响应式，避免每一帧重绘左侧列表。
  */
@@ -405,8 +405,9 @@ function openStage(): void {
   display: flex; flex-direction: column; justify-content: center; gap: var(--sp-3);
 }
 .line {
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
-  margin: 0; overflow: hidden; overflow-wrap: break-word;
+  display: block; min-width: 0; max-width: 100%;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  margin: 0;
   font-size: var(--fs-lg); font-weight: var(--fw-med); line-height: 1.45;
   color: var(--ink-2); opacity: .72;
   text-shadow: 0 1px 14px color-mix(in srgb, var(--bg) 80%, transparent);
