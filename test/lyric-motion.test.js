@@ -281,6 +281,8 @@ test('接线：全屏歌词走这份判定，桌面同步不另写二分，光�
   assert.ok(discLine, '播放舞台歌词行');
   assert.match(discLine[0], /white-space:\s*nowrap/, '舞台上的一句也排成一行');
   assert.doesNotMatch(discLine[0], /line-clamp|overflow-wrap:\s*break-word/);
+  assert.doesNotMatch(discLine[0], /transition:\s*color\s+var\(\s*--dur-2/, '舞台当前句不能再淡 0.32s，否则会晚于拍点');
+  assert.match(style, /\.lift-enter-from\s*\{[^}]*opacity:\s*1/, '换句时当前句一开始就能读，不能先淡着进来');
   assert.match(
     fs.readFileSync(path.join(ROOT, 'src/renderer/app/core/lyricMotion.js'), 'utf8'),
     /LYRIC_HANDOFF_MS = 320/,
@@ -398,6 +400,19 @@ test('resolveWordSweep：光带跟同一播放秒，长音停留更亮，快词�
   assert.strictEqual(fastSung.states[0], 'sung');
   assert.strictEqual(fastSung.sweep[0], 1);
   assert.ok(fastSung.bloom[0] > 0 && fastSung.bloom[0] < fastMid.bloom[0], '唱过留下更弱的余光');
+
+  const syllable = words[1];
+  const justSung = resolveWordSweep(words, syllable.t - 0.02);
+  assert.strictEqual(justSung.sweep[1], 0, '这个字开唱前光带不动');
+  assert.strictEqual(justSung.bloom[1], 0);
+  const early = resolveWordSweep(words, syllable.t + 0.05);
+  assert.strictEqual(early.states[1], 'active');
+  assert.ok(early.sweep[1] > 0 && early.sweep[1] < 1, '起音时光带已经在这个字上走');
+  const mid = resolveWordSweep(words, syllable.t + 0.22);
+  assert.strictEqual(mid.states[1], 'active');
+  assert.strictEqual(mid.linger[1], true, '普通音节唱到中段，亮的仍是这个字，而不是等它唱完');
+  assert.strictEqual(mid.sweep[1], 1);
+  assert.ok(mid.bloom[1] > fastMid.bloom[0]);
 
   const heldEarly = resolveWordSweep(words, 1.67);
   const heldLate = resolveWordSweep(words, 2.72);

@@ -19,7 +19,8 @@
  * 行号二分全屏页和桌面歌词同步共用，不要在播放器里再写一份。
  *
  * 逐字状态用的是调用方已经算好的同一播放秒（含偏移），不是第二只钟。
- * 光带也吃这一秒和这个字自己的起止：长音扫过之后停在字上并加重，
+ * 光带也吃这一秒和这个字自己的起止：起音时扫过，然后停在正在唱的字上，
+ * 不把整段音长都用来铺满（否则亮点会落在这个字唱完之后）。长音停得更亮，
  * 快词在自己的时长里扫完。有逐字时间就沿用；一个词里有好几个字时，
  * 只在这个词自己的时长里均分。没有逐字时间时，把这一句的时长均分给
  * 拆开的字。标点贴在前一个字上。
@@ -560,7 +561,16 @@ function glowAmounts(dur, elapsed, state) {
   }
   const p = dur > 0 ? clamp01(elapsed / dur) : 1;
   if (fast) return { sweep: p, band: p, bloom: 0.46, linger: false };
-  return { sweep: p, band: p, bloom: 0.52 + 0.22 * p, linger: false };
+  // 普通音节如果按整段时长慢慢铺满，亮点会落在这个字唱完的时候，听起来就晚一拍。
+  // 光带只在起音时扫过，剩下的时间停在这个字上，和音频里正在唱的字对齐。
+  const cross = Math.min(SWEEP_CROSS_SEC, Math.max(0.08, dur * 0.35));
+  if (elapsed < cross) {
+    const attack = cross > 0 ? elapsed / cross : 1;
+    return { sweep: attack, band: attack, bloom: 0.62 + 0.18 * attack, linger: false };
+  }
+  const remain = Math.max(0.05, dur - cross);
+  const lingerP = clamp01((elapsed - cross) / remain);
+  return { sweep: 1, band: 0.5, bloom: 0.72 + 0.06 * lingerP, linger: true };
 }
 
 /**

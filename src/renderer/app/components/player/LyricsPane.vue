@@ -503,8 +503,8 @@ onBeforeUnmount(() => {
   transition: transform var(--dur-2) var(--ease-emph), opacity var(--dur-2) var(--ease);
 }
 .lift-leave-active { position: absolute; left: 0; right: 0; }
-.lift-enter-from { transform: translateY(78%); opacity: .32; }
-.lift-leave-to { transform: translateY(-82%); opacity: .28; }
+.lift-enter-from { transform: translateY(12%); opacity: 1; }
+.lift-leave-to { transform: translateY(-28%); opacity: .35; }
 
 .word {
   position: relative;

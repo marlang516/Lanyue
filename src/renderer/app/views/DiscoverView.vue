@@ -411,7 +411,8 @@ function openStage(): void {
   font-size: var(--fs-lg); font-weight: var(--fw-med); line-height: 1.45;
   color: var(--ink-2); opacity: .72;
   text-shadow: 0 1px 14px color-mix(in srgb, var(--bg) 80%, transparent);
-  transition: color var(--dur-2) var(--ease), opacity var(--dur-2) var(--ease);
+  /* 当前句跟播放时钟一起换。0.32s 的淡入会让这句在拍点之后才显出来。 */
+  transition: none;
 }
 .line.prev { opacity: .55; }
 .line.next { opacity: .68; }
