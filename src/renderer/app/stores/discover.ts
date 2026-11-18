@@ -7,6 +7,7 @@
 import { reactive, computed } from 'vue';
 import type { ComputedRef } from 'vue';
 import { call, callSafe } from '../core/bridge';
+import { platformName } from '../core/format';
 import { normalizeSongs } from '../core/song';
 import type {
   DiscoverPlatformGroup,
@@ -18,6 +19,23 @@ import type {
   PlaylistSummary,
   SourceHealthMap,
 } from './types';
+
+/**
+ * getPlatforms 还没回来时的平台条。
+ * 顺序与平台 manifest 的 policies.order 一致：
+ * 网易云、QQ音乐、B站、酷狗、酷我、咪咕、5sing、汽水。
+ * 后四家只有搜索，没有榜单/歌单分区，仍要出现在发现页平台条上。
+ */
+export const DISCOVER_PLATFORM_FALLBACK: readonly string[] = Object.freeze([
+  'netease',
+  'qq',
+  'bilibili',
+  'kugou',
+  'kuwo',
+  'migu',
+  'fivesing',
+  'soda',
+]);
 
 export const DISCOVER_SECTIONS: readonly DiscoverPlatformGroup[] = Object.freeze([
   {
@@ -89,8 +107,19 @@ export const discover = reactive<DiscoverState>({
   sourceHealth: null,
 });
 
+/**
+ * 发现页平台条。优先用已注册音源（不另造平台）；注册表未到时用上面的八家。
+ */
+export const discoverPlatformIds: ComputedRef<readonly string[]> = computed(() => {
+  const live = discover.platforms
+    .map((p) => (p && typeof p.id === 'string' ? p.id.trim() : ''))
+    .filter((id) => id.length > 0);
+  return live.length ? live : DISCOVER_PLATFORM_FALLBACK;
+});
+
 export const activePlatformMeta: ComputedRef<DiscoverPlatformGroup> = computed(
-  () => DISCOVER_SECTIONS.find((p) => p.plat === discover.activePlat) || DISCOVER_SECTIONS[0],
+  () => DISCOVER_SECTIONS.find((p) => p.plat === discover.activePlat)
+    || { plat: discover.activePlat, sections: [] },
 );
 
 export function platformSections(plat: string): readonly DiscoverSectionMeta[] {
@@ -192,5 +221,5 @@ export const platformNameMap: ComputedRef<Record<string, string>> = computed(() 
 });
 
 export function platformLabel(id: string): string {
-  return platformNameMap.value[id] || id;
+  return platformNameMap.value[id] || platformName(id);
 }

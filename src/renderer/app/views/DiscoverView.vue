@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
-  discover, DISCOVER_SECTIONS, initDiscover, showPlatform, showSection,
+  discover, discoverPlatformIds, initDiscover, showPlatform, showSection,
   activeSection, sectionState, platformSections, platformLabel, reloadActive,
 } from '../stores/discover';
 import type { DiscoverSectionState, PlaylistSummary } from '../stores/types';
@@ -173,17 +173,20 @@ function openStage(): void {
     <div class="cols">
       <!-- 平台内容 -->
       <section class="feed ly-card">
-        <div class="plat-tabs">
+        <div class="plat-tabs" role="tablist" aria-label="平台">
           <button
-            v-for="p in DISCOVER_SECTIONS" :key="p.plat"
-            class="ptab" :class="{ on: discover.activePlat === p.plat }"
-            @click="showPlatform(p.plat)"
+            v-for="id in discoverPlatformIds" :key="id"
+            type="button"
+            role="tab"
+            class="ptab" :class="{ on: discover.activePlat === id }"
+            :aria-selected="discover.activePlat === id"
+            @click="showPlatform(id)"
           >
-            {{ platformLabel(p.plat) }}
+            {{ platformLabel(id) }}
           </button>
         </div>
 
-        <div class="chips">
+        <div v-if="platformSections(discover.activePlat).length" class="chips">
           <button
             v-for="s in platformSections(discover.activePlat)" :key="s.sec"
             class="chip" :class="{ on: sec && sec.sec === s.sec }"
@@ -196,16 +199,22 @@ function openStage(): void {
           </button>
         </div>
 
-        <header class="sec-head">
+        <header v-if="sec" class="sec-head">
           <div class="sec-title">
-            <h2>{{ sec ? sec.title : '推荐' }}</h2>
+            <h2>{{ sec.title }}</h2>
             <p>{{ platformName(discover.activePlat) }} · {{ st.data.length }} 项</p>
           </div>
-          <span v-if="sec && sec.kind === 'list' && st.data.length" class="ly-tag ly-tag-accent">前 {{ Math.min(st.data.length, 20) }} 首</span>
+          <span v-if="sec.kind === 'list' && st.data.length" class="ly-tag ly-tag-accent">前 {{ Math.min(st.data.length, 20) }} 首</span>
         </header>
 
         <div class="sec-body">
-          <div v-if="st.loading" class="grid skel">
+          <div v-if="!sec" class="ly-empty">
+            <Icon name="disc" />
+            <b>暂无榜单和歌单</b>
+            <p>{{ platformLabel(discover.activePlat) }} 目前只支持搜索</p>
+          </div>
+
+          <div v-else-if="st.loading" class="grid skel">
             <div v-for="n in 10" :key="n" class="ly-skeleton" style="aspect-ratio: 1 / 1"></div>
           </div>
 
@@ -288,17 +297,16 @@ function openStage(): void {
 <style scoped>
 .discover { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 
-.cols { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 300px; gap: var(--gap-app); }
+.cols { flex: 1; min-height: 0; min-width: 0; display: grid; grid-template-columns: 1fr 300px; gap: var(--gap-app); }
 
-.feed { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: var(--sp-4) var(--sp-6) var(--sp-5); overflow: hidden; }
+.feed { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; padding: var(--sp-4) var(--sp-6) var(--sp-5); overflow: hidden; }
 
 .plat-tabs {
-  display: inline-flex; align-self: flex-start; gap: 4px; padding: 4px;
+  display: flex; flex-wrap: wrap; align-self: flex-start; max-width: 100%; min-width: 0;
+  gap: 4px; padding: 4px;
   background: var(--glass-2); border: 1px solid var(--hairline);
   border-radius: var(--r-md); box-shadow: inset 0 1px 0 var(--stroke);
-  overflow-x: auto; scrollbar-width: none;
 }
-.plat-tabs::-webkit-scrollbar { display: none; }
 .ptab {
   height: 30px; padding: 0 var(--sp-4); border: 0; border-radius: var(--r-sm);
   background: transparent; color: var(--ink-3); font-size: var(--fs-sm); font-weight: var(--fw-med);
