@@ -186,7 +186,7 @@ function openStage(): void {
           </button>
         </div>
 
-        <div v-if="platformSections(discover.activePlat).length" class="chips">
+        <div class="chips">
           <button
             v-for="s in platformSections(discover.activePlat)" :key="s.sec"
             class="chip" :class="{ on: sec && sec.sec === s.sec }"
@@ -199,22 +199,16 @@ function openStage(): void {
           </button>
         </div>
 
-        <header v-if="sec" class="sec-head">
+        <header class="sec-head">
           <div class="sec-title">
-            <h2>{{ sec.title }}</h2>
+            <h2>{{ sec ? sec.title : '推荐' }}</h2>
             <p>{{ platformName(discover.activePlat) }} · {{ st.data.length }} 项</p>
           </div>
-          <span v-if="sec.kind === 'list' && st.data.length" class="ly-tag ly-tag-accent">前 {{ Math.min(st.data.length, 20) }} 首</span>
+          <span v-if="sec && sec.kind === 'list' && st.data.length" class="ly-tag ly-tag-accent">前 {{ Math.min(st.data.length, 20) }} 首</span>
         </header>
 
         <div class="sec-body">
-          <div v-if="!sec" class="ly-empty">
-            <Icon name="disc" />
-            <b>暂无榜单和歌单</b>
-            <p>{{ platformLabel(discover.activePlat) }} 目前只支持搜索</p>
-          </div>
-
-          <div v-else-if="st.loading" class="grid skel">
+          <div v-if="st.loading" class="grid skel">
             <div v-for="n in 10" :key="n" class="ly-skeleton" style="aspect-ratio: 1 / 1"></div>
           </div>
 

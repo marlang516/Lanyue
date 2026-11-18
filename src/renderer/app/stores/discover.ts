@@ -20,23 +20,6 @@ import type {
   SourceHealthMap,
 } from './types';
 
-/**
- * getPlatforms 还没回来时的平台条。
- * 顺序与平台 manifest 的 policies.order 一致：
- * 网易云、QQ音乐、B站、酷狗、酷我、咪咕、5sing、汽水。
- * 后四家只有搜索，没有榜单/歌单分区，仍要出现在发现页平台条上。
- */
-export const DISCOVER_PLATFORM_FALLBACK: readonly string[] = Object.freeze([
-  'netease',
-  'qq',
-  'bilibili',
-  'kugou',
-  'kuwo',
-  'migu',
-  'fivesing',
-  'soda',
-]);
-
 export const DISCOVER_SECTIONS: readonly DiscoverPlatformGroup[] = Object.freeze([
   {
     plat: 'netease',
@@ -108,13 +91,18 @@ export const discover = reactive<DiscoverState>({
 });
 
 /**
- * 发现页平台条。优先用已注册音源（不另造平台）；注册表未到时用上面的八家。
+ * 发现页平台条：只放有榜单或歌单分区的音源。
+ * 酷我 / 咪咕 / 5sing / 汽水只有搜索，不出现在这里；搜索和播放仍走各自页面。
+ * 注册表已到时再滤掉未注册的 id，顺序跟 DISCOVER_SECTIONS。
  */
 export const discoverPlatformIds: ComputedRef<readonly string[]> = computed(() => {
+  const charts = DISCOVER_SECTIONS.map((p) => p.plat);
   const live = discover.platforms
     .map((p) => (p && typeof p.id === 'string' ? p.id.trim() : ''))
     .filter((id) => id.length > 0);
-  return live.length ? live : DISCOVER_PLATFORM_FALLBACK;
+  if (!live.length) return charts;
+  const known = new Set(live);
+  return charts.filter((id) => known.has(id));
 });
 
 export const activePlatformMeta: ComputedRef<DiscoverPlatformGroup> = computed(
