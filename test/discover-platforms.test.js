@@ -44,6 +44,20 @@ test('发现页平台条回落清单与已注册音源一致，且正好八家',
   ]);
 });
 
+test('酷我/咪咕/5sing/汽水没有榜单或歌单实现，发现页不能给它们编分区', () => {
+  const chartFns = ['getTopList', 'getRecommendPlaylists', 'getRanking', 'getCategoryPlaylists', 'getNewSongs'];
+  for (const file of ['kuwo.js', 'migu.js', 'fivesing.js', 'soda.js']) {
+    const src = read(`src/api/platforms/${file}`);
+    for (const fn of chartFns) {
+      assert.doesNotMatch(src, new RegExp(`\\b${fn}\\s*:`), `${file} 不应声明 ${fn}`);
+    }
+  }
+  const sections = read('src/renderer/app/stores/discover.ts');
+  for (const id of ['kuwo', 'migu', 'fivesing', 'soda']) {
+    assert.doesNotMatch(sections, new RegExp(`plat:\\s*'${id}'`));
+  }
+});
+
 test('发现页 tab 走 discoverPlatformIds，不再只遍历有分区的四家', () => {
   const view = read('src/renderer/app/views/DiscoverView.vue');
   assert.match(view, /v-for="id in discoverPlatformIds"/);
