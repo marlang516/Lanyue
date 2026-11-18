@@ -158,9 +158,8 @@ function closePeek() {
 }
 
 /** 封面加载失败时摘掉底图，舞台退回极光空底，不再补一块硬封面。 */
-function dropBrokenImg(e: Event): void {
+function dropBrokenImg(): void {
   coverGone.value = true;
-  if (e.target instanceof HTMLElement) e.target.remove();
 }
 
 function openStage(): void {
@@ -342,7 +341,7 @@ function openStage(): void {
 .skel { gap: var(--sp-4); }
 .skel > div { border-radius: var(--r-md); }
 
-/* ── 侧栏：模糊封面铺满整列，歌词是主体；歌名贴在上沿 ── */
+/* ── 侧栏：当前歌曲封面半透明铺满整列，歌词是主体；歌名贴在上沿 ── */
 .side { min-height: 0; min-width: 0; display: flex; flex-direction: column; }
 .stage {
   position: relative; flex: 1 1 auto; min-height: 0; min-width: 0; width: 100%;
@@ -352,19 +351,22 @@ function openStage(): void {
 .stage.idle { cursor: default; }
 .side .stage.ly-card:hover { transform: none; box-shadow: var(--shadow-card); }
 .wash {
-  position: absolute; top: -22%; left: -22%; width: 144%; height: 144%;
+  position: absolute; top: -8%; left: -8%; width: 116%; height: 116%;
   max-width: none; max-height: none;
-  object-fit: cover; filter: blur(56px) saturate(1.45);
+  object-fit: cover;
+  /* .58：封面仍是这首歌的图，玻璃底透出来，歌词不用跟实图抢。8px 只去硬边。 */
+  filter: blur(8px) saturate(1.2);
+  opacity: .58;
   pointer-events: none;
 }
 .veil {
   position: absolute; inset: 0; pointer-events: none;
   background:
     linear-gradient(180deg,
-      color-mix(in srgb, var(--bg) 58%, transparent) 0%,
-      color-mix(in srgb, var(--bg) 34%, transparent) 22%,
-      color-mix(in srgb, var(--bg) 34%, transparent) 78%,
-      color-mix(in srgb, var(--bg) 52%, transparent) 100%);
+      color-mix(in srgb, var(--bg) 46%, transparent) 0%,
+      color-mix(in srgb, var(--bg) 22%, transparent) 16%,
+      color-mix(in srgb, var(--bg) 22%, transparent) 84%,
+      color-mix(in srgb, var(--bg) 40%, transparent) 100%);
 }
 .stage.idle .veil,
 .stage.bare .veil {
@@ -382,6 +384,7 @@ function openStage(): void {
 .meta {
   position: absolute; top: var(--sp-4); left: var(--sp-4); right: var(--sp-4);
   min-width: 0; text-align: left;
+  text-shadow: 0 1px 14px color-mix(in srgb, var(--bg) 80%, transparent);
 }
 .meta b, .meta span {
   display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -404,6 +407,7 @@ function openStage(): void {
   margin: 0; overflow: hidden; overflow-wrap: break-word;
   font-size: var(--fs-lg); font-weight: var(--fw-med); line-height: 1.45;
   color: var(--ink-2); opacity: .72;
+  text-shadow: 0 1px 14px color-mix(in srgb, var(--bg) 80%, transparent);
   transition: color var(--dur-2) var(--ease), opacity var(--dur-2) var(--ease);
 }
 .line.prev { opacity: .55; }
