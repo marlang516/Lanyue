@@ -19,8 +19,11 @@
  * 行号二分全屏页和桌面歌词同步共用，不要在播放器里再写一份。
  *
  * 逐字状态用的是调用方已经算好的同一播放秒（含偏移），不是第二只钟。
- * 有逐字时间就沿用；一个词里有好几个字时，只在这个词自己的时长里均分。
- * 没有逐字时间时，把这一句的时长均分给拆开的字。标点贴在前一个字上。
+ * 光带也吃这一秒和这个字自己的起止，并提前 WORD_LEAD_SEC：时间戳到达时
+ * 这个字已经亮住，而不是等唱完才铺满。长音停得更亮，快词在自己的时长里
+ * 扫完。有逐字时间就沿用；一个词里有好几个字时，
+ * 只在这个词自己的时长里均分。没有逐字时间时，把这一句的时长均分给
+ * 拆开的字。标点贴在前一个字上。
  */
 
 /** 与 tokens.css 的 --dur-2（.32s）对齐；改一边必须改另一边。 */
@@ -263,8 +266,32 @@ export function projectPlayhead(anchor, reported, nowMs, rate, playing) {
   return { seconds: Math.max(0, Math.min(expected, lead)), anchor, seeked: false };
 }
 
-/** 词在自己的起点前这么久进入「在唱」，给弹入留出时间。 */
+/**
+ * 高亮比歌词时间戳早这么多。
+ * 媒体图里的声音比 audio.currentTime 大约早 30ms，只等到时间戳再亮，
+ * 人声已经出来了。行号和逐字都用这一段，不再另加延迟。
+ */
 export const WORD_LEAD_SEC = 0.15;
+
+/**
+ * 歌词时间轴上的播放秒（含用户偏移），还没加提前量。
+ * @param {number} playSeconds
+ * @param {number} [offsetMs]
+ * @returns {number}
+ */
+export function lyricPlaySeconds(playSeconds, offsetMs) {
+  return finite(playSeconds, 0) + (Number(offsetMs) || 0) / 1000;
+}
+
+/**
+ * 用来选当前句的秒。比播放秒早 WORD_LEAD_SEC，和逐字的提前量同一段。
+ * @param {number} playSeconds
+ * @param {number} [offsetMs]
+ * @returns {number}
+ */
+export function lyricDisplaySeconds(playSeconds, offsetMs) {
+  return lyricPlaySeconds(playSeconds, offsetMs) + WORD_LEAD_SEC;
+}
 
 /** 源没给时长、后面也没有下一词时，在唱态保持这么久再收成已唱。 */
 export const WORD_UNTIMED_SEC = 0.4;
@@ -506,4 +533,141 @@ export function resolveWordStates(words, seconds) {
     if (state === 'active') index = i;
   }
   return { index, states };
+}
+
+/** 短于等于这时长的字只做一次快扫，光几乎不加重。 */
+export const SWEEP_FAST_SEC = 0.18;
+
+/** 长于等于这时长的音，光带扫过后停在字上并继续变亮。 */
+export const SWEEP_HELD_SEC = 0.7;
+
+/** 长音用这么久把光带扫过整字，剩下的时间停住。 */
+export const SWEEP_CROSS_SEC = 0.36;
+
+/**
+ * @param {number} n
+ * @returns {number}
+ */
+function clamp01(n) {
+  if (n <= 0) return 0;
+  if (n >= 1) return 1;
+  return n;
+}
+
+/**
+ * 一个字在这一秒的光带。提前量里就开始扫，时间戳到达时这个字已经亮住。
+ * @param {number} dur
+ * @param {number} elapsed
+ * @param {'unreached'|'active'|'sung'} state
+ * @returns {{sweep:number, band:number, bloom:number, linger:boolean}}
+ */
+function glowAmounts(dur, elapsed, state) {
+  const fast = dur > 0 && dur <= SWEEP_FAST_SEC;
+  const held = dur >= SWEEP_HELD_SEC;
+  if (state === 'unreached' || elapsed < -WORD_LEAD_SEC) {
+    return { sweep: 0, band: 0, bloom: 0, linger: false };
+  }
+  if (state === 'sung') {
+    let bloom = 0.4;
+    if (held) bloom = 0.58;
+    else if (fast) bloom = 0.26;
+    return { sweep: 1, band: 0, bloom, linger: false };
+  }
+  // into = 0 在提前量起点，into = WORD_LEAD_SEC 在时间戳上。扫完正好赶上人声。
+  const into = elapsed + WORD_LEAD_SEC;
+  const attackLen = fast ? Math.min(WORD_LEAD_SEC, Math.max(0.04, dur)) : WORD_LEAD_SEC;
+  if (into < attackLen) {
+    const p = attackLen > 0 ? Math.max(0, into) / attackLen : 1;
+    return {
+      sweep: p,
+      band: p,
+      bloom: fast ? 0.46 : 0.62 + 0.18 * p,
+      linger: false,
+    };
+  }
+  const lingerP = clamp01(Math.max(0, elapsed) / Math.max(0.05, dur));
+  if (fast) return { sweep: 1, band: 1, bloom: 0.46, linger: false };
+  if (held) return { sweep: 1, band: 0.5, bloom: 0.8 + 0.2 * lingerP, linger: true };
+  return { sweep: 1, band: 0.5, bloom: 0.72 + 0.06 * lingerP, linger: true };
+}
+
+/**
+ * 光带扫到哪、有多亮。seconds 与 resolveWordStates 是同一播放秒。
+ * sweep 是已经照亮的比例，band 是亮带中心，linger 表示长音停在字上。
+ * @param {readonly {t:number, dur?:number}[] | null | undefined} words
+ * @param {number} seconds
+ * @returns {{
+ *   index: number,
+ *   states: ('unreached'|'active'|'sung')[],
+ *   sweep: number[],
+ *   band: number[],
+ *   bloom: number[],
+ *   linger: boolean[],
+ * }}
+ */
+export function resolveWordSweep(words, seconds) {
+  const base = resolveWordStates(words, seconds);
+  const n = base.states.length;
+  const sweep = new Array(n);
+  const band = new Array(n);
+  const bloom = new Array(n);
+  const linger = new Array(n);
+  const t = finite(seconds, 0);
+  const list = Array.isArray(words) ? words : [];
+  for (let i = 0; i < n; i++) {
+    const start = finite(list[i] && list[i].t, 0);
+    const dur = Math.max(0, wordActiveEnd(list, i) - start);
+    const glow = glowAmounts(dur, t - start, base.states[i]);
+    sweep[i] = glow.sweep;
+    band[i] = glow.band;
+    bloom[i] = glow.bloom;
+    linger[i] = glow.linger;
+  }
+  return { index: base.index, states: base.states, sweep, band, bloom, linger };
+}
+
+/**
+ * 把一整句缩进可用宽度。放得下就保持 1，避免无谓缩小。
+ * @param {number} neededPx
+ * @param {number} availablePx
+ * @returns {number}
+ */
+export function lineFitScale(neededPx, availablePx) {
+  const needed = Number(neededPx);
+  const available = Number(availablePx);
+  if (!(needed > 0) || !(available > 0)) return 1;
+  if (needed <= available) return 1;
+  return available / needed;
+}
+
+/**
+ * 从封面小样里挑一抹还能当光的颜色。
+ * 近黑、近白、近灰丢掉。没有可用样本就返回空串，调用方用强调色令牌。
+ * @param {ArrayLike<number> | null | undefined} rgba
+ * @returns {string}
+ */
+export function glowFromCoverPixels(rgba) {
+  if (!rgba || typeof rgba.length !== 'number') return '';
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  let w = 0;
+  for (let i = 0; i + 3 < rgba.length; i += 4) {
+    const pr = Number(rgba[i]);
+    const pg = Number(rgba[i + 1]);
+    const pb = Number(rgba[i + 2]);
+    const a = Number(rgba[i + 3]);
+    if (!(a >= 128)) continue;
+    const max = Math.max(pr, pg, pb);
+    const min = Math.min(pr, pg, pb);
+    if (max < 28 || min > 236) continue;
+    const sat = max - min;
+    if (sat < 18) continue;
+    r += pr * sat;
+    g += pg * sat;
+    b += pb * sat;
+    w += sat;
+  }
+  if (!(w > 0)) return '';
+  return `rgb(${Math.round(r / w)}, ${Math.round(g / w)}, ${Math.round(b / w)})`;
 }

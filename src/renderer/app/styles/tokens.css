@@ -186,6 +186,13 @@ button { font: inherit; color: inherit; }
   --dur-0: .08s;
   --ease-emph: cubic-bezier(.22, 1, .36, 1);
 
+  /* 全屏歌词光带。封面取样成功时组件覆盖 --lyric-glow / --lyric-hot。 */
+  --lyric-glow: var(--au-1);
+  --lyric-hot: var(--au-2);
+  --lyric-sweep: 0;
+  --lyric-band: 0;
+  --lyric-bloom: 0;
+
   /* z 层级补全（新外壳） */
   --z-rail: 30; --z-topbar: 35;
 }

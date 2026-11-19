@@ -8,7 +8,7 @@ import type { DiscoverSectionState, PlaylistSummary } from '../stores/types';
 import type { SongLike } from '../core/song';
 import { player, currentKey, playFromList, appendToQueue } from '../stores/player';
 import { lyrics } from '../stores/lyrics';
-import { activeLineIndex, projectPlayhead } from '../core/lyricMotion.js';
+import { activeLineIndex, lyricDisplaySeconds, projectPlayhead } from '../core/lyricMotion.js';
 import { downloadSongs } from '../stores/search';
 import { platformName } from '../core/format';
 import { toast } from '../core/toast';
@@ -66,7 +66,7 @@ function setLines(next: LyricWindow): void {
 }
 
 /**
- * 窄栏只显示三句：上一句淡、当前句强调、下一句淡。
+ * 窄栏只显示三句：上一句淡、当前句强调、下一句淡，每句保持一行。
  * 播放头与行号都走 lyricMotion，不另起歌词时钟，也不做逐字跳动。
  * 句子没变就不写响应式，避免每一帧重绘左侧列表。
  */
@@ -93,7 +93,7 @@ function publishLines(now: number): void {
     setLines({ prev: '', cur: '', next: '' });
     return;
   }
-  const seconds = projected.seconds + (Number(lyrics.offsetMs) || 0) / 1000;
+  const seconds = lyricDisplaySeconds(projected.seconds, lyrics.offsetMs);
   const idx = activeLineIndex(lyrics.items, seconds);
   const items = lyrics.items;
   const prev = idx > 0 ? (items[idx - 1]?.text ?? '') : '';
@@ -405,12 +405,14 @@ function openStage(): void {
   display: flex; flex-direction: column; justify-content: center; gap: var(--sp-3);
 }
 .line {
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
-  margin: 0; overflow: hidden; overflow-wrap: break-word;
+  display: block; min-width: 0; max-width: 100%;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  margin: 0;
   font-size: var(--fs-lg); font-weight: var(--fw-med); line-height: 1.45;
   color: var(--ink-2); opacity: .72;
   text-shadow: 0 1px 14px color-mix(in srgb, var(--bg) 80%, transparent);
-  transition: color var(--dur-2) var(--ease), opacity var(--dur-2) var(--ease);
+  /* 当前句跟播放时钟一起换。0.32s 的淡入会让这句在拍点之后才显出来。 */
+  transition: none;
 }
 .line.prev { opacity: .55; }
 .line.next { opacity: .68; }

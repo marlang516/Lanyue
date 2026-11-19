@@ -214,7 +214,7 @@ test('几百行歌词重复求帧仍便宜，不靠每帧重排', async () => {
   assert.ok(Date.now() - t0 < 500, `2000 帧耗时 ${Date.now() - t0}ms`);
 });
 
-test('接线：全屏歌词走这份判定，桌面同步不另写二分，逐字只在活动句上弹', () => {
+test('接线：全屏歌词走这份判定，桌面同步不另写二分，光带只跟同一播放秒', () => {
   assert.match(LYRICS_TS, /export \{ activeLineIndex \} from '\.\.\/core\/lyricMotion\.js'/);
   assert.match(LYRICS_TS, /linesFromLyricResult\(raw\)/);
   assert.match(LYRICS_TS, /words: \[\]/, '桌面歌词继续交空的 words，不把逐字时间送过去');
@@ -222,11 +222,18 @@ test('接线：全屏歌词走这份判定，桌面同步不另写二分，逐�
   assert.doesNotMatch(PLAYER_TS, /while \(lo <= hi\)/, '播放器里不能再复制一份行号二分');
   assert.match(PANE, /resolveLyricFrame/);
   assert.match(PANE, /projectPlayhead/);
-  assert.match(PANE, /resolveWordStates/);
+  assert.match(PANE, /resolveWordStates|resolveWordSweep/);
+  assert.match(PANE, /resolveWordSweep/);
+  assert.match(PANE, /lyricDisplaySeconds/);
+  assert.match(PANE, /lyricPlaySeconds/);
+  assert.match(PANE, /lineFitScale/);
+  assert.match(PANE, /glowFromCoverPixels/);
   assert.match(PANE, /displayWords/);
   assert.match(PANE, /projected\.seeked/);
   assert.match(PANE, /frame\.role === 'active'/);
   assert.match(PANE, /class="context"/);
+  assert.match(PANE, /seekWord/);
+  assert.doesNotMatch(PANE, /bounceAt/);
   const NOW = fs.readFileSync(path.join(ROOT, 'src/renderer/app/views/NowPlayingView.vue'), 'utf8');
   assert.doesNotMatch(NOW, /class="art"/, '全屏页不再留左侧封面栏');
   assert.doesNotMatch(NOW, /class="cover"/);
@@ -249,18 +256,36 @@ test('接线：全屏歌词走这份判定，桌面同步不另写二分，逐�
   const style = PANE.slice(PANE.lastIndexOf('<style'));
   const activeBlock = style.match(/\.word\.active[^{]*\{[^}]*\}/);
   assert.ok(activeBlock, '缺少 .word.active');
-  assert.doesNotMatch(activeBlock[0], /font-weight/, '逐字弹入不改字重');
-  assert.match(style, /@keyframes word-bounce/);
-  assert.match(style, /@keyframes word-breath/);
-  assert.match(style, /@keyframes afterglow/);
+  assert.doesNotMatch(activeBlock[0], /font-weight/, '光带不改字重，避免整列重排');
+  assert.doesNotMatch(style, /\.word[^{]*\{[^}]*font-weight/);
+  assert.doesNotMatch(style, /word-bounce|word-breath|afterglow/, '不再用逐字弹入');
+  assert.doesNotMatch(style, /\.word[^{]*\{[^}]*transform\s*:/);
   assert.match(style, /@keyframes dot-hop/);
-  assert.match(style, /\.word\.unreached\s*\{[^}]*opacity:\s*0/);
-  assert.match(style, /\.word\.sung\s*\{[^}]*opacity:\s*\.72/);
-  assert.match(style, /\.stage\.snap \.word\.active[\s\S]*?animation:\s*none/);
+  assert.match(style, /\.line\s*\{[^}]*white-space:\s*nowrap/, '当前句排成一行');
+  assert.match(style, /\.context\s*\{[^}]*white-space:\s*nowrap/);
+  assert.doesNotMatch(style, /16em/, '当前句不再收进 16em，否则大字号会拆成几个字一行');
+  assert.match(style, /--lyric-sweep/);
+  assert.match(style, /--lyric-bloom/);
+  assert.match(style, /--lyric-glow/);
+  const unreached = style.match(/\.word\.unreached[^{]*\{[^}]*\}/);
+  assert.ok(unreached, '未唱到的字也要留在句里');
+  assert.doesNotMatch(unreached[0], /opacity:\s*0/, '未唱到的字保持可见，不再整颗藏起来');
+  assert.match(style, /\.stage\.snap[\s\S]*?animation:\s*none/);
   assert.match(style, /var\(\s*--dur-2\s*\)/);
   assert.match(style, /var\(\s*--ease-emph\s*\)/);
   assert.doesNotMatch(style, /#[0-9a-fA-F]{3,8}/, '歌词样式不写死色值，随浅色/深色令牌走');
   assert.match(TOKENS, /--dur-2:\s*\.32s/);
+  assert.match(TOKENS, /--lyric-glow:/);
+  assert.match(TOKENS, /--lyric-hot:/);
+  const DISC = fs.readFileSync(path.join(ROOT, 'src/renderer/app/views/DiscoverView.vue'), 'utf8');
+  assert.match(DISC, /lyricDisplaySeconds/);
+  const discStyle = DISC.slice(DISC.lastIndexOf('<style'));
+  const discLine = discStyle.match(/\.line\s*\{[^}]*\}/);
+  assert.ok(discLine, '播放舞台歌词行');
+  assert.match(discLine[0], /white-space:\s*nowrap/, '舞台上的一句也排成一行');
+  assert.doesNotMatch(discLine[0], /line-clamp|overflow-wrap:\s*break-word/);
+  assert.doesNotMatch(discLine[0], /transition:\s*color\s+var\(\s*--dur-2/, '舞台当前句不能再淡 0.32s，否则会晚于拍点');
+  assert.match(style, /\.lift-enter-from\s*\{[^}]*opacity:\s*1/, '换句时当前句一开始就能读，不能先淡着进来');
   assert.match(
     fs.readFileSync(path.join(ROOT, 'src/renderer/app/core/lyricMotion.js'), 'utf8'),
     /LYRIC_HANDOFF_MS = 320/,
@@ -346,6 +371,104 @@ test('displayWords：单字沿用逐字时间，长词和句级 LRC 按字均分
   assert.strictEqual(tail[0].dur, 2);
   const unknown = displayWords({ t: 8, text: '尾' }, null, undefined);
   assert.ok(unknown[0].dur > 0);
+});
+
+test('resolveWordSweep：提前量里开始扫，时间戳上这个字已经亮住', async () => {
+  const { resolveWordSweep, resolveWordStates, WORD_LEAD_SEC } = await fresh();
+  const words = [
+    { t: 1, dur: 0.12, text: '快' },
+    { t: 1.12, dur: 0.4, text: '中' },
+    { t: 1.52, dur: 1.6, text: '长' },
+  ];
+  const before = resolveWordSweep(words, 0.5);
+  assert.deepStrictEqual(before.states, ['unreached', 'unreached', 'unreached']);
+  assert.deepStrictEqual(before.sweep, [0, 0, 0]);
+  assert.deepStrictEqual(before.bloom, [0, 0, 0]);
+  assert.strictEqual(before.index, resolveWordStates(words, 0.5).index);
+
+  const tooEarly = resolveWordSweep(words, 1 - WORD_LEAD_SEC - 0.02);
+  assert.strictEqual(tooEarly.bloom[0], 0, '提前量之前不亮');
+
+  const lead = resolveWordSweep(words, 0.9);
+  assert.strictEqual(lead.states[0], 'active');
+  assert.ok(lead.sweep[0] > 0.3 && lead.sweep[0] < 0.6, '提前量里光带已经在走');
+  assert.strictEqual(lead.linger[0], false);
+  assert.ok(lead.bloom[0] > 0 && lead.bloom[0] < 0.55);
+
+  const atVocal = resolveWordSweep(words, 1);
+  assert.strictEqual(atVocal.sweep[0], 1, '人声到这个字的时间戳时，字已经亮住');
+  assert.strictEqual(atVocal.linger[0], false, '快词不停留成大光');
+  assert.ok(atVocal.bloom[0] < 0.55);
+
+  const fastSung = resolveWordSweep(words, 1.12);
+  assert.strictEqual(fastSung.states[0], 'sung');
+  assert.ok(fastSung.bloom[0] > 0 && fastSung.bloom[0] < atVocal.bloom[0], '唱过留下更弱的余光');
+
+  const syllable = words[1];
+  const arriving = resolveWordSweep(words, syllable.t - 0.05);
+  assert.strictEqual(arriving.states[1], 'active');
+  assert.ok(arriving.sweep[1] > 0.5 && arriving.sweep[1] < 1, '时间戳之前光带已经扫过大半');
+  const onTime = resolveWordSweep(words, syllable.t);
+  assert.strictEqual(onTime.sweep[1], 1);
+  assert.strictEqual(onTime.linger[1], true, '人声到达时普通字已经停在亮态');
+  const mid = resolveWordSweep(words, syllable.t + 0.22);
+  assert.strictEqual(mid.states[1], 'active');
+  assert.strictEqual(mid.sweep[1], 1);
+  assert.ok(mid.bloom[1] > atVocal.bloom[0]);
+
+  const heldEarly = resolveWordSweep(words, 1.67);
+  const heldLate = resolveWordSweep(words, 2.72);
+  assert.strictEqual(heldEarly.states[2], 'active');
+  assert.strictEqual(heldEarly.sweep[2], 1, '长音在人声之后保持整字照亮');
+  assert.strictEqual(heldEarly.linger[2], true);
+  assert.ok(Math.abs(heldEarly.band[2] - 0.5) < 1e-9);
+  assert.strictEqual(heldLate.linger[2], true);
+  assert.ok(heldLate.bloom[2] > heldEarly.bloom[2], '长音越唱越亮');
+  assert.deepStrictEqual(resolveWordSweep(words, 2.72), heldLate, '同一秒结果稳定，没有第二只钟');
+
+  const heldSung = resolveWordSweep(words, 3.12);
+  assert.strictEqual(heldSung.states[2], 'sung');
+  assert.strictEqual(heldSung.linger[2], false);
+  assert.ok(heldSung.bloom[2] > fastSung.bloom[0]);
+  assert.ok(heldSung.bloom[2] < heldLate.bloom[2]);
+
+  assert.deepStrictEqual(resolveWordSweep([], 1), {
+    index: -1, states: [], sweep: [], band: [], bloom: [], linger: [],
+  });
+});
+
+test('lyricDisplaySeconds：当前句和逐字共用同一段提前量', async () => {
+  const { lyricPlaySeconds, lyricDisplaySeconds, WORD_LEAD_SEC, activeLineIndex } = await fresh();
+  assert.strictEqual(lyricPlaySeconds(10, 0), 10);
+  assert.strictEqual(lyricPlaySeconds(10, 500), 10.5);
+  assert.strictEqual(lyricDisplaySeconds(10, 0), 10 + WORD_LEAD_SEC);
+  assert.strictEqual(lyricDisplaySeconds(10, -200), 10 - 0.2 + WORD_LEAD_SEC);
+  const lines = [{ t: 2, text: '甲' }, { t: 5, text: '乙' }];
+  const play = 2 - WORD_LEAD_SEC;
+  assert.strictEqual(activeLineIndex(lines, play), -1, '播放秒还没到这句');
+  assert.strictEqual(activeLineIndex(lines, lyricDisplaySeconds(play, 0)), 0, '提前量到了就换当前句');
+});
+
+test('lineFitScale：一行放得下就不缩，放不下按宽度缩成一行', async () => {
+  const { lineFitScale } = await fresh();
+  assert.strictEqual(lineFitScale(100, 200), 1);
+  assert.strictEqual(lineFitScale(200, 100), 0.5);
+  assert.strictEqual(lineFitScale(0, 100), 1);
+  assert.strictEqual(lineFitScale(100, 0), 1);
+  assert.strictEqual(lineFitScale(Number.NaN, 40), 1);
+  assert.strictEqual(lineFitScale(40, Number.NaN), 1);
+});
+
+test('glowFromCoverPixels：封面里挑有色彩的点，灰白和读不到就交给强调色', async () => {
+  const { glowFromCoverPixels } = await fresh();
+  const red = new Uint8ClampedArray(8);
+  red.set([200, 20, 40, 255, 250, 250, 250, 255]);
+  assert.strictEqual(glowFromCoverPixels(red), 'rgb(200, 20, 40)');
+  assert.strictEqual(glowFromCoverPixels(new Uint8ClampedArray([250, 250, 250, 255])), '');
+  assert.strictEqual(glowFromCoverPixels(new Uint8ClampedArray([120, 120, 120, 255])), '');
+  assert.strictEqual(glowFromCoverPixels(new Uint8ClampedArray([10, 12, 8, 255])), '');
+  assert.strictEqual(glowFromCoverPixels(null), '');
+  assert.strictEqual(glowFromCoverPixels(undefined), '');
 });
 
 test('linesFromLyricResult / loadFor：酷狗与汽水保留逐字，纯 LRC 不造词', async () => {
