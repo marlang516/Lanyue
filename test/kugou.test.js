@@ -8,7 +8,7 @@
  * 网络链路（榜单接口 / 歌单广场）由 .preview/_probe-kugou-*.cjs 实测覆盖；
  * 这里只测**无需网络、但回归代价高**的部分：
  *   - 榜单名 → rankid 映射（服务端下发，写错就静默空榜）
- *   - 分页（酷狗单页固定 30，取 100 必须翻页；翻错会漏歌或死循环）
+ *   - 分页（mobileservice 单页最多 100；满页仍不够才翻页，短页必须停）
  *   - 封面 URL 规范化（http→https 是**硬约束**：渲染层 https 上下文会拦掉混合内容，
  *     表现为「封面全裂」而不是报错）
  *   - 字段映射（duration 单位是秒，标准形态是毫秒，差 1000 倍）
@@ -224,35 +224,44 @@ test('getTopList: limit <= 30 时只请求 1 页', async () => {
   assert.strictEqual(calls.length, 1);
 });
 
-test('getTopList: limit=100 时翻 4 页（单页恒 30，取 100 必须翻页）', async () => {
-  // 每页返回 30 条；酷狗单页固定 30，pagesize 参数不生效
-  resetStub(() => ({ songs: { list: Array.from({ length: 30 }, (_, i) => rankSong({ hash: `H${i}` })) } }));
+test('getTopList: 单页能装下 100 条时只请求 1 页，并带上 pagesize', async () => {
+  resetStub(() => ({ data: { info: Array.from({ length: 100 }, (_, i) => rankSong({ hash: `H${i}` })) } }));
   const out = await kugou.kugouGetTopList('飙升榜', 100);
   assert.strictEqual(out.length, 100, `应取到 100 条，实际 ${out.length}`);
-  assert.strictEqual(calls.length, 4, `应翻 4 页，实际 ${calls.length}`);
-  // 页码递增且不重复
-  assert.deepStrictEqual(
-    calls.map(c => /page=(\d+)/.exec(c.url)[1]),
-    ['1', '2', '3', '4'],
-  );
+  assert.strictEqual(calls.length, 1, `满页一次取完，实际 ${calls.length} 次`);
+  assert.match(calls[0].url, /pagesize=100/);
+  assert.match(calls[0].url, /mobileservice\.kugou\.com\/api\/v3\/rank\/song/);
 });
 
-test('getTopList: 翻页遇到空页立即停止（不空转到 pages 上限）', async () => {
+test('getTopList: 满页仍不够才翻下一页，短页立即停止', async () => {
   let n = 0;
   resetStub(() => {
     n += 1;
-    return { songs: { list: n === 1 ? Array.from({ length: 30 }, (_, i) => rankSong({ hash: `H${i}` })) : [] } };
+    const len = n === 1 ? 100 : 20;
+    return { data: { info: Array.from({ length: len }, (_, i) => rankSong({ hash: `P${n}H${i}` })) } };
   });
-  const out = await kugou.kugouGetTopList('飙升榜', 100);
-  assert.strictEqual(out.length, 30);
-  assert.strictEqual(calls.length, 2, '第 2 页为空后应停止，不应继续请求第 3/4 页');
+  const out = await kugou.kugouGetTopList('飙升榜', 150);
+  assert.strictEqual(out.length, 120);
+  assert.strictEqual(calls.length, 2, '第二页不足 pagesize 后应停止');
+  assert.deepStrictEqual(calls.map(c => /page=(\d+)/.exec(c.url)[1]), ['1', '2']);
 });
 
-test('getTopList: 结果被 slice 到 limit（翻页会超采）', async () => {
-  resetStub(() => ({ songs: { list: Array.from({ length: 30 }, (_, i) => rankSong({ hash: `H${i}` })) } }));
+test('getTopList: 翻页遇到空页立即停止', async () => {
+  let n = 0;
+  resetStub(() => {
+    n += 1;
+    return { data: { info: n === 1 ? Array.from({ length: 100 }, (_, i) => rankSong({ hash: `H${i}` })) : [] } };
+  });
+  const out = await kugou.kugouGetTopList('飙升榜', 250);
+  assert.strictEqual(out.length, 100);
+  assert.strictEqual(calls.length, 2);
+});
+
+test('getTopList: 结果被 slice 到 limit', async () => {
+  resetStub(() => ({ data: { info: Array.from({ length: 100 }, (_, i) => rankSong({ hash: `H${i}` })) } }));
   const out = await kugou.kugouGetTopList('飙升榜', 35);
   assert.strictEqual(out.length, 35);
-  assert.strictEqual(calls.length, 2);
+  assert.strictEqual(calls.length, 1);
 });
 
 test('getTopList: 响应结构不符（缺 songs.list）返回 [] 而不是抛错', async () => {
@@ -278,8 +287,16 @@ test('getTopList: limit 非法值被归一（0 / 负数 → 至少 1 条）', as
   assert.strictEqual((await kugou.kugouGetTopList('飙升榜', -5)).length, 1);
 });
 
-test('KUGOU_RANK_PAGE_SIZE 与实测单页条数一致（写错会导致翻页数算错）', () => {
-  assert.strictEqual(KUGOU_RANK_PAGE_SIZE, 30);
+test('KUGOU_RANK_PAGE_SIZE 与实测单页上限一致（写错会导致翻页数算错）', () => {
+  assert.strictEqual(KUGOU_RANK_PAGE_SIZE, 100);
+});
+
+test('kugouRankItemToSong: 新榜单接口用 authors[].author_name 当歌手', () => {
+  const s = kugouRankItemToSong(rankSong({
+    h5_author_name: '',
+    authors: [{ author_name: '周杰伦' }, { author_name: '温岚' }],
+  }));
+  assert.strictEqual(s.artist, '周杰伦 / 温岚');
 });
 
 // ══════════════════════════════════════════════════════════
@@ -290,6 +307,16 @@ test('KUGOU_RANK_PAGE_SIZE 与实测单页条数一致（写错会导致翻页�
 function plistResp(info) {
   return { plist: { list: { total: 600, has_next: true, info } } };
 }
+
+test('getRecommendPlaylists: 新接口 data.info 与旧接口 plist.list.info 都能解析', async () => {
+  resetStub(() => ({
+    data: { info: [{ specialid: 7, specialname: '抖音热歌', imgurl: 'http://imge.kugou.com/soft/collection/{size}/a.jpg', playcount: 11 }] },
+  }));
+  const live = await kugou.kugouGetRecommendPlaylists(10);
+  assert.strictEqual(live[0].id, '7');
+  assert.strictEqual(live[0].name, '抖音热歌');
+  assert.ok(calls[0].url.includes('mobileservice.kugou.com/api/v3/category/special'));
+});
 
 test('getRecommendPlaylists: 按实测结构解析 plist.list.info（不是嵌套的 list[].list.info）', async () => {
   resetStub(() => plistResp([
@@ -428,8 +455,8 @@ test('registry 从 manifest 自动推导出 topList / recommendPlaylists 能力�
 
 test('gateway.getTopList 能真正取到酷狗榜单数据（经能力位分派，UI 的实际调用路径）', async () => {
   resetStub((url) => {
-    if (url.includes('/rank/info/')) {
-      return { songs: { list: [rankSong()] } };
+    if (url.includes('/api/v3/rank/song')) {
+      return { data: { info: [rankSong()] } };
     }
     return {};
   });

@@ -7,6 +7,7 @@
 import { reactive, computed } from 'vue';
 import type { ComputedRef } from 'vue';
 import { call, callSafe } from '../core/bridge';
+import { platformName } from '../core/format';
 import { normalizeSongs } from '../core/song';
 import type {
   DiscoverPlatformGroup,
@@ -89,8 +90,24 @@ export const discover = reactive<DiscoverState>({
   sourceHealth: null,
 });
 
+/**
+ * 发现页平台条：只放有榜单或歌单分区的音源。
+ * 酷我 / 咪咕 / 5sing / 汽水只有搜索，不出现在这里；搜索和播放仍走各自页面。
+ * 注册表已到时再滤掉未注册的 id，顺序跟 DISCOVER_SECTIONS。
+ */
+export const discoverPlatformIds: ComputedRef<readonly string[]> = computed(() => {
+  const charts = DISCOVER_SECTIONS.map((p) => p.plat);
+  const live = discover.platforms
+    .map((p) => (p && typeof p.id === 'string' ? p.id.trim() : ''))
+    .filter((id) => id.length > 0);
+  if (!live.length) return charts;
+  const known = new Set(live);
+  return charts.filter((id) => known.has(id));
+});
+
 export const activePlatformMeta: ComputedRef<DiscoverPlatformGroup> = computed(
-  () => DISCOVER_SECTIONS.find((p) => p.plat === discover.activePlat) || DISCOVER_SECTIONS[0],
+  () => DISCOVER_SECTIONS.find((p) => p.plat === discover.activePlat)
+    || { plat: discover.activePlat, sections: [] },
 );
 
 export function platformSections(plat: string): readonly DiscoverSectionMeta[] {
@@ -192,5 +209,5 @@ export const platformNameMap: ComputedRef<Record<string, string>> = computed(() 
 });
 
 export function platformLabel(id: string): string {
-  return platformNameMap.value[id] || id;
+  return platformNameMap.value[id] || platformName(id);
 }

@@ -368,7 +368,8 @@ async function kugouGetSingerAlbums(singerId, pageNo = 1, pageSize = 20) {
  * 与 netease 的 NETEASE_TOP_MAP 同一约定：榜单是**产品配置**（投放哪几个榜
  * 是产品决定），不是平台能力，故不能由 registry 推导，只能显式声明。
  *
- * rankid 取自 `https://m.kugou.com/rank/list&json=true`（实测返回 55 个榜单），
+ * rankid 取自 mobileservice 榜单清单（2026-11-18 复测仍是这四个 id，
+ * 且榜名仍是飙升榜 / 网络热歌榜 / 短视频热歌榜 / TOP500）。
  * 这里只登记要上首页的四个，与 netease 的「飙升/热歌/新歌/原创」四榜对齐。
  */
 const KUGOU_TOP_MAP = {
@@ -379,17 +380,25 @@ const KUGOU_TOP_MAP = {
 };
 
 /**
- * 榜单分页固定 30 条/页 —— 接口的 pagesize 由服务端决定（实测恒为 30），
- * 传 pagesize 参数不生效。故「取 100 条」需要分页请求，见 kugouGetTopList。
+ * mobileservice 榜单接口认 pagesize（2026-11-18 实测 pagesize=100 返回 100 条）。
+ * 旧的 m.kugou.com/rank/info 单页写死 30 且现在整页被防爬壳替换，不再使用。
  */
-const KUGOU_RANK_PAGE_SIZE = 30;
+const KUGOU_RANK_PAGE_SIZE = 100;
+
+/** 榜单歌曲列表。新接口在 data.info，旧桩与旧响应在 songs.list。 */
+function kugouRankSongList(result) {
+  if (Array.isArray(result?.data?.info)) return result.data.info;
+  if (Array.isArray(result?.songs?.list)) return result.songs.list;
+  return [];
+}
 
 /**
  * 把榜单接口的歌曲条目转成标准歌曲对象。
  *
- * 字段来源（实测 m.kugou.com/rank/info）：
+ * 字段来源（2026-11-18 实测 mobileservice /api/v3/rank/song，
+ * 旧 m.kugou.com/rank/info 的字段仍兼容）：
  *   - songname            「甲乙丙丁 (你我怎么两清)」——标题
- *   - h5_author_name      「李佳薇」——歌手（单独字段，无需从 filename 切分）
+ *   - authors[].author_name / h5_author_name —— 歌手
  *   - hash/sqhash/320hash 三种音质的 hash，直接喂 encodeKugouId 让下载侧择优
  *   - album_sizable_cover 形如 http://imge.kugou.com/stdmusic/{size}/xxx.jpg
  *   - duration            单位是**秒**（标准图谱里 duration 是毫秒，此处必须 ×1000）
@@ -408,8 +417,12 @@ function kugouRankItemToSong(s) {
   const title = s.songname || s.filename || '';
   if (!title) return null;
 
-  // 歌手优先取 h5_author_name；缺失时从 filename 的 "歌手 - 歌名" 里切
+  // 歌手：旧接口的 h5_author_name，新接口的 authors[].author_name，
+  // 都没有时再从 filename 的 "歌手 - 歌名" 里切。
   let artist = s.h5_author_name || '';
+  if (!artist && Array.isArray(s.authors)) {
+    artist = s.authors.map((a) => a && a.author_name).filter(Boolean).join(' / ');
+  }
   if (!artist && s.filename && String(s.filename).includes(' - ')) {
     artist = String(s.filename).split(' - ')[0];
   }
@@ -441,7 +454,7 @@ function kugouNormalizeCover(url, size = 240) {
  * 排行榜曲目。
  *
  * @param {string|number} name - 榜单名（见 KUGOU_TOP_MAP）或直接给 rankid
- * @param {number} limit - 期望条数；酷狗单页固定 30，超出则翻页拉取
+ * @param {number} limit - 期望条数；单页最多 KUGOU_RANK_PAGE_SIZE，超出再翻页
  * @returns {Promise<Array>} 标准歌曲对象数组；失败返回 []
  */
 async function kugouGetTopList(name, limit = 30) {
@@ -449,22 +462,27 @@ async function kugouGetTopList(name, limit = 30) {
   if (!rankId) return [];
 
   try {
-    const want = Math.max(1, limit);
+    const want = Math.max(1, Number(limit) || 1);
     const pages = Math.ceil(want / KUGOU_RANK_PAGE_SIZE);
     const out = [];
 
-    // 串行翻页：酷狗对同域并发较敏感，且首页一次只要 30 条（1 页），
-    // 多页只发生在「查看完整榜单」弹窗里，慢一点可接受。
+    // m.kugou.com/rank/info 自 2026-11 起只回防爬壳（__Tpl=outsidetpl.html，
+    // 没有 songs），首页四个榜因此全部变成 0 条。mobileservice 的 v3 榜单
+    // 不需要签名，字段与旧映射兼容。
     for (let page = 1; page <= pages; page++) {
-      const url = `https://m.kugou.com/rank/info/?rankid=${encodeURIComponent(rankId)}&page=${encodeURIComponent(page)}&json=true`;
-      const result = await request(url, { timeout: 10000 });
-      const list = result?.songs?.list || [];
-      if (!list.length) break; // 翻到底了
+      const url = `https://mobileservice.kugou.com/api/v3/rank/song?rankid=${encodeURIComponent(rankId)}&page=${encodeURIComponent(page)}&pagesize=${KUGOU_RANK_PAGE_SIZE}`;
+      const result = await request(url, {
+        timeout: 10000,
+        headers: { Referer: 'https://m.kugou.com/' },
+      });
+      const list = kugouRankSongList(result);
+      if (!list.length) break;
       for (const raw of list) {
         const song = kugouRankItemToSong(raw);
         if (song) out.push(song);
+        if (out.length >= want) break;
       }
-      if (out.length >= want) break;
+      if (out.length >= want || list.length < KUGOU_RANK_PAGE_SIZE) break;
     }
 
     return out.slice(0, want);
@@ -483,16 +501,29 @@ async function kugouGetTopList(name, limit = 30) {
  *
  * @returns {Promise<Array<{id:string,name:string,cover:string}>>}
  */
+function flattenRankNodes(nodes, out = []) {
+  for (const node of nodes || []) {
+    if (!node || typeof node !== 'object') continue;
+    out.push(node);
+    if (Array.isArray(node.children) && node.children.length) flattenRankNodes(node.children, out);
+  }
+  return out;
+}
+
 async function kugouGetRankList() {
   try {
-    const result = await request('https://m.kugou.com/rank/list&json=true', { timeout: 10000 });
-    const list = result?.rank?.list || [];
+    // 与榜单曲目同一主机。旧 m.kugou.com/rank/list 现在也是防爬壳。
+    const result = await request('https://mobileservice.kugou.com/api/v3/rank/list', {
+      timeout: 10000,
+      headers: { Referer: 'https://m.kugou.com/' },
+    });
+    const list = flattenRankNodes(result?.data?.info || result?.rank?.list || []);
     return list.map(r => ({
-      id: String(r.rankid || ''),
+      id: String(r.rankid || r.id || ''),
       name: r.rankname || '',
       cover: kugouNormalizeCover(r.img_9 || r.banner_9 || ''),
       source: 'kugou',
-    })).filter(r => r.id && r.name);
+    })).filter(r => r.id && r.name && r.id !== '0');
   } catch (e) {
     logger.warn('[kugou] getRankList 失败:', e.message || e);
     return [];
@@ -503,14 +534,11 @@ async function kugouGetRankList() {
  * 推荐歌单。
  *
  * 酷狗**没有**「个性化推荐歌单」这类接口（不同于 netease 的 personalized /
- * QQ 的 recommend）。可用的是歌单广场：
- *   https://m.kugou.com/plist/index&json=true
- * 返回官方精选歌单（实测 total=600，每页 30，带 has_next 可供翻页），
- * 语义上最接近「推荐歌单」。
- *
- * 响应结构（实测，与初版猜测的嵌套完全不同 —— 故此处按真实结构解析）：
- *   { plist: { list: { total, has_next, info: [ 歌单, ... ] } } }
- *                          ^^^^ info 是**直接数组**，不是 list[].list.info
+ * QQ 的 recommend）。可用的是歌单广场。
+ * 2026-11-18：m.kugou.com/plist/index 与榜单一样只回防爬壳。
+ * 改走 mobileservice 分类歌单（实测 total=600，字段仍是 specialid / specialname / imgurl）：
+ *   https://mobileservice.kugou.com/api/v3/category/special
+ * 旧响应 `{ plist.list.info }` 仍兼容，避免打桩测试和历史样本失效。
  *
  * 歌单条目字段（实测）：
  *   specialid      数字 ID（下载侧要的）
@@ -526,8 +554,12 @@ async function kugouGetRankList() {
  */
 async function kugouGetRecommendPlaylists(limit = 30) {
   try {
-    const result = await request('https://m.kugou.com/plist/index&json=true', { timeout: 10000 });
-    const info = result?.plist?.list?.info || [];
+    const size = Math.max(1, Number(limit) || 30);
+    const result = await request(
+      `https://mobileservice.kugou.com/api/v3/category/special?page=1&pagesize=${encodeURIComponent(size)}`,
+      { timeout: 10000, headers: { Referer: 'https://m.kugou.com/' } },
+    );
+    const info = result?.data?.info || result?.plist?.list?.info || [];
     return info
       .filter(p => p && (p.specialid || p.global_specialid))
       .map(p => ({
