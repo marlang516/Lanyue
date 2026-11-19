@@ -1,5 +1,9 @@
+// @ts-nocheck
 /**
  * playback/crossfade.js — 交叉淡入淡出编排层（零 DOM 依赖）
+ *
+ * 类型在 crossfade.d.ts。本文件保持零 DOM、由 node:test 覆盖；
+ * 生产播放器从这里引用时不能把整份旧 JS 拖进 vue-tsc 的 strict 检查。
  *
  * 它解决什么
  * ----------
@@ -152,6 +156,135 @@ export function planCrossfade({ fadeOutMs, fadeInMs, preloadOk = true, enabled =
     fadeOutMs: fadeOut,
     fadeInMs: fadeIn,
   };
+}
+
+/**
+ * 与 player/fade.js 的 FADE_STEPS 同一张表。
+ *
+ * 不从 fade.js 引入：那个文件在浏览器里会去接线 #audioPlayer。
+ * 数值是否漂移由 playback-crossfade 测试钉住，不在这里复制第二套逻辑。
+ */
+export const CROSSFADE_STEPS = Object.freeze([0, 500, 1000, 2000]);
+
+/** prefs 键。渲染层读写、主进程白名单都用这一份字面量。 */
+export const CROSSFADE_PREF_KEY = 'crossfadeMs';
+
+/** 与 fadeStageLabel 同形：关 / 0.5s / 1s / 2s */
+export function crossfadeStepLabel(ms) {
+  const n = +ms;
+  return n ? (n / 1000) + 's' : '关';
+}
+
+/**
+ * 只接受档位表上的值。脏值当「关」，避免一份坏偏好把交叉拉成任意时长。
+ * @param {unknown} value
+ * @returns {number}
+ */
+export function normalizeCrossfadeMs(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return CROSSFADE_STEPS[0];
+  return CROSSFADE_STEPS.indexOf(n) >= 0 ? n : CROSSFADE_STEPS[0];
+}
+
+/**
+ * 自动连播的启动窗口，单位毫秒。
+ *
+ * max 是设定的交叉时长：还没走进这段尾部就先别开。
+ * min 是「再短就硬切」的地板。窗口要比 timeupdate（大约 250ms）宽，
+ * 否则自动连播会稳定地错过交叉、掉回 ended 硬切。
+ *
+ * @param {number} fadeMs
+ * @returns {{ minRemainingMs: number, maxRemainingMs: number }}
+ */
+export function crossfadeTailBounds(fadeMs) {
+  const fade = normalizeCrossfadeMs(fadeMs);
+  if (!(fade > 0)) return { minRemainingMs: Infinity, maxRemainingMs: -1 };
+  const slack = Math.min(fade * 0.6, Math.max(320, fade * 0.3));
+  return {
+    minRemainingMs: Math.max(80, fade - slack),
+    maxRemainingMs: fade,
+  };
+}
+
+function finiteRemaining(remainingMs) {
+  // null / undefined 是「还不知道」，不是 0。Number(null) === 0 会把
+  // 没拿到时长的手动切歌误判成尾部太短。
+  if (remainingMs == null || remainingMs === '') return null;
+  const n = Number(remainingMs);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, n);
+}
+
+function hardCut(reason, fadeOutMs = 0, fadeInMs = 0) {
+  return { mode: 'hardCut', durationMs: 0, midpointMs: 0, fadeOutMs, fadeInMs, reason };
+}
+
+/**
+ * 生产切歌要不要重叠交叉。
+ *
+ * mode 'none' 表示做重叠；'hardCut' 表示沿用今天的立刻切换。
+ * 编排层不管随机、单曲循环和剩余时长 —— 那些是播放器才知道的事，
+ * 集中在这里，避免 stores/player.ts 里再长出一套判据。
+ *
+ * @param {object} [opts]
+ * @param {number} [opts.fadeMs]
+ * @param {boolean} [opts.enabled]
+ * @param {boolean} [opts.preloadOk] 下一首是否已经在备用元素上
+ * @param {number|null} [opts.remainingMs] 当前曲剩余毫秒；未知传 null
+ * @param {boolean} [opts.sameStream] 单曲循环重播同一条流
+ * @param {boolean} [opts.predictable] 随机模式猜不到下一首，传 false
+ * @param {'manual'|'auto'} [opts.trigger]
+ * @returns {{ mode: 'none'|'hardCut', durationMs: number, midpointMs: number, fadeOutMs: number, fadeInMs: number, reason: string }}
+ */
+export function decideCrossfade({
+  fadeMs = 0,
+  enabled = true,
+  preloadOk = false,
+  remainingMs = null,
+  sameStream = false,
+  predictable = true,
+  trigger = 'manual',
+} = {}) {
+  const fade = enabled ? normalizeCrossfadeMs(fadeMs) : 0;
+  if (!enabled || fade <= 0) return hardCut('disabled');
+  if (sameStream) return hardCut('same-stream');
+  if (!predictable) return hardCut('unpredictable');
+  if (!preloadOk) return hardCut('preload', fade, fade);
+
+  const remaining = finiteRemaining(remainingMs);
+  const bounds = crossfadeTailBounds(fade);
+  if (trigger === 'auto') {
+    if (remaining == null || remaining < bounds.minRemainingMs || remaining > bounds.maxRemainingMs) {
+      return hardCut('remaining');
+    }
+  } else if (remaining != null && remaining < bounds.minRemainingMs) {
+    // 手动切歌不要求已经走到尾部，但剩下的时间必须盖得住交叉，
+    // 否则出走的元素会先 ended，进来的歌还在半音量。
+    return hardCut('remaining');
+  }
+
+  return {
+    mode: 'none',
+    durationMs: fade,
+    midpointMs: fade / 2,
+    fadeOutMs: fade,
+    fadeInMs: fade,
+    reason: 'ok',
+  };
+}
+
+/**
+ * 元素实际音量。交叉层只产增益，写 audio.volume 的那一处用这个合成。
+ * @param {number} userVolume 用户音量 0..1
+ * @param {number} gain 该实例的交叉增益 0..1
+ * @returns {number}
+ */
+export function audibleVolume(userVolume, gain) {
+  const u = Number(userVolume);
+  const g = Number(gain);
+  const uv = Number.isFinite(u) ? Math.min(1, Math.max(0, u)) : 0;
+  const gv = Number.isFinite(g) ? Math.min(1, Math.max(0, g)) : 0;
+  return uv * gv;
 }
 
 /**

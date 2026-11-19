@@ -1,10 +1,10 @@
 # P0 · 交叉淡入淡出（Crossfade）设计与实现记录
 
-> 状态：**基础设施已落地**（编排层 + 实例池 + 引擎多实例支持），**接线待前置条件满足**
+> 状态：**生产路径已接线**（Vue `stores/player.ts`）。编排层仍是本文件描述的 `playback/crossfade.js`。
+> 旧引擎 `engine.js` 的 `crossfadeTo` **仍是占位**，不要为了交叉去把播放迁回引擎。
 > 依据：对 4 个 GitHub 项目（lx-music-desktop / pear-desktop / spotube / YesPlayMusic）
-> 源码的研读，以及 Lanyue v1.0.35 实际代码的核实。
-> 本文档区分「已实现」与「待接线」——**不要把待接线当成已完成**。
-> ⚠️ 关键前置条件见第 3.0 节：**引擎尚未接入生产播放路径**，现在接线不会生效。
+> 源码的研读，以及 Lanyue v1.0.35 实际代码的核实。后文第 3.0 节的「不要往 `player.js` 接线」
+> 针对的是当时的旧播放器；生产界面改成 Vue 之后，交叉接在三元素池上，不改这条历史结论。
 
 ---
 
@@ -118,9 +118,14 @@ function applyVolumeTo(instanceId) {
 
 ---
 
-## 三、待接线的部分（未完成）
+## 三、引擎那条接线（历史记录，生产交叉不走这里）
 
-### 3.0 ⚠️ 前置条件未满足 —— 现在接线不会生效
+生产交叉已经接在 Vue `src/renderer/app/stores/player.ts`：三元素池负责重叠，
+`decideCrossfade` 决定何时退回硬切，prefs 键是 `crossfadeMs`。
+下面几节记录的是「不要把交叉塞进尚未迁完的旧引擎」——这条仍然成立。
+`engine.crossfadeTo` 继续返回 null。
+
+### 3.0 ⚠️ 旧播放器 / 旧引擎：接线不会生效
 
 **`docs/architecture/PLAYBACK-ENGINE.md` 明确记载：引擎是「旁路建好的缝」，
 尚未接入生产链路，阶段 3 才迁移 11 个调用方。**

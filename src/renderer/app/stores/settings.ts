@@ -8,7 +8,7 @@ import { getPref, setPref } from '../core/prefs';
 import { toast, errText } from '../core/toast';
 import { confirmDialog } from '../core/dialog';
 import { ui, applyTheme, setLanguage as setUiLanguage } from './ui';
-import { setQuality, setVolume } from './player';
+import { setCrossfadeMs, setQuality, setVolume } from './player';
 import { lyrics, setOffset } from './lyrics';
 import type {
   DownloadTemplate,
@@ -129,6 +129,11 @@ export async function changeVolume(v: number | string): Promise<void> {
 export async function changeRate(v: number | string): Promise<void> {
   const { setRate } = await import('./player');
   setRate(v);
+}
+
+/** 无缝交叉档位。只接受播放器收进来的那几档，脏值会在那边被当成关。 */
+export function changeCrossfade(ms: number): void {
+  setCrossfadeMs(ms);
 }
 
 export async function changeLyricOffset(ms: number): Promise<void> {
