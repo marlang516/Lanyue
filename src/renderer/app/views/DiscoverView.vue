@@ -4,34 +4,18 @@ import {
   discover, discoverPlatformIds, initDiscover, showPlatform, showSection,
   activeSection, sectionState, platformSections, platformLabel, reloadActive,
 } from '../stores/discover';
-import type { DiscoverSectionState, PlaylistSummary } from '../stores/types';
-import type { SongLike } from '../core/song';
-import { player, currentKey, playFromList, appendToQueue } from '../stores/player';
+import type { DiscoverSectionState } from '../stores/types';
+import { player, currentKey, playFromList } from '../stores/player';
 import { lyrics } from '../stores/lyrics';
 import { activeLineIndex, lyricDisplaySeconds, projectPlayhead } from '../core/lyricMotion.js';
-import { downloadSongs } from '../stores/search';
 import { platformName } from '../core/format';
-import { toast } from '../core/toast';
-import SongTable from '../components/data/SongTable.vue';
-import PlaylistCard from '../components/data/PlaylistCard.vue';
-import PlaylistPeek from '../components/data/PlaylistPeek.vue';
+import DiscoverRankList from '../components/data/DiscoverRankList.vue';
 import Icon from '../components/common/Icon.vue';
-
-/** PlaylistCard 的 open 事件载荷（卡片组件内的行形状，字段全可选） */
-interface PlaylistCardRow {
-  name?: string;
-  source?: string;
-  cover?: string;
-  playCount?: number;
-  [key: string]: unknown;
-}
 
 const sec = computed(() => activeSection());
 const st = computed<DiscoverSectionState>(() => (sec.value
   ? sectionState(sec.value.sec)
   : { data: [], loading: false, error: '', loaded: false }));
-
-const peek = ref<{ open: boolean; playlist: PlaylistSummary | null }>({ open: false, playlist: null });
 
 interface LyricWindow {
   prev: string;
@@ -130,33 +114,6 @@ function onPlay(i: number) {
   playFromList(st.value.data, i);
 }
 
-function onQueue(song: SongLike) {
-  const n = appendToQueue([song]);
-  toast.success(`已加入队列 ${n} 首`);
-}
-
-async function onDownload(song: SongLike) {
-  await downloadSongs([song]);
-}
-
-/** 卡片事件载荷 → 歌单摘要（id/source/name 归一到字符串，其余字段原样透传） */
-function toPlaylistSummary(p: PlaylistCardRow): PlaylistSummary {
-  return {
-    ...p,
-    id: String(p.id ?? ''),
-    source: String(p.source ?? ''),
-    name: String(p.name ?? ''),
-  };
-}
-
-function openPlaylist(p: PlaylistCardRow) {
-  peek.value = { open: true, playlist: toPlaylistSummary(p) };
-}
-
-function closePeek() {
-  peek.value = { ...peek.value, open: false };
-}
-
 /** 封面加载失败时摘掉底图，舞台退回极光空底，不再补一块硬封面。 */
 function dropBrokenImg(): void {
   coverGone.value = true;
@@ -201,14 +158,26 @@ function openStage(): void {
         <header class="sec-head">
           <div class="sec-title">
             <h2>{{ sec ? sec.title : '推荐' }}</h2>
-            <p>{{ platformName(discover.activePlat) }} · {{ st.data.length }} 项</p>
+            <p>{{ platformName(discover.activePlat) }} · {{ st.data.length }} 首</p>
           </div>
-          <span v-if="sec && sec.kind === 'list' && st.data.length" class="ly-tag ly-tag-accent">前 {{ Math.min(st.data.length, 20) }} 首</span>
+          <span v-if="!st.loading && st.data.length" class="ly-tag ly-tag-accent">前 {{ st.data.length }} 首</span>
         </header>
 
         <div class="sec-body">
-          <div v-if="st.loading" class="grid skel">
-            <div v-for="n in 10" :key="n" class="ly-skeleton" style="aspect-ratio: 1 / 1"></div>
+          <div v-if="st.loading" class="rank-skel" aria-hidden="true">
+            <div class="hero-skel">
+              <div class="ly-skeleton cov"></div>
+              <div class="lines">
+                <div class="ly-skeleton"></div>
+                <div class="ly-skeleton"></div>
+                <div class="ly-skeleton"></div>
+              </div>
+            </div>
+            <div v-for="n in 7" :key="n" class="row-skel">
+              <div class="ly-skeleton no"></div>
+              <div class="ly-skeleton art"></div>
+              <div class="ly-skeleton tx"></div>
+            </div>
           </div>
 
           <div v-else-if="st.error" class="ly-empty">
@@ -217,16 +186,11 @@ function openStage(): void {
             <button class="ly-btn ly-btn-sm" @click="reloadActive">重试</button>
           </div>
 
-          <div v-else-if="sec && sec.kind === 'grid'" class="grid">
-            <PlaylistCard
-              v-for="p in st.data" :key="p.source + '-' + p.id"
-              :playlist="p" @open="openPlaylist"
-            />
-          </div>
-
-          <SongTable
-            v-else :songs="st.data" :active-key="currentKey"
-            :show-source="true" @play="onPlay" @queue="onQueue" @download="onDownload"
+          <DiscoverRankList
+            v-else
+            :songs="st.data"
+            :active-key="currentKey"
+            @play="onPlay"
           />
         </div>
       </section>
@@ -282,8 +246,6 @@ function openStage(): void {
         </div>
       </aside>
     </div>
-
-    <PlaylistPeek :open="peek.open" :playlist="peek.playlist" @close="closePeek" />
   </div>
 </template>
 
@@ -339,9 +301,24 @@ function openStage(): void {
 .sec-title p { font-size: var(--fs-xs); color: var(--ink-3); }
 
 .sec-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: var(--sp-4); padding-bottom: var(--sp-3); }
-.skel { gap: var(--sp-4); }
-.skel > div { border-radius: var(--r-md); }
+.rank-skel { display: flex; flex-direction: column; gap: var(--sp-3); padding-bottom: var(--sp-3); }
+.rank-skel .ly-skeleton { display: block; }
+.hero-skel {
+  display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: var(--sp-4); align-items: center;
+  padding: var(--sp-3); border-radius: 22px; border: 1px solid var(--stroke);
+}
+.hero-skel .cov { width: 132px; height: 132px; border-radius: 18px; }
+.hero-skel .lines { display: flex; flex-direction: column; gap: var(--sp-2); }
+.hero-skel .lines .ly-skeleton { height: 14px; border-radius: var(--r-full); width: 42%; }
+.hero-skel .lines .ly-skeleton:nth-child(2) { width: 68%; height: 26px; }
+.hero-skel .lines .ly-skeleton:nth-child(3) { width: 36%; }
+.row-skel {
+  display: grid; grid-template-columns: 36px 40px minmax(0, 1fr); gap: 10px; align-items: center;
+  height: 54px; padding: 0 8px;
+}
+.row-skel .no { width: 22px; height: 14px; border-radius: var(--r-full); justify-self: center; }
+.row-skel .art { width: 40px; height: 40px; border-radius: 10px; }
+.row-skel .tx { height: 14px; border-radius: var(--r-full); width: 46%; }
 
 /* ── 侧栏：当前歌曲封面半透明铺满整列，歌词是主体；歌名贴在上沿 ── */
 .side { min-height: 0; min-width: 0; display: flex; flex-direction: column; }
@@ -443,7 +420,7 @@ function openStage(): void {
   box-shadow: inset 0 0 0 1px var(--accent-line);
 }
 
-/* ── 歌单卡片 hover 升起 ── */
+/* ── 卡片 hover 升起 ── */
 .ly-card { transition: transform var(--dur-1) var(--ease), box-shadow var(--dur-1) var(--ease); }
 .ly-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-pop); }
 </style>

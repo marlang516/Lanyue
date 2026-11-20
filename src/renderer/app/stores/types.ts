@@ -24,11 +24,16 @@ export type SourceHealthMap = Readonly<Record<string, unknown>>;
 
 export type DiscoverSectionKind = 'list' | 'grid';
 
+/** 分区原始数据不是歌曲时，先展开再进列表 */
+export type DiscoverSectionExpand = 'playlist' | 'singer';
+
 /** 分区展示配置（界面结构，不是业务数据） */
 export interface DiscoverSectionMeta {
   sec: string;
   title: string;
   kind: DiscoverSectionKind;
+  /** 歌单 / 歌手分区要先展开成歌曲；缺省表示接口直接返回歌曲 */
+  expand?: DiscoverSectionExpand;
   showSource?: boolean;
 }
 
@@ -48,12 +53,12 @@ export interface PlaylistSummary {
   [key: string]: unknown;
 }
 
-/** 分区数据：list 区是歌曲，grid 区是歌单摘要 */
-export type DiscoverSectionItem = Song | PlaylistSummary;
+/** 分区数据：发现页一律是歌曲。歌单和歌手在写入状态前已经展开。 */
+export type DiscoverSectionItem = Song;
 
 /** 单个分区的懒加载状态 */
 export interface DiscoverSectionState {
-  data: DiscoverSectionItem[];
+  data: Song[];
   loading: boolean;
   error: string;
   loaded: boolean;
