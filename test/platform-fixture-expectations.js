@@ -8,6 +8,29 @@
 'use strict';
 
 module.exports = {
+  audiomack: {
+    // show=songs 的 livesearch；秒折成毫秒；空 artist 回退 uploader.name；专辑与空 id 丢掉
+    marker: 'api.audiomack.com/v1/livesearch',
+    expect: [
+      {
+        id: '5321130',
+        title: 'BAD ENERGY STAY FAR (FREESTYLE)',
+        artist: 'YOUNG PARIS',
+        album: '',
+        cover: 'https://i.audiomack.com/afrobeats-1/af04163a3b.webp',
+        duration: 152000,
+      },
+      {
+        id: '15137903',
+        title: 'Obsessed With You',
+        artist: 'Central Cee',
+        album: 'Wild West',
+        cover: 'https://i.audiomack.com/centralcee/cover.webp',
+        duration: 109000,
+      },
+    ],
+  },
+
   netease: {
     marker: 'ncm:search',
     expect: [

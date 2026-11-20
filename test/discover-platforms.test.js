@@ -1,6 +1,6 @@
 /**
  * 发现页平台条只放有榜单或歌单的音源。
- * 酷我 / 咪咕 / 5sing / 汽水仍留在平台实现里，供搜索、播放、歌词使用。
+ * 酷我 / 咪咕 / 5sing / 汽水 / Audiomack 仍留在平台实现里，供搜索和播放使用。
  *
  * discover.ts 顶层依赖 Vue，node:test 不直接 import。
  */
@@ -45,9 +45,9 @@ test('发现页只列出有分区的四家，且这四家都在注册表里', ()
   assert.doesNotMatch(src, /DISCOVER_PLATFORM_FALLBACK/);
 });
 
-test('酷我/咪咕/5sing/汽水没有榜单或歌单实现，发现页不能给它们编分区', () => {
+test('酷我/咪咕/5sing/汽水/Audiomack 没有榜单或歌单实现，发现页不能给它们编分区', () => {
   const chartFns = ['getTopList', 'getRecommendPlaylists', 'getRanking', 'getCategoryPlaylists', 'getNewSongs'];
-  for (const file of ['kuwo.js', 'migu.js', 'fivesing.js', 'soda.js']) {
+  for (const file of ['kuwo.js', 'migu.js', 'fivesing.js', 'soda.js', 'audiomack.js']) {
     const src = read(`src/api/platforms/${file}`);
     for (const fn of chartFns) {
       assert.doesNotMatch(src, new RegExp(`\\b${fn}\\s*:`), `${file} 不应声明 ${fn}`);
@@ -55,7 +55,7 @@ test('酷我/咪咕/5sing/汽水没有榜单或歌单实现，发现页不能给
   }
   const sections = read('src/renderer/app/stores/discover.ts');
   const view = read('src/renderer/app/views/DiscoverView.vue');
-  for (const id of ['kuwo', 'migu', 'fivesing', 'soda']) {
+  for (const id of ['kuwo', 'migu', 'fivesing', 'soda', 'audiomack']) {
     assert.doesNotMatch(sections, new RegExp(`plat:\\s*'${id}'`));
     assert.match(read(`src/api/platforms/${id}.js`), /\bsearch\s*:/);
   }

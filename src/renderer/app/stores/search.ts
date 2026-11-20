@@ -10,6 +10,7 @@ import { call, callSafe } from '../core/bridge';
 import { normalizeSongs, songKey, sortSongs } from '../core/song';
 import type { Song, SongLike } from '../core/song';
 import { toast, errText } from '../core/toast';
+import { rememberPlatformNames } from '../core/format';
 import { getPref } from '../core/prefs';
 import { appendToQueue } from './player';
 import type {
@@ -106,6 +107,7 @@ export async function initSearch(): Promise<void> {
     callSafe<string[], string[]>('getSearchHistory', [], []),
   ]);
   search.platforms = Array.isArray(platforms) ? platforms : [];
+  rememberPlatformNames(search.platforms);
   search.history = Array.isArray(history) ? history : [];
 }
 

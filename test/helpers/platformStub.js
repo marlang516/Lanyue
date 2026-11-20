@@ -119,7 +119,7 @@ function loadPlatformPlugin(platformId) {
  * @returns {Object} { platformId: plugin }
  */
 function loadAllPlatformPlugins() {
-  const ids = ['netease', 'qq', 'bilibili', 'kugou', 'kuwo', 'migu', 'fivesing', 'soda'];
+  const ids = ['netease', 'qq', 'bilibili', 'kugou', 'kuwo', 'migu', 'fivesing', 'soda', 'audiomack'];
   const plugins = {};
   for (const id of ids) {
     plugins[id] = loadPlatformPlugin(id);

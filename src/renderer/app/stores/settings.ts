@@ -5,6 +5,7 @@ import { reactive, computed } from 'vue';
 import type { ComputedRef } from 'vue';
 import { call, callSafe } from '../core/bridge';
 import { getPref, setPref } from '../core/prefs';
+import { rememberPlatformNames } from '../core/format';
 import { toast, errText } from '../core/toast';
 import { confirmDialog } from '../core/dialog';
 import { ui, applyTheme, setLanguage as setUiLanguage } from './ui';
@@ -85,6 +86,7 @@ export async function loadSettings(): Promise<void> {
     ]);
     settings.version = version || '';
     settings.platforms = Array.isArray(platforms) ? platforms : [];
+    rememberPlatformNames(settings.platforms);
     settings.cookies = cookies && typeof cookies === 'object' ? cookies : {};
     settings.templates = Array.isArray(tpl && tpl.templates) ? (tpl.templates as DownloadTemplate[]) : [];
     settings.activeTemplate = (tpl && tpl.active) || null;

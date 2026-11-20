@@ -84,7 +84,7 @@ Module._load = function (request, parent, isMain) {
 };
 
 const platforms = {};
-for (const id of ['netease', 'qq', 'bilibili', 'kugou', 'kuwo', 'migu', 'fivesing', 'soda']) {
+for (const id of ['netease', 'qq', 'bilibili', 'kugou', 'kuwo', 'migu', 'fivesing', 'soda', 'audiomack']) {
   platforms[id] = require(`../src/api/platforms/${id}`);
 }
 // 平台模块已全部加载、传输引用已被捕获，钩子使命完成，立刻还原
@@ -141,7 +141,7 @@ function assertSongShape(song, platform) {
 
 // ── 交叉守卫 ──────────────────────────────────────────────
 
-test('fixture 覆盖全部 8 个平台的 search 链路（新平台必须补录）', () => {
+test('fixture 覆盖全部 9 个平台的 search 链路（新平台必须补录）', () => {
   const dir = path.join(ROOT, 'test', 'fixtures', 'platforms');
   const have = new Set(fs.readdirSync(dir).filter(f => f.endsWith('.search.json')).map(f => f.replace('.search.json', '')));
   const all = new Set(Object.keys(platforms));

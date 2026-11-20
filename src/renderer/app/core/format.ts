@@ -66,10 +66,29 @@ const PLATFORM_NAMES: Readonly<Record<string, string>> = Object.freeze({
   local: '本地',
 });
 
+/**
+ * 已注册、但不在上面这张旧表里的平台显示名。
+ * 由 getPlatforms 的 manifest.name 灌入，避免每加一个源就改这张表或 i18n。
+ * 已有中文名的八个源不在这里覆盖，以免搜索结果里的标签改口。
+ */
+const liveNames: Record<string, string> = {};
+
+export function rememberPlatformNames(
+  list: readonly { id?: unknown; name?: unknown }[] | null | undefined,
+): void {
+  if (!Array.isArray(list)) return;
+  for (const item of list) {
+    const id = String((item && item.id) || '').trim().toLowerCase();
+    const name = String((item && item.name) || '').trim();
+    if (!id || !name || PLATFORM_NAMES[id]) continue;
+    liveNames[id] = name;
+  }
+}
+
 export function platformName(source: unknown): string {
   const k = String(source || '').toLowerCase();
   // 与原实现一致：未知平台原样回退 source 本身（调用方按字符串展示）
-  return PLATFORM_NAMES[k] || (source as string) || '未知';
+  return PLATFORM_NAMES[k] || liveNames[k] || (source as string) || '未知';
 }
 
 /** 音质档位 → 展示文案 */

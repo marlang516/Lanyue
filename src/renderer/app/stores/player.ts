@@ -40,6 +40,7 @@ const REFERERS: Readonly<Record<string, string>> = {
   migu: 'https://music.migu.cn/',
   soda: 'https://music.douyin.com/',
   fivesing: 'https://5sing.kugou.com/',
+  audiomack: 'https://audiomack.com/',
 };
 
 /** 播放器状态 */
