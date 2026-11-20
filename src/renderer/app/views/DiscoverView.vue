@@ -4,18 +4,22 @@ import {
   discover, discoverPlatformIds, initDiscover, showPlatform, showSection,
   activeSection, sectionState, platformSections, platformLabel, reloadActive,
 } from '../stores/discover';
-import type { DiscoverSectionState } from '../stores/types';
+import type { DiscoverSectionState, PlaylistSummary } from '../stores/types';
+import type { DiscoverPlaylistRef } from '../core/discoverFeed';
 import { player, currentKey, playFromList } from '../stores/player';
 import { lyrics } from '../stores/lyrics';
 import { activeLineIndex, lyricDisplaySeconds, projectPlayhead } from '../core/lyricMotion.js';
 import { platformName } from '../core/format';
 import DiscoverRankList from '../components/data/DiscoverRankList.vue';
+import PlaylistPeek from '../components/data/PlaylistPeek.vue';
 import Icon from '../components/common/Icon.vue';
 
 const sec = computed(() => activeSection());
 const st = computed<DiscoverSectionState>(() => (sec.value
   ? sectionState(sec.value.sec)
   : { data: [], loading: false, error: '', loaded: false }));
+
+const peek = ref<{ open: boolean; playlist: PlaylistSummary | null }>({ open: false, playlist: null });
 
 interface LyricWindow {
   prev: string;
@@ -114,6 +118,21 @@ function onPlay(i: number) {
   playFromList(st.value.data, i);
 }
 
+/** 打开这一首歌所属的那一个歌单，不把当前榜再播一遍。 */
+function openPlaylist(ref: DiscoverPlaylistRef): void {
+  const id = String(ref?.id || '').trim();
+  const source = String(ref?.source || '').trim();
+  if (!id || !source) return;
+  peek.value = {
+    open: true,
+    playlist: { id, source, name: String(ref.name || '').trim() },
+  };
+}
+
+function closePeek(): void {
+  peek.value = { ...peek.value, open: false };
+}
+
 /** 封面加载失败时摘掉底图，舞台退回极光空底，不再补一块硬封面。 */
 function dropBrokenImg(): void {
   coverGone.value = true;
@@ -191,6 +210,7 @@ function openStage(): void {
             :songs="st.data"
             :active-key="currentKey"
             @play="onPlay"
+            @open-playlist="openPlaylist"
           />
         </div>
       </section>
@@ -246,6 +266,8 @@ function openStage(): void {
         </div>
       </aside>
     </div>
+
+    <PlaylistPeek :open="peek.open" :playlist="peek.playlist" @close="closePeek" />
   </div>
 </template>
 
