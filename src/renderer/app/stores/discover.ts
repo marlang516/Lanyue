@@ -207,12 +207,15 @@ function sectionExpand(sec: string): DiscoverSectionExpand | '' {
 /**
  * 榜单分区的 data 已经是歌曲。歌单 / 歌手分区先取前几条摘要，
  * 再各拉几首，收成带来源名的一首榜。
+ * kind 跟着分区走：只有歌单会在歌曲上留下 id 和平台，
+ * 榜单和歌手都没有「打开这一个歌单」的身份。
  */
 async function songsForSection(sec: string, data: unknown[]): Promise<Song[]> {
   const expand = sectionExpand(sec);
   if (!expand) return normalizeSongs(data);
   const platform = sec.split('.')[0] || '';
-  const refs = readDiscoverSources(data, DISCOVER_FEED_CAPS.sources, platform);
+  const refs = readDiscoverSources(data, DISCOVER_FEED_CAPS.sources, platform)
+    .map((ref) => ({ ...ref, kind: expand }));
   const limit = DISCOVER_FEED_CAPS.perSource;
   const bundles = await collectDiscoverBundles(refs, (ref) => (
     expand === 'playlist'

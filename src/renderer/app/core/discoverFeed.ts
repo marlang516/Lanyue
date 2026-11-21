@@ -6,6 +6,8 @@
  *
  * 上限故意小：发现页大约二十首就够点开就播，
  * 不能先把「30 个歌单 × 300 首」拉回来再丢掉。
+ * 歌单来源会在每首歌上留下 id + 平台，打开完整歌单时用；
+ * 只有名称对不上那一个歌单。
  */
 import { normalizeSong, songKey } from './song';
 import type { Song } from './song';
@@ -25,11 +27,23 @@ export interface DiscoverFeedCaps {
   total?: number;
 }
 
-/** 歌单或歌手摘要里，展开时真正用得上的三个字段 */
+/** 歌单或歌手摘要里，展开时真正用得上的字段 */
 export interface DiscoverSourceRef {
   id: string;
   name: string;
   source: string;
+  /**
+   * playlist 才会在歌曲上留下可打开的歌单身份。
+   * singer 只用来源名做标签：没有可复用的歌手曲目面板。
+   */
+  kind?: 'playlist' | 'singer';
+}
+
+/** 一首展开歌指向的那一个歌单。缺 id 或平台就不能打开。 */
+export interface DiscoverPlaylistRef {
+  id: string;
+  source: string;
+  name: string;
 }
 
 export interface DiscoverSourceBundle {
@@ -93,9 +107,37 @@ function summarySource(summary: DiscoverSourceBundle['summary']): string {
 }
 
 /**
+ * 只有明确标成歌单、并且 id 和平台都在的摘要才写得进歌曲。
+ * 歌手、榜单，或只剩一个名字的行，打开时会对不上那一个歌单。
+ */
+function playlistIdentity(summary: DiscoverSourceBundle['summary']): DiscoverPlaylistRef | null {
+  if (!summary || typeof summary !== 'object' || summary.kind !== 'playlist') return null;
+  const id = text(summary.id);
+  const source = text(summary.source);
+  if (!id || !source) return null;
+  return { id, source, name: text(summary.name) };
+}
+
+/**
+ * 从展开后的歌曲上读歌单身份。
+ * 名称可以空，id 和平台不能空；形状不对就当没有，避免把别的字段当成歌单。
+ */
+export function discoverPlaylistOf(song: unknown): DiscoverPlaylistRef | null {
+  if (!song || typeof song !== 'object') return null;
+  const raw = (song as { fromPlaylist?: unknown }).fromPlaylist;
+  if (!raw || typeof raw !== 'object') return null;
+  const row = raw as { id?: unknown; source?: unknown; name?: unknown };
+  const id = text(row.id);
+  const source = text(row.source);
+  if (!id || !source) return null;
+  return { id, source, name: text(row.name) };
+}
+
+/**
  * 把若干来源的曲目收成一条榜。
  * 同一 id + source 只保留先出现的那首，来源名写在 `from` 上。
- * 歌曲对象上原来的 from 丢掉，避免平台字段冒充歌单名。
+ * 歌曲对象上原来的 from / fromPlaylist 丢掉，避免平台字段冒充歌单。
+ * 歌单来源另外写 `fromPlaylist`（id + source + name），打开完整列表时用。
  */
 export function expandDiscoverFeed(
   bundles: readonly DiscoverSourceBundle[] | null | undefined,
@@ -125,7 +167,10 @@ export function expandDiscoverFeed(
       seen.add(key);
       taken += 1;
       delete song.from;
+      delete song.fromPlaylist;
       if (label) song.from = label;
+      const playlist = playlistIdentity(bundle?.summary);
+      if (playlist) song.fromPlaylist = playlist;
       out.push(song);
     }
   }

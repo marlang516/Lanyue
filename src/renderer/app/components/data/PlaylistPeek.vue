@@ -27,25 +27,41 @@ const loading = ref(false);
 const error = ref('');
 const songs = ref<Song[]>([]);
 const panelEl = ref<HTMLElement | null>(null);
+/** 关掉或改开另一个歌单后，晚到的结果不能再改当前面板。 */
+let loadSeq = 0;
 
 const title = computed(() => props.playlist?.name || '歌单');
 
 useModalAccessibility(() => props.open, panelEl, () => emit('close'));
 
-watch(() => [props.open, props.playlist?.id, props.playlist?.source], async () => {
+async function loadSongs(): Promise<void> {
+  const seq = ++loadSeq;
   if (!props.open || !props.playlist) return;
+  const source = String(props.playlist.source || '').trim();
+  const id = String(props.playlist.id || '').trim();
   loading.value = true;
   error.value = '';
   songs.value = [];
+  if (!source || !id) {
+    error.value = '无法打开这个歌单';
+    loading.value = false;
+    return;
+  }
   try {
-    const list = await call('getPlaylistSongs', props.playlist.source, props.playlist.id, 300);
+    const list = await call('getPlaylistSongs', source, id, 300);
+    if (seq !== loadSeq) return;
     songs.value = normalizeSongs(list);
     if (!songs.value.length) error.value = '歌单暂无歌曲';
   } catch (e) {
+    if (seq !== loadSeq) return;
     error.value = errText(e, '加载歌单失败');
   } finally {
-    loading.value = false;
+    if (seq === loadSeq) loading.value = false;
   }
+}
+
+watch(() => [props.open, props.playlist?.id, props.playlist?.source], () => {
+  void loadSongs();
 }, { immediate: true });
 
 function playAll(): void {
@@ -96,7 +112,11 @@ function dropBrokenImg(e: Event): void {
             <div v-if="loading" class="skels">
               <div v-for="n in 8" :key="n" class="ly-skeleton" style="height: 52px"></div>
             </div>
-            <div v-else-if="error" class="ly-empty"><Icon name="warning" /><b>{{ error }}</b></div>
+            <div v-else-if="error" class="ly-empty">
+              <Icon name="warning" />
+              <b>{{ error }}</b>
+              <button type="button" class="ly-btn ly-btn-sm" @click="loadSongs">重试</button>
+            </div>
             <SongTable v-else :songs="songs" compact @play="playAt" />
           </div>
         </div>

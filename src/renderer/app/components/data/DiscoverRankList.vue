@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import { discoverPlaylistOf } from '../../core/discoverFeed';
+import type { DiscoverPlaylistRef } from '../../core/discoverFeed';
 import { songKey } from '../../core/song';
 import type { Song } from '../../core/song';
+import Icon from '../common/Icon.vue';
 
 interface DiscoverRankListProps {
   songs?: readonly Song[];
@@ -13,7 +16,10 @@ const props = withDefaults(defineProps<DiscoverRankListProps>(), {
   activeKey: '',
 });
 
-const emit = defineEmits<{ play: [index: number] }>();
+const emit = defineEmits<{
+  play: [index: number];
+  openPlaylist: [playlist: DiscoverPlaylistRef];
+}>();
 
 const broken = ref<Set<string>>(new Set());
 
@@ -23,6 +29,7 @@ watch(() => props.songs, () => {
 
 const first = computed(() => props.songs[0] || null);
 const rest = computed(() => props.songs.slice(1));
+const firstPlaylist = computed(() => (first.value ? discoverPlaylistOf(first.value) : null));
 
 function isOn(song: Song): boolean {
   return !!props.activeKey && songKey(song) === props.activeKey;
@@ -60,17 +67,43 @@ function playLabel(song: Song): string {
   const from = fromOf(song);
   return from ? `${state} ${song.title}，${who}，来自${from}` : `${state} ${song.title}，${who}`;
 }
+
+function playlistOf(song: Song): DiscoverPlaylistRef | null {
+  return discoverPlaylistOf(song);
+}
+
+function openPlaylistLabel(playlist: DiscoverPlaylistRef): string {
+  return playlist.name ? `查看完整歌单「${playlist.name}」` : '查看完整歌单';
+}
+
+function openLabel(song: Song): string {
+  const playlist = discoverPlaylistOf(song);
+  return playlist ? openPlaylistLabel(playlist) : '';
+}
+
+/** 只打开这一首歌所属的那一个歌单，不改当前榜的播放列表。 */
+function openFrom(song: Song): void {
+  const playlist = discoverPlaylistOf(song);
+  if (!playlist) return;
+  emit('openPlaylist', playlist);
+}
+
+function openFirst(): void {
+  if (first.value) openFrom(first.value);
+}
 </script>
 
 <template>
   <div v-if="first" class="feed-list">
-    <button
-      type="button"
-      class="hero"
-      :class="{ on: isOn(first) }"
-      :aria-label="playLabel(first)"
-      @click="emit('play', 0)"
-    >
+    <!-- 播放和打开歌单是两块点击面：整张卡仍是播放，来源名单独打开那一个歌单。 -->
+    <div class="hero" :class="{ on: isOn(first) }">
+      <button
+        type="button"
+        class="hero-play"
+        :aria-label="playLabel(first)"
+        :aria-current="isOn(first) ? 'true' : undefined"
+        @click="emit('play', 0)"
+      ></button>
       <img
         v-if="showCover(first)"
         class="hero-wash"
@@ -94,22 +127,36 @@ function playLabel(song: Song): string {
         <p class="sub" :title="`${first.artist || '未知歌手'}${first.album ? ' · ' + first.album : ''}`">
           {{ first.artist || '未知歌手' }}<template v-if="first.album"> · {{ first.album }}</template>
         </p>
-        <p v-if="fromOf(first)" class="origin" :title="`来自「${fromOf(first)}」`">来自「{{ fromOf(first) }}」</p>
+        <button
+          v-if="firstPlaylist"
+          type="button"
+          class="origin link"
+          :aria-label="openPlaylistLabel(firstPlaylist)"
+          :title="openPlaylistLabel(firstPlaylist)"
+          @click="openFirst"
+        >
+          <span class="origin-tx">{{ firstPlaylist.name ? `来自「${firstPlaylist.name}」` : '查看完整歌单' }}</span>
+          <Icon name="chevron-right" :size="12" />
+        </button>
+        <p v-else-if="fromOf(first)" class="origin" :title="`来自「${fromOf(first)}」`">来自「{{ fromOf(first) }}」</p>
         <span class="play-now">{{ isOn(first) ? '正在播放' : '播放' }}</span>
       </div>
-    </button>
+    </div>
 
     <div v-if="rest.length" class="rank-list">
-      <button
+      <div
         v-for="(s, i) in rest"
         :key="songKey(s) + '-' + i"
-        type="button"
         class="hit"
         :class="{ on: isOn(s) }"
-        :aria-current="isOn(s) ? 'true' : undefined"
-        :aria-label="playLabel(s)"
-        @click="emit('play', i + 1)"
       >
+        <button
+          type="button"
+          class="hit-play"
+          :aria-label="playLabel(s)"
+          :aria-current="isOn(s) ? 'true' : undefined"
+          @click="emit('play', i + 1)"
+        ></button>
         <span class="no">{{ rankNo(i + 2) }}</span>
         <span class="art" :class="{ ph: !showCover(s) }">
           <img
@@ -126,8 +173,19 @@ function playLabel(song: Song): string {
           <b :title="s.title">{{ s.title }}</b>
           <span>{{ s.artist || '未知歌手' }}</span>
         </span>
-        <span v-if="fromOf(s)" class="src" :title="fromOf(s)">{{ fromOf(s) }}</span>
-      </button>
+        <button
+          v-if="playlistOf(s)"
+          type="button"
+          class="src link"
+          :aria-label="openLabel(s)"
+          :title="openLabel(s)"
+          @click="openFrom(s)"
+        >
+          <span>{{ playlistOf(s)?.name || '完整歌单' }}</span>
+          <Icon name="chevron-right" :size="12" />
+        </button>
+        <span v-else-if="fromOf(s)" class="src" :title="fromOf(s)">{{ fromOf(s) }}</span>
+      </div>
     </div>
   </div>
 </template>
@@ -153,7 +211,29 @@ function playLabel(song: Song): string {
   overflow: hidden;
 }
 .hero:hover { background: var(--glass-3); }
-.hero:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.hero:has(.hero-play:focus-visible) { outline: none; box-shadow: var(--focus-ring); }
+.hero-play,
+.hit-play {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.hero-play:focus-visible,
+.hit-play:focus-visible { outline: none; }
+/* pointer-events 不继承。封面、歌名、播放胶囊都要点下去播，
+   只有「来自」按钮自己接点击，否则会点在文字上、播不了。 */
+.hero-cover,
+.hero-cover *,
+.hero-copy,
+.hero-copy * { pointer-events: none; }
+.origin.link,
+.origin.link * { pointer-events: auto; }
 .hero-wash {
   position: absolute;
   z-index: 0;
@@ -219,6 +299,36 @@ function playLabel(song: Song): string {
 }
 .sub { font-size: var(--fs-md); color: var(--ink-2); }
 .origin { font-size: var(--fs-sm); color: var(--ink-3); }
+.origin.link {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--au-1);
+  font: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.origin.link .origin-tx {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.origin.link:hover { color: var(--ink); }
+.origin.link:focus-visible {
+  outline: none;
+  border-radius: 4px;
+  box-shadow: var(--focus-ring);
+}
 .play-now {
   display: inline-flex;
   align-items: center;
@@ -234,6 +344,7 @@ function playLabel(song: Song): string {
 
 .rank-list { display: flex; flex-direction: column; margin-top: 8px; }
 .hit {
+  position: relative;
   display: grid;
   grid-template-columns: 36px 44px minmax(0, 1fr) auto;
   gap: 10px;
@@ -250,7 +361,15 @@ function playLabel(song: Song): string {
   transition: background var(--dur-1) var(--ease);
 }
 .hit:hover { background: var(--glass-3); }
-.hit:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.hit:has(.hit-play:focus-visible) { outline: none; box-shadow: var(--focus-ring); }
+.hit > :not(.hit-play) {
+  position: relative;
+  z-index: 1;
+}
+.hit > :not(.hit-play),
+.hit > :not(.hit-play) * { pointer-events: none; }
+.hit > .src.link,
+.hit > .src.link * { pointer-events: auto; }
 .hit.on {
   background: linear-gradient(95deg, rgba(124, 92, 255, .13), rgba(0, 198, 255, .1));
 }
@@ -298,5 +417,32 @@ function playLabel(song: Song): string {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.src.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--au-1);
+  font: inherit;
+  font-size: 11px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.src.link span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.src.link:hover { color: var(--ink); }
+.src.link:focus-visible {
+  outline: none;
+  border-radius: 4px;
+  box-shadow: var(--focus-ring);
 }
 </style>
