@@ -13,7 +13,7 @@ import {
   expandDiscoverFeed,
   readDiscoverSources,
 } from '../core/discoverFeed';
-import { platformName } from '../core/format';
+import { platformName, rememberPlatformNames } from '../core/format';
 import { normalizeSongs } from '../core/song';
 import type { Song } from '../core/song';
 import type {
@@ -99,7 +99,7 @@ export const discover = reactive<DiscoverState>({
 
 /**
  * 发现页平台条：只放有榜单或歌单分区的音源。
- * 酷我 / 咪咕 / 5sing / 汽水只有搜索，不出现在这里；搜索和播放仍走各自页面。
+ * 酷我 / 咪咕 / 5sing / 汽水 / Audiomack 只有搜索，不出现在这里；搜索和播放仍走各自页面。
  * 注册表已到时再滤掉未注册的 id，顺序跟 DISCOVER_SECTIONS。
  */
 export const discoverPlatformIds: ComputedRef<readonly string[]> = computed(() => {
@@ -140,6 +140,7 @@ export async function initDiscover(): Promise<void> {
     callSafe<SourceHealthMap | null>('getSourceHealth', [], null),
   ]);
   discover.platforms = Array.isArray(platforms) ? platforms : [];
+  rememberPlatformNames(discover.platforms);
   discover.sourceHealth = health;
   await ensurePlatform(discover.activePlat, true);
 }

@@ -1,0 +1,37 @@
+{
+  "results": [
+    {
+      "id": 5321130,
+      "type": "song",
+      "title": "BAD ENERGY STAY FAR (FREESTYLE)",
+      "artist": "YOUNG PARIS",
+      "album": "",
+      "duration": "152",
+      "featuring": "wizkid, skepta",
+      "image": "https://i.audiomack.com/afrobeats-1/af04163a3b.webp",
+      "uploader": { "name": "SOME CHANNEL", "url_slug": "young-paris" },
+      "url_slug": "bad-energy-young-paris-tbr2"
+    },
+    {
+      "id": 15137903,
+      "type": "song",
+      "title": "Obsessed With You",
+      "artist": "",
+      "album": "Wild West",
+      "duration": 109,
+      "image_base": "https://i.audiomack.com/centralcee/cover.webp",
+      "uploader": { "name": "Central Cee", "url_slug": "centralcee" }
+    },
+    {
+      "id": 9001,
+      "type": "album",
+      "title": "应该被丢掉的专辑",
+      "artist": "Skepta"
+    },
+    {
+      "id": "",
+      "type": "song",
+      "title": "缺 id"
+    }
+  ]
+}

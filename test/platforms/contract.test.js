@@ -1,5 +1,5 @@
 /**
- * 平台插件契约测试 — 覆盖全部 8 个平台
+ * 平台插件契约测试 — 覆盖全部 9 个平台
  *
  * 验证每个平台插件的：
  *   1. manifest 完整性（id, name, hosts, search, getUrl）
@@ -16,7 +16,7 @@ const assert = require('node:assert');
 const { loadAllPlatformPlugins } = require('../helpers/platformStub.js');
 
 // ── 平台 ID 清单 ─────────────────────────────────────────
-const ALL_IDS = ['netease', 'qq', 'bilibili', 'kugou', 'kuwo', 'migu', 'fivesing', 'soda'];
+const ALL_IDS = ['netease', 'qq', 'bilibili', 'kugou', 'kuwo', 'migu', 'fivesing', 'soda', 'audiomack'];
 
 // ── 加载所有平台插件 ─────────────────────────────────────
 const plugins = loadAllPlatformPlugins();

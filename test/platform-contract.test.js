@@ -33,12 +33,12 @@ loadPlatformPlugins();
 const reg = defaultRegistry;
 
 // ── 冻结契约 ──────────────────────────────────────────────
-const ALL_IDS = ['netease', 'qq', 'bilibili', 'kugou', 'kuwo', 'migu', 'fivesing', 'soda'];
+const ALL_IDS = ['netease', 'qq', 'bilibili', 'kugou', 'kuwo', 'migu', 'fivesing', 'soda', 'audiomack'];
 /** 平台顺序 = 展示顺序 = 聚合权重顺序，改动会静默影响搜索结果条数 */
-const FROZEN_ORDER = ['netease', 'qq', 'bilibili', 'kugou', 'kuwo', 'migu', 'fivesing', 'soda'];
+const FROZEN_ORDER = ['netease', 'qq', 'bilibili', 'kugou', 'kuwo', 'migu', 'fivesing', 'soda', 'audiomack'];
 /**
  * 'all' 聚合时每源每页保留几条。必须等于该源单曲搜索的页大小
- * （网易/QQ/酷狗/酷我 30，B 站/咪咕/汽水 20，5sing 服务端默认 10）。
+ * （网易/QQ/酷狗/酷我 30，B 站/咪咕/汽水/Audiomack 20，5sing 服务端默认 10）。
  * 小于页大小会把已经取回的结果在合并前丢掉。
  */
 const FROZEN_AGG_LIMIT = {
@@ -50,11 +50,12 @@ const FROZEN_AGG_LIMIT = {
   migu: 20,
   fivesing: 10,
   soda: 20,
+  audiomack: 20,
 };
 /** 换源候选：故意排除 bilibili（其 artist 是 UP 主名，参与换源只会制造错配） */
-const FROZEN_FALLBACK = ['netease', 'qq', 'kugou', 'kuwo', 'migu', 'fivesing', 'soda'];
+const FROZEN_FALLBACK = ['netease', 'qq', 'kugou', 'kuwo', 'migu', 'fivesing', 'soda', 'audiomack'];
 /** 链接识别支持直取详情的平台 */
-const FROZEN_LINK_PLATFORMS = ['netease', 'qq', 'bilibili', 'kugou'];
+const FROZEN_LINK_PLATFORMS = ['netease', 'qq', 'bilibili', 'kugou', 'audiomack'];
 /** 🔴 安全边界：CORS 白名单必须与历史枚举**逐条相等**（不是"包含"） */
 const FROZEN_LOCAL_ORIGINS = ['http://localhost', 'http://127.0.0.1'];
 const FROZEN_PLATFORM_ORIGINS = [
@@ -76,6 +77,8 @@ const FROZEN_PLATFORM_ORIGINS = [
   'https://5sing.kugou.com',
   'https://api.qishui.com',
   'https://music.douyin.com',
+  'https://api.audiomack.com',
+  'https://music.audiomack.com',
 ];
 const FROZEN_ORIGIN_SUFFIXES = ['.douyinvod.com', '.douyinpic.com', '.kugou.com'];
 
@@ -123,8 +126,8 @@ function objectSpanLines(src, declMarker) {
 // 1. manifest 完整性
 // ══════════════════════════════════════════════════════════
 
-test('契约：registry 自动发现 8 个平台，id 集合与冻结值一致', () => {
-  assert.strictEqual(reg.size, 8, '平台数应为 8');
+test('契约：registry 自动发现 9 个平台，id 集合与冻结值一致', () => {
+  assert.strictEqual(reg.size, 9, '平台数应为 9');
   assert.deepStrictEqual(sorted(reg.getIds()), sorted(ALL_IDS));
 });
 
@@ -186,11 +189,11 @@ test('派生：平台顺序 == 冻结顺序（顺序决定聚合权重与 UI 排
   assert.deepStrictEqual(reg.getIds(), FROZEN_ORDER);
 });
 
-test('派生：探针源 == 全部 8 个平台', () => {
+test('派生：探针源 == 全部 9 个平台', () => {
   assert.deepStrictEqual(sorted(reg.getProbeSources()), sorted(ALL_IDS));
 });
 
-test('派生：换源候选 == 冻结 7 个（排除 bilibili）', () => {
+test('派生：换源候选 == 冻结 8 个（排除 bilibili）', () => {
   assert.deepStrictEqual(sorted(reg.getFallbackSources()), sorted(FROZEN_FALLBACK));
   assert.ok(!reg.getFallbackSources().includes('bilibili'), 'bilibili 不应参与换源');
 });
@@ -218,7 +221,7 @@ test('派生：聚合条数等于各源单曲搜索页大小（不再是 10/10/5
   }
 });
 
-test('派生：链接识别平台 == 冻结 4 个，且每条 pattern 都带 extract', () => {
+test('派生：链接识别平台 == 冻结 5 个，且每条 pattern 都带 extract', () => {
   const patterns = reg.getLinkPatterns();
   assert.deepStrictEqual(
     sorted([...new Set(patterns.map(x => x.platform))]),
@@ -231,7 +234,7 @@ test('派生：链接识别平台 == 冻结 4 个，且每条 pattern 都带 ext
   }
 });
 
-test('🔴 安全边界：CORS 平台域名 == 冻结 18 条，逐条相等（不是"包含"）', () => {
+test('🔴 安全边界：CORS 平台域名 == 冻结 20 条，逐条相等（不是"包含"）', () => {
   const { origins } = reg.getAllowedOrigins();
   assert.deepStrictEqual(sorted(origins), sorted(FROZEN_PLATFORM_ORIGINS));
 });
@@ -245,9 +248,9 @@ test('🔴 安全边界：CORS 后缀 == 冻结 3 条，且都带前导点', () 
   }
 });
 
-test('🔴 安全边界：本地源独立于平台清单，全量白名单恰为 20 条', () => {
+test('🔴 安全边界：本地源独立于平台清单，全量白名单恰为 22 条', () => {
   // CORS 白名单已从 index.js 抽到 main/corsHeaders.js；安全边界常量随之钉在
-  // 新模块上（全量白名单 = 本地来源 + 平台清单，仍恒为 20 条）。
+  // 新模块上（全量白名单 = 本地来源 + 平台清单，现为 22 条）。
   const src = read('src/main/corsHeaders.js');
   assert.ok(/LOCAL_ORIGINS\s*=\s*\[/.test(src), 'main/corsHeaders.js 应保留 LOCAL_ORIGINS 常量');
   const local = [...src.matchAll(/LOCAL_ORIGINS\s*=\s*\[([^\]]*)\]/g)]
@@ -266,7 +269,7 @@ test('🔴 安全边界：本地源独立于平台清单，全量白名单恰为
 
 test('UI：toClientPayload() 剔除函数、保留展示与能力字段', () => {
   const payload = reg.toClientPayload();
-  assert.strictEqual(payload.length, 8);
+  assert.strictEqual(payload.length, 9);
   assert.deepStrictEqual(sorted(payload.map(p => p.id)), sorted(ALL_IDS));
   for (const item of payload) {
     assert.ok(!('search' in item) && !('getUrl' in item), `${item.id}: payload 不应带函数`);
@@ -475,7 +478,7 @@ test('守卫：recommendations.js 经 gateway 调用平台，不再直连或手�
     .replace(/(^|[^:])\/\/.*$/gm, '$1');
   const withoutStrategy = stripComments(src).replace(STRATEGY_BLOCK, '');
 
-  const hardcoded = [...withoutStrategy.matchAll(/(?:===|!==)\s*'(netease|qq|kugou|bilibili|kuwo|migu|fivesing|soda)'/g)]
+  const hardcoded = [...withoutStrategy.matchAll(/(?:===|!==)\s*'(netease|qq|kugou|bilibili|kuwo|migu|fivesing|soda|audiomack)'/g)]
     .map((m) => m[1]);
   assert.deepStrictEqual(
     hardcoded, [],

@@ -23,9 +23,9 @@ const AGENT_TOOLS = [
   // ── 查询 ──────────────────────────────────────────
   {
     name: 'search_music', channel: 'search-music', risk: 'read',
-    description: '按关键词在音乐平台搜索歌曲。source 传 "all" 聚合 8 平台。返回 {songs:[{id,source,title,artist,album,duration,...}]}',
+    description: '按关键词在音乐平台搜索歌曲。source 传 "all" 聚合全部已注册平台。返回 {songs:[{id,source,title,artist,album,duration,...}]}',
     required: ['keyword'],
-    paramDocs: { keyword: '搜索关键词', source: '平台 id（netease/qq/kugou/kuwo/migu/bilibili/soda/fivesing）或 all', page: '页码，从 1 开始' },
+    paramDocs: { keyword: '搜索关键词', source: '平台 id（netease/qq/kugou/kuwo/migu/bilibili/soda/fivesing/audiomack）或 all', page: '页码，从 1 开始' },
   },
   {
     name: 'ai_search_music', channel: 'nl-search-music', risk: 'read',

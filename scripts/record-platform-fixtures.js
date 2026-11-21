@@ -44,6 +44,7 @@ const LIST_PATH = {
   migu: ['songResultData', 'result'],
   fivesing: ['list'],
   soda: ['result_groups', 0, 'data'],
+  audiomack: ['results'],
 };
 const KEEP = 3;
 
