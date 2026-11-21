@@ -3,7 +3,7 @@ import { onMounted } from 'vue';
 import {
   settings, TABS, loadSettings, setTab,
   chooseTheme, chooseLanguage, chooseQuality, changeVolume, changeRate,
-  changeLyricOffset, chooseSaveDir,
+  changeCrossfade, changeLyricOffset, chooseSaveDir,
   toggleCookieEditor, saveCookie, verifyCookie, clearCookie, openLogin,
   saveTemplate, deleteTemplate, activateTemplate,
   exportData, importData, checkUpdate, downloadUpdate, restartInstall,
@@ -15,6 +15,7 @@ import { lyrics } from '../stores/lyrics';
 import { qualityLabel } from '../core/format';
 import { promptDialog } from '../core/dialog';
 import Icon from '../components/common/Icon.vue';
+import { CROSSFADE_STEPS, crossfadeStepLabel } from '../../js/playback/crossfade.js';
 
 onMounted(loadSettings);
 
@@ -115,6 +116,21 @@ function onVolumeInput(e: Event) {
           <div class="row sl">
             <input type="range" min="0" max="100" :value="Math.round(player.volume * 100)" aria-label="音量" @input="onVolumeInput" />
             <span class="val">{{ Math.round(player.volume * 100) }}%</span>
+          </div>
+        </div>
+
+        <div class="group">
+          <h4>无缝交叉</h4>
+          <p class="hint">下一首已经缓冲好时，两首歌重叠淡出淡入，中间不再空一段。自动连播也会在当前曲结束前交叉。关则立刻切换。</p>
+          <div class="row">
+            <button
+              v-for="ms in CROSSFADE_STEPS"
+              :key="ms"
+              class="ly-btn ly-btn-sm"
+              :class="{ 'ly-btn-primary': player.crossfadeMs === ms }"
+              :aria-pressed="player.crossfadeMs === ms"
+              @click="changeCrossfade(ms)"
+            >{{ crossfadeStepLabel(ms) }}</button>
           </div>
         </div>
 

@@ -14,9 +14,17 @@ import {
   crossfadeFadeInAt,
   crossfadeMidpoint,
   planCrossfade,
+  decideCrossfade,
+  crossfadeTailBounds,
+  normalizeCrossfadeMs,
+  audibleVolume,
+  crossfadeStepLabel,
+  CROSSFADE_STEPS,
+  CROSSFADE_PREF_KEY,
   createCrossfadeController,
   CROSSFADE_STATES,
 } from '../src/renderer/js/playback/crossfade.js';
+import { FADE_STEPS, fadeStageLabel } from '../src/renderer/js/player/fade.js';
 import { createAudioPool, createSingleInstancePool } from '../src/renderer/js/playback/audioPool.js';
 
 const read = (rel) => fs.readFileSync(new URL(rel, import.meta.url), 'utf8');
@@ -88,6 +96,102 @@ test('planCrossfade：时长为 0 / 未启用 → hardCut', () => {
 test('planCrossfade：脏入参不炸，退化为 hardCut', () => {
   assert.equal(planCrossfade({}).mode, 'hardCut');
   assert.equal(planCrossfade({ fadeOutMs: NaN, fadeInMs: 'x' }).mode, 'hardCut');
+});
+
+test('交叉档位与 fade.js 的 FADE_STEPS 是同一张表', () => {
+  assert.deepEqual([...CROSSFADE_STEPS], [...FADE_STEPS]);
+  for (const ms of CROSSFADE_STEPS) {
+    assert.equal(crossfadeStepLabel(ms), fadeStageLabel(ms));
+  }
+  assert.equal(CROSSFADE_PREF_KEY, 'crossfadeMs');
+  assert.equal(normalizeCrossfadeMs(1000), 1000);
+  assert.equal(normalizeCrossfadeMs(0), 0);
+  assert.equal(normalizeCrossfadeMs(300), 0, '不在档位表上的值当关，避免任意时长');
+  assert.equal(normalizeCrossfadeMs('nope'), 0);
+  assert.equal(normalizeCrossfadeMs(-5), 0);
+});
+
+test('decideCrossfade：下一首已缓冲且尾部够长 → 重叠交叉', () => {
+  const d = decideCrossfade({
+    fadeMs: 1000,
+    enabled: true,
+    preloadOk: true,
+    remainingMs: 8000,
+    predictable: true,
+    sameStream: false,
+    trigger: 'manual',
+  });
+  assert.equal(d.mode, 'none');
+  assert.equal(d.durationMs, 1000);
+  assert.equal(d.midpointMs, 500);
+  assert.equal(d.fadeOutMs, 1000);
+  assert.equal(d.fadeInMs, 1000);
+  assert.equal(d.reason, 'ok');
+});
+
+test('decideCrossfade：关闭、时长 0、预载失败、随机、同流、尾部太短 → 硬切', () => {
+  assert.equal(
+    decideCrossfade({ fadeMs: 1000, enabled: false, preloadOk: true, remainingMs: 9000 }).reason,
+    'disabled',
+  );
+  assert.equal(decideCrossfade({ fadeMs: 0, preloadOk: true, remainingMs: 9000 }).mode, 'hardCut');
+  assert.equal(decideCrossfade({ fadeMs: 1000, preloadOk: false, remainingMs: 9000 }).reason, 'preload');
+  assert.equal(
+    decideCrossfade({ fadeMs: 1000, preloadOk: true, remainingMs: 9000, predictable: false }).reason,
+    'unpredictable',
+  );
+  assert.equal(
+    decideCrossfade({ fadeMs: 1000, preloadOk: true, remainingMs: 9000, sameStream: true }).reason,
+    'same-stream',
+  );
+  const short = decideCrossfade({ fadeMs: 2000, preloadOk: true, remainingMs: 50, trigger: 'manual' });
+  assert.equal(short.mode, 'hardCut');
+  assert.equal(short.reason, 'remaining');
+  assert.equal(short.durationMs, 0);
+});
+
+test('decideCrossfade：自动连播只在交叉窗口内启动，窗口比一拍 timeupdate 宽', () => {
+  const bounds = crossfadeTailBounds(2000);
+  assert.equal(bounds.maxRemainingMs, 2000);
+  assert.ok(bounds.maxRemainingMs - bounds.minRemainingMs >= 300, '窗口至少盖住一次 timeupdate');
+  assert.ok(bounds.minRemainingMs > 80, '太短的尾部不该开交叉');
+  const inside = (bounds.minRemainingMs + bounds.maxRemainingMs) / 2;
+  assert.equal(
+    decideCrossfade({ fadeMs: 2000, preloadOk: true, remainingMs: inside, trigger: 'auto' }).mode,
+    'none',
+  );
+  assert.equal(
+    decideCrossfade({ fadeMs: 2000, preloadOk: true, remainingMs: bounds.maxRemainingMs + 50, trigger: 'auto' }).reason,
+    'remaining',
+  );
+  assert.equal(
+    decideCrossfade({ fadeMs: 2000, preloadOk: true, remainingMs: bounds.minRemainingMs - 1, trigger: 'auto' }).reason,
+    'remaining',
+  );
+  assert.equal(
+    decideCrossfade({ fadeMs: 2000, preloadOk: true, remainingMs: null, trigger: 'auto' }).reason,
+    'remaining',
+  );
+  assert.equal(
+    decideCrossfade({ fadeMs: 2000, preloadOk: true, remainingMs: null, trigger: 'manual' }).mode,
+    'none',
+    '还不知道剩余时长时，手动切歌仍可重叠',
+  );
+  // 手动切歌不要求已经走进尾部窗口，只要剩下的时间够把交叉做完
+  assert.equal(
+    decideCrossfade({ fadeMs: 2000, preloadOk: true, remainingMs: bounds.maxRemainingMs + 50, trigger: 'manual' }).mode,
+    'none',
+  );
+});
+
+test('audibleVolume：元素音量 = 用户音量 × 交叉增益，越界钳制', () => {
+  assert.equal(audibleVolume(0.8, 1), 0.8);
+  assert.equal(audibleVolume(0.8, 0.5), 0.4);
+  assert.equal(audibleVolume(0.8, 0), 0);
+  assert.equal(audibleVolume(2, 1), 1, '用户音量超过 1 也钳在 1');
+  assert.equal(audibleVolume(0.5, -1), 0);
+  assert.equal(audibleVolume(NaN, 1), 0);
+  assert.equal(audibleVolume(0.8, 2), 0.8, '增益超过 1 按满增益算');
 });
 
 // ── 编排器 ──────────────────────────────────────────────
@@ -331,9 +435,32 @@ test('前置条件守卫：engine.js 仍是零 DOM 依赖（不得为 crossfade 
     '引擎不得自己建 <audio> —— 第二个实例由调用方注入');
 });
 
+test('生产播放器只在 audibleVolume 一处写元素音量，交叉不走旧引擎', () => {
+  const src = stripComments(read('../src/renderer/app/stores/player.ts'));
+  const writes = src.match(/(?<!player)\.volume\s*=/g) || [];
+  assert.equal(writes.length, 1, 'audio.volume 只能有一个写手：用户音量 × 交叉增益');
+  assert.match(src, /audibleVolume\(/);
+  assert.match(src, /decideCrossfade\(/);
+  assert.doesNotMatch(src, /playback\/engine/);
+  assert.doesNotMatch(src, /crossfadeTo\(/);
+});
+
+test('设置页露出交叉档位，prefs 键进白名单', async () => {
+  const view = read('../src/renderer/app/views/SettingsView.vue');
+  const settings = read('../src/renderer/app/stores/settings.ts');
+  assert.match(view, /无缝交叉/);
+  assert.match(view, /CROSSFADE_STEPS/);
+  assert.match(view, /changeCrossfade/);
+  assert.match(settings, /setCrossfadeMs/);
+  const { createRequire } = await import('node:module');
+  const require = createRequire(import.meta.url);
+  const { ALLOWED_PREF_KEYS } = require('../src/main/ipc/prefs.js');
+  assert.equal(ALLOWED_PREF_KEYS.has('crossfadeMs'), true);
+});
+
 test('前置条件守卫：crossfadeTo 仍是诚实的占位（未接入生产路径前不得半成品）', () => {
-  // 阶段 3 之前，生产播放路径不走引擎 —— 接线了也不会生效。
-  // 这里钉住「占位必须诚实」：要么真实现，要么明确返回 null + 注释说明。
+  // 生产交叉接在 Vue stores/player.ts，不把播放迁回引擎。
+  // 引擎的 crossfadeTo 继续返回 null，避免一条看起来能用、实际不走的半成品。
   assert.match(ENGINE_SRC, /async function crossfadeTo/,
     'engine.js 应保留 crossfadeTo 接缝（阶段 3 后在此实现）');
   const body = ENGINE_SRC.slice(

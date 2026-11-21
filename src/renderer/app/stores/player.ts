@@ -10,13 +10,25 @@
  * 可预测的邻居在当前这首一开始就解析，并静音预热到备用元素上；
  * 点击时直接播那个元素，不再等新的取流。随机模式猜不到下一首，仍走冷路径。
  *
+ * 邻居已经在备用元素上、并且交叉档位开着时，切歌改成重叠：
+ * 出去的歌变轻、进来的歌同时变响，中间不留一段静音。编排在
+ * playback/crossfade.js，本模块仍是唯一的 audio 所有者和音量写手。
+ * 旧引擎的 crossfadeTo 继续是占位 —— 生产路径不迁回去。
+ *
  * 竞态：切歌后旧请求的结果必须丢弃（_reqSeq），否则慢源会盖掉快源。
  * 唯一 audio 所有者：本模块，视图只读 state。
  */
 import { reactive, computed, watch } from 'vue';
 import type { ComputedRef } from 'vue';
 import { fileUrlFromPath } from '../../../shared/fileUrl.mjs';
-import { createSkipPrep, prepKey } from '../../js/skipPrep.js';
+import { createSkipPrep, neighborIndex, prepKey } from '../../js/skipPrep.js';
+import {
+  CROSSFADE_PREF_KEY,
+  audibleVolume,
+  createCrossfadeController,
+  decideCrossfade,
+  normalizeCrossfadeMs,
+} from '../../js/playback/crossfade.js';
 import { call, callSafe, on } from '../core/bridge';
 import { getPref, setPref } from '../core/prefs';
 import { normalizeSong, songKey } from '../core/song';
@@ -58,6 +70,8 @@ interface PlayerState {
   mode: PlayMode;
   error: string | number;
   quality: string;
+  /** 无缝交叉时长（ms）。0 关，其余只取 FADE_STEPS 那几档。 */
+  crossfadeMs: number;
   // 播放器扩展面板（不进入导航）
   fullscreen: boolean;
   queueOpen: boolean;
@@ -76,20 +90,23 @@ export const player = reactive<PlayerState>({
   mode: 'order',     // order | list-loop | single | shuffle
   error: '',
   quality: 'standard',
+  crossfadeMs: 0,
   // 播放器扩展面板（不进入导航）
   fullscreen: false,
   queueOpen: false,
 });
 
 export async function restorePlaybackPrefs(): Promise<void> {
-  const [quality, volume, rate] = await Promise.all([
+  const [quality, volume, rate, crossfade] = await Promise.all([
     getPref('quality', 'standard'),
     getPref('playerVolume', 0.8),
     getPref('playbackRate', 1),
+    getPref(CROSSFADE_PREF_KEY, 0),
   ]);
   setQuality(String(quality || 'standard'), false);
   setVolume(Number(volume), false);
   setRate(Number(rate), false);
+  setCrossfadeMs(Number(crossfade), false);
 }
 
 export const hasCurrent: ComputedRef<boolean> = computed(() => !!player.current);
@@ -106,16 +123,238 @@ const keyOfEl = new WeakMap<HTMLAudioElement, string>();
 const urlOf = new WeakMap<HTMLAudioElement, string>();
 const spares: HTMLAudioElement[] = [];
 
+/** 每个元素的交叉增益。实际音量 = 用户音量 × 增益，只在 applyAudibleVolume 落地。 */
+const gains = new WeakMap<HTMLAudioElement, number>();
+const elByGainId = new Map<string, HTMLAudioElement>();
+const idOfEl = new WeakMap<HTMLAudioElement, string>();
+let gainSeq = 0;
+
+interface CrossfadeSession {
+  fromEl: HTMLAudioElement;
+  toEl: HTMLAudioElement;
+  toSong: Song;
+  toIndex: number;
+  fromSong: Song | null;
+  fromIndex: number;
+  metaSwapped: boolean;
+}
+
+let xfade: CrossfadeSession | null = null;
+
+interface CrossfadeClock {
+  now: number;
+  manual?: boolean;
+}
+
+function readCrossfadeClock(): CrossfadeClock | null {
+  const clock = (globalThis as { __LY_CROSSFADE_CLOCK__?: CrossfadeClock }).__LY_CROSSFADE_CLOCK__;
+  if (!clock || typeof clock !== 'object') return null;
+  return clock;
+}
+
+function elementId(el: HTMLAudioElement): string {
+  let id = idOfEl.get(el);
+  if (!id) {
+    gainSeq += 1;
+    id = 'a' + gainSeq;
+    idOfEl.set(el, id);
+  }
+  elByGainId.set(id, el);
+  return id;
+}
+
+function gainOf(el: HTMLAudioElement): number {
+  const g = gains.get(el);
+  if (g === undefined) return el === activeEl ? 1 : 0;
+  return g;
+}
+
+/** 全文件唯一的 audio.volume 写点。交叉层只改增益。 */
+function applyAudibleVolume(el: HTMLAudioElement | null): void {
+  if (!el) return;
+  el.volume = audibleVolume(player.volume, gainOf(el));
+}
+
+function parkElement(el: HTMLAudioElement | null): void {
+  if (!el) return;
+  try { el.pause(); } catch { /* 已经停了 */ }
+  el.muted = true;
+  gains.set(el, 0);
+  applyAudibleVolume(el);
+}
+
+function remainingMsOf(el: HTMLAudioElement): number | null {
+  const dur = el.duration;
+  const cur = el.currentTime;
+  if (!Number.isFinite(dur) || dur <= 0 || !Number.isFinite(cur)) return null;
+  return Math.max(0, (dur - cur) * 1000);
+}
+
+function indexOfElement(el: HTMLAudioElement): number {
+  const key = keyOfEl.get(el);
+  if (!key) return -1;
+  return player.queue.findIndex((s) => prepKey(s, player.quality) === key);
+}
+
+/**
+ * 中点才换「正在听的那首」。此前系统媒体键和界面标题都还是出去的歌。
+ */
+function commitCrossfadeSong(song: Song, index: number, el: HTMLAudioElement | null): void {
+  if (index >= 0 && index < player.queue.length) player.queueIdx = index;
+  player.current = song;
+  player.progress = el ? (el.currentTime || 0) : 0;
+  if (el && Number.isFinite(el.duration) && el.duration > 0) player.duration = el.duration;
+  else player.duration = (Number(song.duration) || 0) / 1000;
+  player.playing = true;
+  player.error = '';
+  void loadLyricsFor(song);
+  addRecent(song);
+  _lastSyncedKey = '';
+  syncOutputs(true);
+  // 按住即将成为当前的这首，避免预取表把它当成「不再是邻居」拆掉。
+  armNeighbors(song);
+}
+
+function handoffPrimary(id: string): void {
+  if (!xfade) return;
+  const el = elByGainId.get(id) || xfade.toEl;
+  activeEl = el;
+  el.muted = false;
+  gains.set(el, 1);
+  applyAudibleVolume(el);
+  el.playbackRate = player.rate;
+  if (!xfade.metaSwapped) {
+    xfade.metaSwapped = true;
+    commitCrossfadeSong(xfade.toSong, xfade.toIndex, el);
+  }
+  player.playing = !el.paused;
+  player.progress = el.currentTime || 0;
+  if (Number.isFinite(el.duration) && el.duration > 0) player.duration = el.duration;
+}
+
+function releaseFaded(id: string): void {
+  const session = xfade;
+  const el = elByGainId.get(id);
+  xfade = null;
+  if (el && el !== activeEl) parkElement(el);
+  armNeighbors(null);
+  // 进来的歌比交叉更短，淡完时已经 ended，不会再发一次。
+  if (session && session.toEl.ended) next(true);
+}
+
+/**
+ * 立刻收掉重叠。keep 是还要继续出声的那一路；none 是两路都停。
+ * 中点之前留下出去的歌，中点之后留下已经报给系统的那首。
+ */
+function collapseCrossfade(keep: 'from' | 'to' | 'none', opts: { pause?: boolean } = {}): void {
+  const session = xfade;
+  if (!session) return;
+  xfade = null;
+  try { xfCtrl.abort('collapse'); } catch { /* 编排器不在交叉中 */ }
+  const keepEl = keep === 'to' ? session.toEl : keep === 'from' ? session.fromEl : null;
+  for (const el of [session.fromEl, session.toEl]) {
+    if (el && el !== keepEl) parkElement(el);
+  }
+  if (!keepEl) {
+    player.playing = false;
+    return;
+  }
+  keepEl.muted = false;
+  gains.set(keepEl, 1);
+  applyAudibleVolume(keepEl);
+  keepEl.playbackRate = player.rate;
+  activeEl = keepEl;
+  if (keep === 'to' && !session.metaSwapped) {
+    commitCrossfadeSong(session.toSong, session.toIndex, keepEl);
+  } else if (keep === 'from') {
+    const idx = session.fromIndex >= 0 ? session.fromIndex : indexOfElement(session.fromEl);
+    if (session.metaSwapped && session.fromSong) {
+      player.current = session.fromSong;
+      if (idx >= 0) player.queueIdx = idx;
+      player.progress = keepEl.currentTime || 0;
+      _lastSyncedKey = '';
+      syncOutputs(true);
+    } else if (idx >= 0) {
+      player.queueIdx = idx;
+    }
+  }
+  if (opts.pause) {
+    try { keepEl.pause(); } catch { /* 已经停了 */ }
+    player.playing = false;
+    return;
+  }
+  if (keepEl.paused) {
+    const pending = keepEl.play();
+    if (pending && typeof pending.catch === 'function') {
+      pending.catch((e) => { if (!isBenignPlayError(e)) player.error = '恢复播放失败'; });
+    }
+  }
+  player.playing = true;
+}
+
+const xfCtrl = createCrossfadeController({
+  now: () => {
+    const clock = readCrossfadeClock();
+    if (clock && Number.isFinite(clock.now)) return clock.now;
+    return typeof performance !== 'undefined' ? performance.now() : Date.now();
+  },
+  setGain: (id: string, g: number) => {
+    const el = elByGainId.get(id);
+    if (!el) return;
+    gains.set(el, g);
+    applyAudibleVolume(el);
+  },
+  onMetadataSwap: () => {
+    if (!xfade || xfade.metaSwapped) return;
+    xfade.metaSwapped = true;
+    commitCrossfadeSong(xfade.toSong, xfade.toIndex, xfade.toEl);
+  },
+  onPrimaryChange: (id: string) => { handoffPrimary(id); },
+  onRelease: (id: string) => { releaseFaded(id); },
+});
+
+function installCrossfadeClock(): void {
+  const clock = readCrossfadeClock();
+  if (clock && clock.manual) {
+    xfCtrl.setTick(() => 0);
+    return;
+  }
+  const raf = globalThis.requestAnimationFrame;
+  const caf = globalThis.cancelAnimationFrame;
+  if (typeof raf === 'function' && typeof caf === 'function') {
+    xfCtrl.setTick((step: () => void) => {
+      const handle = raf(() => { step(); });
+      return { cancel: () => caf(handle) };
+    });
+  }
+}
+installCrossfadeClock();
+
+/** 测试用手动时钟推进一帧。生产走 requestAnimationFrame，不会来调它。 */
+export function pumpCrossfade(nowMs?: number): void {
+  const clock = readCrossfadeClock();
+  if (clock && Number.isFinite(nowMs)) clock.now = Number(nowMs);
+  xfCtrl.step(Number.isFinite(nowMs) ? Number(nowMs) : undefined);
+}
+
 function createBoundAudio(): HTMLAudioElement {
   created += 1;
   const a = new Audio();
   a.preload = 'auto';
   a.muted = true;
-  a.volume = 0;
+  gains.set(a, 0);
+  applyAudibleVolume(a);
   a.playbackRate = player.rate;
   // 备用元素也会 play/pause（用来逼 Chromium 真的去缓冲）。
   // 不是当前元素的事件一律丢掉，否则预热会把界面打成「已暂停」。
   a.addEventListener('timeupdate', () => {
+    // 中点之后进度跟进来的那首，哪怕主元素还没交过去。
+    if (xfade && xfade.metaSwapped && a === xfade.toEl) {
+      player.progress = a.currentTime || 0;
+      if (Number.isFinite(a.duration) && a.duration > 0) player.duration = a.duration;
+      syncOutputs();
+      return;
+    }
     if (a !== activeEl) return;
     // 切歌失败时 current 已换成新歌，元素仍是上一首。进度不能再跟那首走。
     const owned = keyOfEl.get(a) ?? null;
@@ -124,22 +363,34 @@ function createBoundAudio(): HTMLAudioElement {
     player.progress = a.currentTime || 0;
     if (Number.isFinite(a.duration) && a.duration > 0) player.duration = a.duration;
     syncOutputs();
+    maybeAutoCrossfade(a);
   });
   a.addEventListener('play', () => {
+    if (xfade && a === xfade.fromEl) return;
     if (a !== activeEl) return;
     player.playing = true;
     syncOutputs(true);
   });
   a.addEventListener('pause', () => {
+    // 出去的歌播到结尾会先 pause 再 ended。交叉还没完时这不是用户暂停。
+    if (xfade && (a === xfade.fromEl || a === xfade.toEl)) return;
     if (a !== activeEl) return;
     player.playing = false;
     syncOutputs(true);
   });
   a.addEventListener('ended', () => {
+    if (xfade && (a === xfade.fromEl || a === xfade.toEl)) return;
     if (a !== activeEl) return;
     next(true);
   });
   a.addEventListener('error', () => {
+    if (xfade && a === xfade.toEl) {
+      const song = xfade.toSong;
+      const index = xfade.toIndex;
+      collapseCrossfade('from');
+      void playSong(song, { index, forceHard: true });
+      return;
+    }
     if (a !== activeEl) return;
     player.error = '播放失败：音源不可达或已过期';
     player.playing = false;
@@ -164,12 +415,15 @@ function releaseElement(key: string): void {
   const el = owners.get(key);
   // 正在听的那首只从预取表摘掉，元素和已缓冲的字节留着，切回来不用再取流。
   if (!el || el === activeEl) return;
+  // 交叉的两路还在响，预取表收口不能把它们的 src 拆掉。
+  if (xfade && (el === xfade.fromEl || el === xfade.toEl)) return;
   owners.delete(key);
   keyOfEl.delete(el);
   urlOf.delete(el);
   el.pause();
   el.muted = true;
-  el.volume = 0;
+  gains.set(el, 0);
+  applyAudibleVolume(el);
   el.removeAttribute('src');
   el.src = '';
   try { el.load(); } catch { /* 释放备用元素失败不影响当前这首 */ }
@@ -183,6 +437,7 @@ function elementFor(key: string): HTMLAudioElement {
   if (!el && created >= POOL) {
     for (const [k, candidate] of owners) {
       if (candidate === activeEl) continue;
+      if (xfade && (candidate === xfade.fromEl || candidate === xfade.toEl)) continue;
       owners.delete(k);
       keyOfEl.delete(candidate);
       urlOf.delete(candidate);
@@ -203,11 +458,14 @@ function elementFor(key: string): HTMLAudioElement {
 function prime(el: HTMLAudioElement): void {
   if (el === activeEl) return;
   el.muted = true;
-  el.volume = 0;
+  gains.set(el, 0);
+  applyAudibleVolume(el);
   const pending = el.play();
   if (pending && typeof pending.then === 'function') {
     pending.then(() => {
       if (el === activeEl) return;
+      // 预热的 pause 若落在交叉已经把这路拉起来之后，会把进来的歌按停。
+      if (xfade && el === xfade.toEl) return;
       el.pause();
     }).catch(() => { /* 预热被切歌打断不是失败 */ });
   }
@@ -218,8 +476,15 @@ function attachUrl(el: HTMLAudioElement, key: string | null, fileUrl: string, pr
   if (urlOf.get(el) === fileUrl && el.src) return;
   urlOf.set(el, fileUrl);
   const warming = primeIt && el !== activeEl;
-  el.muted = warming ? true : el === activeEl ? false : el.muted;
-  el.volume = warming ? 0 : (el === activeEl ? player.volume : el.volume);
+  if (warming) {
+    el.muted = true;
+    gains.set(el, 0);
+    applyAudibleVolume(el);
+  } else if (el === activeEl) {
+    el.muted = false;
+    if (gains.get(el) === undefined) gains.set(el, 1);
+    applyAudibleVolume(el);
+  }
   el.preload = 'auto';
   el.src = fileUrl;
   try { el.load(); } catch { /* 个别环境对尚未就绪的元素 load 会抛 */ }
@@ -236,16 +501,18 @@ function bufferedElement(song: Song, quality: string): HTMLAudioElement | null {
 }
 
 async function activate(el: HTMLAudioElement, restart: boolean): Promise<void> {
+  if (xfade) collapseCrossfade('none');
   const prev = activeEl;
   activeEl = el;
-  if (prev && prev !== el) prev.pause();
+  if (prev && prev !== el) parkElement(prev);
   if (restart) {
     try {
       if (el.currentTime !== 0) el.currentTime = 0;
     } catch { /* 还没有 metadata，play() 会从头开始 */ }
   }
   el.muted = false;
-  el.volume = player.volume;
+  gains.set(el, 1);
+  applyAudibleVolume(el);
   el.playbackRate = player.rate;
   if (Number.isFinite(el.duration) && el.duration > 0) player.duration = el.duration;
   player.playing = true;
@@ -466,13 +733,116 @@ export async function playFromList(list: unknown, index = 0): Promise<void> {
   await playSong(song);
 }
 
+function beginCrossfade(
+  fromEl: HTMLAudioElement,
+  toEl: HTMLAudioElement,
+  song: Song,
+  index: number,
+  fadeOutMs: number,
+  fadeInMs: number,
+): void {
+  // 丢掉还在飞的冷取流，免得它在交叉中途把主元素换掉。
+  _reqSeq += 1;
+  const fromId = elementId(fromEl);
+  const toId = elementId(toEl);
+  xfade = {
+    fromEl,
+    toEl,
+    toSong: song,
+    toIndex: index,
+    fromSong: player.current,
+    fromIndex: indexOfElement(fromEl),
+    metaSwapped: false,
+  };
+  toEl.muted = false;
+  toEl.playbackRate = player.rate;
+  try {
+    if (toEl.currentTime !== 0) toEl.currentTime = 0;
+  } catch { /* 还没有 metadata，play() 会从头开始 */ }
+  gains.set(toEl, 0);
+  applyAudibleVolume(toEl);
+  const pending = toEl.play();
+  if (pending && typeof pending.then === 'function') {
+    pending.catch((e) => {
+      if (!xfade || xfade.toEl !== toEl) return;
+      if (isBenignPlayError(e)) return;
+      collapseCrossfade('from');
+      void playSong(song, { index, forceHard: true });
+    });
+  }
+  xfCtrl.start({
+    fromId,
+    toId,
+    fadeOutMs,
+    fadeInMs,
+    preloadOk: true,
+  });
+}
+
+/** 手动切歌：备用元素已经热好，并且决策允许重叠时才交叉。否则返回 false，调用方硬切。 */
+function tryBeginCrossfade(song: Song, index: number): boolean {
+  const fromEl = activeEl;
+  if (!fromEl || !fromEl.src || fromEl.error || fromEl.paused) return false;
+  const incoming = bufferedElement(song, player.quality);
+  if (!incoming || incoming === fromEl || incoming.error) return false;
+  const decision = decideCrossfade({
+    fadeMs: player.crossfadeMs,
+    enabled: player.crossfadeMs > 0,
+    preloadOk: true,
+    remainingMs: remainingMsOf(fromEl),
+    sameStream: false,
+    predictable: player.mode !== 'shuffle',
+    trigger: 'manual',
+  });
+  if (decision.mode !== 'none') return false;
+  beginCrossfade(fromEl, incoming, song, index, decision.fadeOutMs, decision.fadeInMs);
+  return true;
+}
+
+/**
+ * 自动连播：在当前曲结束前启动交叉。没缓好就什么都不做，
+ * 等 ended 走原来的硬切 —— 这里不再发一次取流，避免预载失败打成换源风暴。
+ */
+function maybeAutoCrossfade(el: HTMLAudioElement): void {
+  if (xfade || el !== activeEl || el.paused) return;
+  if (player.mode === 'shuffle' || player.mode === 'single') return;
+  if (!(player.crossfadeMs > 0)) return;
+  const idx = neighborIndex(player.queue.length, player.queueIdx, player.mode, 1);
+  if (idx == null) return;
+  const song = player.queue[idx];
+  if (!song) return;
+  const incoming = bufferedElement(song, player.quality);
+  if (!incoming || incoming === el || incoming.error) return;
+  const decision = decideCrossfade({
+    fadeMs: player.crossfadeMs,
+    enabled: true,
+    preloadOk: true,
+    remainingMs: remainingMsOf(el),
+    sameStream: false,
+    predictable: true,
+    trigger: 'auto',
+  });
+  if (decision.mode !== 'none') return;
+  beginCrossfade(el, incoming, song, idx, decision.fadeOutMs, decision.fadeInMs);
+}
+
+interface PlaySongRequest {
+  index?: number;
+  forceHard?: boolean;
+}
+
 /**
  * 播放单曲（不改变队列；调用方通常先 setQueue）。
+ * 邻居已在备用元素上时走交叉，当前曲和媒体键标题留到交叉中点再换。
  */
-export async function playSong(song: unknown): Promise<void> {
+export async function playSong(song: unknown, request: PlaySongRequest = {}): Promise<void> {
   const s = normalizeSong(song);
   if (!s) return;
+  if (xfade) collapseCrossfade('none');
+  const index = Number.isInteger(request.index) ? Number(request.index) : player.queueIdx;
+  if (!request.forceHard && tryBeginCrossfade(s, index)) return;
   const reqId = ++_reqSeq;
+  player.queueIdx = index;
   player.current = s;
   player.error = '';
   player.progress = 0;
@@ -560,6 +930,11 @@ function isBenignPlayError(e: unknown): boolean {
 }
 
 export function togglePlay(): void {
+  if (xfade) {
+    const keep = xfade.metaSwapped ? 'to' : 'from';
+    collapseCrossfade(keep, { pause: true });
+    return;
+  }
   const a = ensureActive();
   if (!a.src) {
     if (player.current) void playSong(player.current);
@@ -570,6 +945,10 @@ export function togglePlay(): void {
 }
 
 export function seekTo(seconds: number): void {
+  if (xfade) {
+    const keep = xfade.metaSwapped ? 'to' : 'from';
+    collapseCrossfade(keep);
+  }
   const a = activeEl;
   const s = Math.max(0, Number(seconds) || 0);
   if (a && a.src) a.currentTime = s;
@@ -579,14 +958,34 @@ export function seekTo(seconds: number): void {
 export function setVolume(v: number, persist = true): void {
   const n = Math.min(1, Math.max(0, Number(v) || 0));
   player.volume = n;
-  if (activeEl && !activeEl.muted) activeEl.volume = n;
+  // 交叉途中两路都按各自增益立刻跟着滑条走，不能只改正在听的那一个。
+  if (activeEl) applyAudibleVolume(activeEl);
+  if (xfade) {
+    applyAudibleVolume(xfade.fromEl);
+    applyAudibleVolume(xfade.toEl);
+  }
   if (persist) void setPref('playerVolume', n);
+}
+
+export function setCrossfadeMs(ms: number, persist = true): number {
+  const n = normalizeCrossfadeMs(ms);
+  player.crossfadeMs = n;
+  if (persist) void setPref(CROSSFADE_PREF_KEY, n);
+  if (n <= 0 && xfade) {
+    const keep = xfade.metaSwapped ? 'to' : 'from';
+    collapseCrossfade(keep);
+  }
+  return n;
 }
 
 export function setRate(r: number | string, persist = true): number {
   const n = Math.min(2, Math.max(0.5, Number(r) || 1));
   player.rate = n;
   if (activeEl) activeEl.playbackRate = n;
+  if (xfade) {
+    xfade.fromEl.playbackRate = n;
+    xfade.toEl.playbackRate = n;
+  }
   if (persist) void setPref('playbackRate', n);
   return n;
 }
@@ -594,6 +993,10 @@ export function setRate(r: number | string, persist = true): number {
 export function setQuality(q: string | null | undefined, persist = true): void {
   const nextQ = q || 'standard';
   if (nextQ === player.quality) return;
+  if (xfade) {
+    const keep = xfade.metaSwapped ? 'to' : 'from';
+    collapseCrossfade(keep);
+  }
   player.quality = nextQ;
   if (persist) void setPref('quality', nextQ);
   // 旧音质的缓冲不能拿来播。正在听的这首不打断，邻居按新音质重取。
@@ -602,6 +1005,7 @@ export function setQuality(q: string | null | undefined, persist = true): void {
 }
 
 export function cycleMode(): PlayMode {
+  if (xfade) collapseCrossfade(xfade.metaSwapped ? 'to' : 'from');
   const order: PlayMode[] = ['order', 'list-loop', 'single', 'shuffle'];
   const i = order.indexOf(player.mode);
   player.mode = order[(i + 1) % order.length];
@@ -627,10 +1031,20 @@ function pickIndex(dir: number): number {
 
 /** @param auto true=播完自动推进（single 模式重播本曲） */
 export function next(auto = false): void {
+  // 交叉期间出走元素的 ended 会再进这里。那一次必须吞掉，否则会连跳两首。
+  if (xfade && auto) return;
+  if (xfade && !auto) {
+    const stand = xfade.toIndex;
+    collapseCrossfade('none');
+    player.queueIdx = stand;
+  }
   // 单曲循环播完：同一条已经打开的流回到开头，不再取一次 URL。
   if (player.mode === 'single' && auto && activeEl && activeEl.src && !activeEl.error) {
     player.progress = 0;
     try { activeEl.currentTime = 0; } catch { /* metadata 未到时从头 play 即可 */ }
+    gains.set(activeEl, 1);
+    activeEl.muted = false;
+    applyAudibleVolume(activeEl);
     activeEl.play().catch((e) => {
       if (!isBenignPlayError(e)) player.error = '播放失败';
     });
@@ -639,18 +1053,25 @@ export function next(auto = false): void {
   const idx = pickIndex(1);
   if (idx < 0) { player.playing = false; return; }
   if (idx === player.queueIdx && player.mode !== 'single') { player.playing = false; return; }
-  player.queueIdx = idx;
-  void playSong(player.queue[idx]);
+  void playSong(player.queue[idx], { index: idx });
 }
 
 export function prev(): void {
+  if (xfade) {
+    const stand = xfade.toIndex;
+    collapseCrossfade('none');
+    player.queueIdx = stand;
+  }
   const idx = pickIndex(-1);
   if (idx < 0) return;
-  player.queueIdx = idx;
-  void playSong(player.queue[idx]);
+  void playSong(player.queue[idx], { index: idx });
 }
 
 export function removeFromQueue(index: number): void {
+  if (xfade) {
+    const keep = xfade.metaSwapped ? 'to' : 'from';
+    collapseCrossfade(keep);
+  }
   if (index < 0 || index >= player.queue.length) return;
   const wasCurrent = index === player.queueIdx;
   player.queue.splice(index, 1);
@@ -666,6 +1087,7 @@ export function removeFromQueue(index: number): void {
 }
 
 export function clearQueue(): void {
+  if (xfade) collapseCrossfade('none');
   player.queue.splice(0);
   player.queueIdx = -1;
   prep.invalidate();
