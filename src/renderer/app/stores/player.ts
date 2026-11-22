@@ -8,12 +8,14 @@
  *
  * 切歌延迟：若等用户点了下一首才串行做上面两步，出声前会空一段。
  * 可预测的邻居在当前这首一开始就解析，并静音预热到备用元素上；
- * 点击时直接播那个元素，不再等新的取流。随机模式猜不到下一首，仍走冷路径。
+ * 已经准备好时硬切直接播那个元素。还没准备好时，当前这首继续出声，
+ * 直到下一条流真正能播再切，中间不停成空白，也不跳过要点的那一首。
+ * 随机模式猜不到下一首，仍走冷路径，不预取一首可能会放错的歌。
  *
- * 邻居已经在备用元素上、并且交叉档位开着时，切歌改成重叠：
- * 出去的歌变轻、进来的歌同时变响，中间不留一段静音。编排在
- * playback/crossfade.js，本模块仍是唯一的 audio 所有者和音量写手。
- * 旧引擎的 crossfadeTo 继续是占位 —— 生产路径不迁回去。
+ * 切歌任何时候都硬切：下一首、上一首、点队列里的另一首、自然播完，
+ * 都不做重叠。crossfadeMs 仍按原档位保存，避免旧偏好看起来丢了，
+ * 但不再启动淡入淡出。编排层还在 playback/crossfade.js，本模块仍是
+ * 唯一的 audio 所有者和音量写手。旧引擎的 crossfadeTo 继续是占位。
  *
  * 竞态：切歌后旧请求的结果必须丢弃（_reqSeq），否则慢源会盖掉快源。
  * 唯一 audio 所有者：本模块，视图只读 state。
@@ -115,6 +117,8 @@ export const currentKey: ComputedRef<string> = computed(() => (player.current ? 
 /** 正在出声的元素。备用元素只负责把下一首/上一首的字节提前拉进来。 */
 let activeEl: HTMLAudioElement | null = null;
 let _reqSeq = 0;
+/** 正在等下一条流的切歌次数。大于 0 时，当前曲自然结束不能再往前跳一首。 */
+let switchesInFlight = 0;
 /** 同时只保留「正在听 + 下一首 + 上一首」，多出来的元素回收再复用。 */
 const POOL = 3;
 let created = 0;
@@ -144,6 +148,11 @@ let xfade: CrossfadeSession | null = null;
 interface CrossfadeClock {
   now: number;
   manual?: boolean;
+  /**
+   * 仅测试用来把「交叉已经在进行」造出来。
+   * 生产页面不设置它；crossfadeMs 也不会把它打开。
+   */
+  allowFade?: boolean;
 }
 
 function readCrossfadeClock(): CrossfadeClock | null {
@@ -381,6 +390,8 @@ function createBoundAudio(): HTMLAudioElement {
   a.addEventListener('ended', () => {
     if (xfade && (a === xfade.fromEl || a === xfade.toEl)) return;
     if (a !== activeEl) return;
+    // 用户已经点了下一首，这条流还在取。自然结束不能再 pick 一次，否则会跳过要点的那首。
+    if (switchesInFlight > 0) return;
     next(true);
   });
   a.addEventListener('error', () => {
@@ -500,23 +511,63 @@ function bufferedElement(song: Song, quality: string): HTMLAudioElement | null {
   return el;
 }
 
-async function activate(el: HTMLAudioElement, restart: boolean): Promise<void> {
-  if (xfade) collapseCrossfade('none');
+const HAVE_FUTURE_DATA = 3;
+
+/** 备用元素已经缓冲到能马上出声。这种切歌不等 play()，当场硬切。 */
+function streamReady(el: HTMLAudioElement): boolean {
+  return !!el.src && !el.error && el.readyState >= HAVE_FUTURE_DATA;
+}
+
+function stillAudible(el: HTMLAudioElement | null): el is HTMLAudioElement {
+  return !!(el && el.src && !el.paused && !el.ended && !el.error);
+}
+
+/**
+ * 切到 el。当前这首还在出声、而 el 还不能播时，先静音把它拉起来，
+ * 当前这首继续放；play() 真正开始后再硬切。已经缓冲好则当场切换。
+ */
+async function activate(el: HTMLAudioElement, restart: boolean, reqId: number): Promise<void> {
+  if (xfade) {
+    if (el === xfade.toEl) collapseCrossfade('to');
+    else if (el === xfade.fromEl) collapseCrossfade('from');
+    else collapseCrossfade(xfade.metaSwapped ? 'to' : 'from');
+  }
   const prev = activeEl;
-  activeEl = el;
-  if (prev && prev !== el) parkElement(prev);
+  const holdCurrent = stillAudible(prev) && prev !== el;
   if (restart) {
     try {
       if (el.currentTime !== 0) el.currentTime = 0;
     } catch { /* 还没有 metadata，play() 会从头开始 */ }
   }
+  el.playbackRate = player.rate;
+
+  if (holdCurrent && !streamReady(el)) {
+    el.muted = true;
+    gains.set(el, 0);
+    applyAudibleVolume(el);
+    try {
+      await el.play();
+    } catch (e) {
+      if (el !== activeEl) parkElement(el);
+      throw e;
+    }
+    if (reqId !== _reqSeq) {
+      if (el !== activeEl) parkElement(el);
+      return;
+    }
+  }
+
   el.muted = false;
   gains.set(el, 1);
   applyAudibleVolume(el);
   el.playbackRate = player.rate;
+  activeEl = el;
+  if (prev && prev !== el) parkElement(prev);
   if (Number.isFinite(el.duration) && el.duration > 0) player.duration = el.duration;
+  player.progress = el.currentTime || 0;
   player.playing = true;
-  await el.play();
+  syncOutputs(true);
+  if (el.paused) await el.play();
 }
 
 type ResolvedPlayable = { fileUrl: string } | { error: string };
@@ -779,8 +830,18 @@ function beginCrossfade(
   });
 }
 
-/** 手动切歌：备用元素已经热好，并且决策允许重叠时才交叉。否则返回 false，调用方硬切。 */
+/**
+ * 生产切歌不重叠。测试把 __LY_CROSSFADE_CLOCK__.allowFade 打开时，
+ * 才能走上原来的交叉，用来覆盖「交叉途中再按下一首/上一首」。
+ */
+function playbackUsesCrossfade(): boolean {
+  const clock = readCrossfadeClock();
+  return !!(clock && clock.allowFade);
+}
+
+/** 手动切歌：备用元素已经热好，并且测试显式允许重叠时才交叉。否则返回 false，调用方硬切。 */
 function tryBeginCrossfade(song: Song, index: number): boolean {
+  if (!playbackUsesCrossfade()) return false;
   const fromEl = activeEl;
   if (!fromEl || !fromEl.src || fromEl.error || fromEl.paused) return false;
   const incoming = bufferedElement(song, player.quality);
@@ -800,10 +861,12 @@ function tryBeginCrossfade(song: Song, index: number): boolean {
 }
 
 /**
- * 自动连播：在当前曲结束前启动交叉。没缓好就什么都不做，
- * 等 ended 走原来的硬切 —— 这里不再发一次取流，避免预载失败打成换源风暴。
+ * 生产路径直接返回：自然结束也硬切，不在曲尾提前重叠。
+ * 只有测试打开 allowFade 时才会走到下面的交叉。
+ * 没缓好就什么都不做，等 ended 硬切，避免预载失败打成换源风暴。
  */
 function maybeAutoCrossfade(el: HTMLAudioElement): void {
+  if (!playbackUsesCrossfade()) return;
   if (xfade || el !== activeEl || el.paused) return;
   if (player.mode === 'shuffle' || player.mode === 'single') return;
   if (!(player.crossfadeMs > 0)) return;
@@ -832,15 +895,41 @@ interface PlaySongRequest {
 }
 
 /**
+ * 给即将播放的那首一个不会盖掉「正在出声的元素」的 audio。
+ * 冷取流若写进当前元素，src 一换当前这首就停了，后面的缓冲全是空白。
+ */
+function elementForResolved(song: Song, quality: string, fileUrl: string): HTMLAudioElement {
+  const key = prepKey(song, quality);
+  let el: HTMLAudioElement | null = key ? bufferedElement(song, quality) : null;
+  if (!el && key) el = elementFor(key);
+  const playingOther = !!(
+    activeEl && activeEl.src && !activeEl.paused && !activeEl.ended && urlOf.get(activeEl) !== fileUrl
+  );
+  if (!el) {
+    el = playingOther ? (spares.pop() || createBoundAudio()) : ensureActive();
+  } else if (el === activeEl && playingOther) {
+    el = spares.pop() || createBoundAudio();
+    if (key) bindOwner(el, key);
+  }
+  if (urlOf.get(el) !== fileUrl || !el.src) attachUrl(el, key, fileUrl, false);
+  return el;
+}
+
+/**
  * 播放单曲（不改变队列；调用方通常先 setQueue）。
- * 邻居已在备用元素上时走交叉，当前曲和媒体键标题留到交叉中点再换。
+ * 任何切歌都硬切。下一条流还不能出声时，当前元素继续放。
  */
 export async function playSong(song: unknown, request: PlaySongRequest = {}): Promise<void> {
   const s = normalizeSong(song);
   if (!s) return;
-  if (xfade) collapseCrossfade('none');
+  if (xfade) {
+    const want = prepKey(s, player.quality);
+    const incoming = prepKey(xfade.toSong, player.quality);
+    collapseCrossfade(want && want === incoming ? 'to' : (xfade.metaSwapped ? 'to' : 'from'));
+  }
   const index = Number.isInteger(request.index) ? Number(request.index) : player.queueIdx;
   if (!request.forceHard && tryBeginCrossfade(s, index)) return;
+  switchesInFlight += 1;
   const reqId = ++_reqSeq;
   player.queueIdx = index;
   player.current = s;
@@ -860,17 +949,19 @@ export async function playSong(song: unknown, request: PlaySongRequest = {}): Pr
       addRecent(s);
       armNeighbors(null);
     } else {
-      // 取流失败时 activate 还没换元素，上一首会在新标题下面继续出声。
+      // 取流失败时还没换元素。标题已经是新歌，不能让上一首在新标题下面继续出声。
       if (activeEl) activeEl.pause();
       player.playing = false;
       player.progress = 0;
     }
   } catch (e) {
     if (reqId === _reqSeq && !isBenignPlayError(e)) {
-      player.playing = false;
+      const live = stillAudible(activeEl);
+      if (!live) player.playing = false;
       player.error = errorMessage(e) || (s.filePath ? '本地文件播放失败' : '播放异常');
     }
   } finally {
+    switchesInFlight -= 1;
     if (reqId === _reqSeq) player.loading = false;
   }
 }
@@ -885,8 +976,7 @@ async function playPreparedOrCold(s: Song, reqId: number): Promise<boolean> {
     if (reqId !== _reqSeq) return false;
     el = bufferedElement(s, player.quality);
     if (!el && hit && hit.fileUrl && player.quality === qualityAtStart) {
-      el = ensureActive();
-      attachUrl(el, key, hit.fileUrl, false);
+      el = elementForResolved(s, qualityAtStart, hit.fileUrl);
     }
   }
 
@@ -898,13 +988,11 @@ async function playPreparedOrCold(s: Song, reqId: number): Promise<boolean> {
       player.error = 'error' in resolved && resolved.error ? resolved.error : '无可用音源';
       return false;
     }
-    const freshKey = prepKey(s, quality);
-    el = (freshKey && bufferedElement(s, quality)) || ensureActive();
-    if (urlOf.get(el) !== resolved.fileUrl || !el.src) attachUrl(el, freshKey, resolved.fileUrl, false);
+    el = elementForResolved(s, quality, resolved.fileUrl);
   }
 
   if (reqId !== _reqSeq) return false;
-  await activate(el, true);
+  await activate(el, true, reqId);
   return reqId === _reqSeq;
 }
 
@@ -1033,10 +1121,11 @@ function pickIndex(dir: number): number {
 export function next(auto = false): void {
   // 交叉期间出走元素的 ended 会再进这里。那一次必须吞掉，否则会连跳两首。
   if (xfade && auto) return;
+  // 交叉已经在进行时，下一首就是正在进来的那首。立刻硬切过去，
+  // 不要两路都停掉再从它的下标往后跳，那会跳过这一首并冷取再下一首。
   if (xfade && !auto) {
-    const stand = xfade.toIndex;
-    collapseCrossfade('none');
-    player.queueIdx = stand;
+    collapseCrossfade('to');
+    return;
   }
   // 单曲循环播完：同一条已经打开的流回到开头，不再取一次 URL。
   if (player.mode === 'single' && auto && activeEl && activeEl.src && !activeEl.error) {
@@ -1058,9 +1147,8 @@ export function next(auto = false): void {
 
 export function prev(): void {
   if (xfade) {
-    const stand = xfade.toIndex;
-    collapseCrossfade('none');
-    player.queueIdx = stand;
+    collapseCrossfade('to');
+    return;
   }
   const idx = pickIndex(-1);
   if (idx < 0) return;

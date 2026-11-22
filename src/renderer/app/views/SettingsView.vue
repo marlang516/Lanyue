@@ -121,7 +121,7 @@ function onVolumeInput(e: Event) {
 
         <div class="group">
           <h4>无缝交叉</h4>
-          <p class="hint">下一首已经缓冲好时，两首歌重叠淡出淡入，中间不再空一段。自动连播也会在当前曲结束前交叉。关则立刻切换。</p>
+          <p class="hint">切歌始终立刻切换，不会把两首歌重叠起来。下一首、上一首和自动连播都一样。下面的档位仍会保存，避免已经记下的偏好丢失，但不会再用来做交叉。</p>
           <div class="row">
             <button
               v-for="ms in CROSSFADE_STEPS"

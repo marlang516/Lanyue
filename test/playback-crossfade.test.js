@@ -449,6 +449,9 @@ test('设置页露出交叉档位，prefs 键进白名单', async () => {
   const view = read('../src/renderer/app/views/SettingsView.vue');
   const settings = read('../src/renderer/app/stores/settings.ts');
   assert.match(view, /无缝交叉/);
+  assert.match(view, /切歌始终立刻切换/);
+  assert.doesNotMatch(view, /重叠淡出淡入/);
+  assert.doesNotMatch(view, /自动连播也会/);
   assert.match(view, /CROSSFADE_STEPS/);
   assert.match(view, /changeCrossfade/);
   assert.match(settings, /setCrossfadeMs/);
