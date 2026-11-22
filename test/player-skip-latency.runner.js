@@ -45,6 +45,13 @@ class FakeAudio {
   }
 
   play() {
+    const id = (String(this.src).match(/lanyue-stream:\/\/([^?]+)/) || [])[1] || '';
+    if (id && pendingPlay.has(id) && !this.playReleased) {
+      this.playCount += 1;
+      return new Promise((resolve) => {
+        pendingPlay.get(id)(this, resolve);
+      });
+    }
     this.paused = false;
     this.playCount += 1;
     this.readyState = 4;
@@ -71,6 +78,8 @@ g.window = g;
 g.Audio = FakeAudio;
 
 const calls = [];
+/** id -> (el, resolve) ，把 play() 停在「还不能出声」。用来钉切歌不能先停掉当前这首。 */
+const pendingPlay = new Map();
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -196,5 +205,42 @@ next();
 await waitFor(() => audible() === localPrimed, '本地下一首直接用预热元素');
 assert.equal(calls.filter((c) => c.op === 'url').length, beforeLocal);
 assert.ok(String(audible().src).startsWith('file://'));
+
+await playFromList([song('stay'), song('mid'), song('gap'), song('after')], 0);
+await waitFor(() => audible() && audible().src.includes('lanyue-stream://stay'), 'stay 在放');
+const stayEl = audible();
+let releaseGap = null;
+pendingPlay.set('gap', (el, resolve) => {
+  releaseGap = () => {
+    el.playReleased = true;
+    el.paused = false;
+    el.ended = false;
+    el.readyState = 4;
+    queueMicrotask(() => el.emit('play'));
+    resolve();
+  };
+});
+const jumping = playSong(song('gap'), { index: 2 });
+await delay(40);
+assert.equal(audible(), stayEl, 'getDownloadUrlSmart / proxyPlay 期间当前这首继续放');
+assert.equal(stayEl.paused, false);
+await waitFor(() => typeof releaseGap === 'function', 'gap 的 play() 已开始但还没出声');
+assert.equal(audible(), stayEl, '下一条流还不能出声时不能先停掉当前这首');
+assert.equal(stayEl.muted, false);
+assert.ok(stayEl.volume > 0);
+stayEl.emit('ended');
+await Promise.resolve();
+assert.equal(player.queueIdx, 2, '当前曲在等待期间结束，不能跳过正在等的那首');
+assert.notEqual(player.current && player.current.id, 'after');
+releaseGap();
+await jumping;
+await waitFor(() => audible() && String(audible().src).includes('lanyue-stream://gap'), 'gap 出声');
+assert.equal(player.current.id, 'gap');
+assert.equal(player.queueIdx, 2);
+assert.equal(stayEl.paused, true);
+assert.equal(audible().muted, false);
+assert.ok(audible().volume > 0);
+const afterEl = audios.find((a) => String(a.src).includes('lanyue-stream://after'));
+if (afterEl) assert.equal(afterEl.paused, true, '不能把再下一首放出来');
 
 console.log('player skip latency runner ok');
