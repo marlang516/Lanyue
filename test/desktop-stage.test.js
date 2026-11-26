@@ -163,6 +163,24 @@ test('舞台投桌面是独立透明窗：不改系统壁纸，也不挂进桌�
   assert.doesNotMatch(src, /type:\s*['"]desktop['"]/);
 });
 
+function secondaryEvent() {
+  const senderTrust = require('../src/main/ipc/senderTrust');
+  const { pathToFileURL } = require('node:url');
+  require('./helpers/ipcTrust').install();
+  const frame = {
+    url: pathToFileURL(path.join(ROOT, 'src/renderer/desktop-lyric.html')).href,
+    parent: null,
+  };
+  const webContents = {
+    id: 8800 + secondaryEvent.seq++,
+    isDestroyed: () => false,
+    mainFrame: frame,
+  };
+  senderTrust.trust(webContents, 'secondary');
+  return { sender: webContents, senderFrame: frame };
+}
+secondaryEvent.seq = 1;
+
 test('舞台窗点击穿透，锁定和悬停都不能把点击抢回来，也不抢焦点', () => {
   const { event } = require('./helpers/ipcTrust').install();
   const win = ipcWindow.createDesktopLyric('stage');
@@ -178,7 +196,51 @@ test('舞台窗点击穿透，锁定和悬停都不能把点击抢回来，也�
   const ignore = win.calls.filter((entry) => Array.isArray(entry) && entry[0] === 'setIgnoreMouseEvents');
   assert.ok(ignore.length >= 1);
   assert.equal(ignore.at(-1)[1], true);
-  assert.ok(!ignore.at(-1)[2] || ignore.at(-1)[2].forward !== true);
+  // 移动要转发，关闭钮才收得到 mouseenter。点击仍然穿透，直到关闭钮自己开孔。
+  assert.deepEqual(ignore.at(-1)[2], { forward: true });
+});
+
+test('舞台关闭钮只开一个点击孔，离开后继续穿透，且不抢焦点、不改壁纸', () => {
+  const event = secondaryEvent();
+  const win = ipcWindow.createDesktopLyric('stage');
+  const before = win.calls.length;
+  ipcHandlers.get('desktop-stage-hit')(event, true);
+  assert.equal(win.ignoreMouse, false, '指针在关闭钮上时这扇窗要能收到点击');
+  assert.equal(win.opts.focusable, false);
+  const opened = win.calls.slice(before);
+  assert.deepEqual(opened, [['setIgnoreMouseEvents', false, null]]);
+  assert.ok(!callNames(win).includes('focus'));
+  assert.ok(!callNames(win).includes('show'));
+  assert.ok(!callNames(win).includes('setWallpaper'));
+
+  ipcHandlers.get('desktop-stage-hit')(event, false);
+  assert.equal(win.ignoreMouse, true);
+  const restored = win.calls.at(-1);
+  assert.deepEqual(restored, ['setIgnoreMouseEvents', true, { forward: true }]);
+
+  const noise = win.calls.length;
+  ipcHandlers.get('desktop-stage-hit')(event, 'nope');
+  assert.equal(win.ignoreMouse, true, '非 true 一律回到穿透，不能被垃圾参数把孔留开');
+  assert.deepEqual(win.calls.at(-1), ['setIgnoreMouseEvents', true, { forward: true }]);
+  assert.ok(win.calls.length > noise);
+
+  const lyric = ipcWindow.createDesktopLyric('lyric');
+  const lyricBefore = lyric.calls.length;
+  ipcHandlers.get('desktop-stage-hit')(event, true);
+  assert.equal(lyric.calls.length, lyricBefore, '歌词条不吃舞台点击孔');
+  assert.ok(!lyric.calls.slice(lyricBefore).some((entry) => Array.isArray(entry) && entry[0] === 'setWallpaper'));
+});
+
+test('舞台上的关闭会关掉这扇窗，并让主窗口退出投射', () => {
+  const { event } = require('./helpers/ipcTrust').install();
+  mainSends.length = 0;
+  const win = ipcWindow.createDesktopLyric('stage');
+  const before = win.calls.length;
+  ipcHandlers.get('desktop-lyric-close')(event);
+  assert.equal(win.destroyed, true);
+  assert.ok(!win.calls.slice(before).includes('focus'));
+  assert.ok(!win.calls.slice(before).includes('setWallpaper'));
+  assert.deepEqual(mainSends.at(-1), ['sync-desktop-lyric', { closed: true }]);
 });
 
 test('关掉投射会关掉这扇窗，并告诉主窗口不用再省着画', () => {
@@ -252,6 +314,14 @@ test('主窗口舞台和全屏歌词在投射时走便宜档，桌面页仍是�
   assert.match(desk, /stageTitle\.textContent/);
   assert.doesNotMatch(desk, /stageTitle\.innerHTML/);
   assert.match(desk, /function desktopTrackSignature/);
+  assert.match(desk, /id="stageClose"/);
+  assert.match(desk, /aria-label="关闭舞台投桌面"/);
+  assert.match(desk, /desktop-stage-hit/);
+  assert.match(desk, /height:\s*44px/);
+  assert.match(desk, /pointer-events:\s*auto/);
+  assert.match(desk, /body\.stage-wall \.control-bar \{ display: none !important; \}/);
+  assert.doesNotMatch(desk, /\.focus\s*\(/);
+  assert.doesNotMatch(desk, /setWallpaper|SystemParametersInfo|IDesktopWallpaper/);
   assert.match(bar, /舞台投桌面/);
   assert.match(bar, /setDesktopStage/);
 });

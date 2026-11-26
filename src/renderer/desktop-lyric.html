@@ -87,7 +87,8 @@
     .dl-btn:hover { background: var(--elev-2); color: var(--fg-1); border-color: var(--stroke-2); }
     .dl-btn.active { color: var(--accent-ui); border-color: var(--accent-line); }
 
-    /* 舞台投桌面：同一页铺满，封面半透明垫底。控制条藏起来，窗本身已经穿透。 */
+    /* 舞台投桌面：同一页铺满，封面半透明垫底。歌词控制条藏起来。
+       窗本身穿透，只有右上角关闭钮能打开点击孔。 */
     .stage-wash, .stage-meta { display: none; }
     body.stage-wall { position: relative; }
     body.stage-wall .stage-wash {
@@ -126,7 +127,7 @@
       z-index: 2;
       top: 8vh;
       left: 8vw;
-      right: 8vw;
+      right: max(8vw, 128px);
       text-align: left;
       pointer-events: none;
     }
@@ -143,6 +144,41 @@
     body.stage-wall .stage-meta b { font-size: 22px; font-weight: var(--fw-bold); }
     body.stage-wall .stage-meta span { margin-top: 4px; font-size: 15px; color: rgba(255,255,255,.72); }
     body.stage-wall .control-bar { display: none !important; }
+    .stage-close { display: none; }
+    body.stage-wall .stage-close {
+      display: inline-flex;
+      position: absolute;
+      z-index: 6;
+      top: 18px;
+      right: 18px;
+      height: 44px;
+      min-width: 44px;
+      padding: 0 14px;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      border: 1px solid rgba(255, 255, 255, .38);
+      border-radius: var(--r-md);
+      background: rgba(12, 14, 20, .78);
+      color: #fff;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: var(--fw-semi);
+      letter-spacing: .04em;
+      cursor: pointer;
+      pointer-events: auto;
+      -webkit-app-region: no-drag;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, .35);
+    }
+    body.stage-wall .stage-close svg { width: 16px; height: 16px; flex-shrink: 0; }
+    body.stage-wall .stage-close:hover,
+    body.stage-wall .stage-close:focus-visible {
+      background: #e5484d;
+      border-color: #e5484d;
+      color: #fff;
+    }
+    body.stage-wall .stage-close:active { transform: scale(.96); }
     body.stage-wall .lyric-stage {
       -webkit-app-region: no-drag;
       position: relative;
@@ -170,6 +206,10 @@
     <div class="lyric-line next" id="lyricNext"></div>
     <div class="lyric-sub" id="lyricSub"></div>
   </div>
+  <button type="button" class="stage-close" id="stageClose" title="关闭舞台投桌面" aria-label="关闭舞台投桌面">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    关闭
+  </button>
   <div class="control-bar" id="controlBar">
     <button class="dl-btn" id="btnLock" title="锁定歌词（锁定后正文鼠标穿透，仅控制条可点）" aria-label="锁定或解锁歌词">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.9-1"/></svg>
@@ -342,7 +382,10 @@
       }
       if (typeof data.title === 'string' && stageTitle) stageTitle.textContent = data.title;
       if (typeof data.artist === 'string' && stageArtist) stageArtist.textContent = data.artist;
-      if (!data.stage) stopStageClock();
+      if (!data.stage) {
+        stopStageClock();
+        if (typeof setStageHit === 'function') setStageHit(false);
+      }
     }
 
     // ── 数据接收 ─────────────────────────────────────────
@@ -413,6 +456,21 @@
     document.getElementById('controlBar').addEventListener('mouseleave', () => {
       if (locked) window.miniAPI.send('desktop-lyric-set-ignore-mouse', true);
     });
+
+    // 舞台关闭钮：平时整窗穿透（移动仍转发）。指针进入按钮才开孔，离开立刻回到穿透。
+    // 不 focus。关闭走既有 desktop-lyric-close，主窗口播放条的开关仍然能关这扇窗。
+    let stageHitOpen = false;
+    function setStageHit(open) {
+      const next = document.body.classList.contains('stage-wall') && open === true;
+      if (stageHitOpen === next) return;
+      stageHitOpen = next;
+      window.miniAPI.send('desktop-stage-hit', next);
+    }
+    const stageClose = document.getElementById('stageClose');
+    stageClose.addEventListener('mouseenter', () => setStageHit(true));
+    stageClose.addEventListener('mousemove', () => setStageHit(true));
+    stageClose.addEventListener('mouseleave', () => setStageHit(false));
+    stageClose.addEventListener('click', () => window.miniAPI.send('desktop-lyric-close'));
 
     applyFontSize();
     renderLines();

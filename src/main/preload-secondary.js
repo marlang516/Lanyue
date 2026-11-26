@@ -4,7 +4,7 @@
  * 这两个窗口渲染的是远端来源的歌词/曲名（XSS 风险面），绝不能持有主窗口
  * musicAPI 的 ~90 个通道（delete-file / save-cookie / get-cookies / set-pref
  * 等）。放行清单由主进程注入的 --ipc-contract 参数派生（win:'secondary'
- * 标记，当前实测：7 个 send + 2 个 receive，见审查报告 C4/M2）。
+ * 标记，当前实测：8 个 send + 2 个 receive，见审查报告 C4/M2）。
  * sandbox preload 运行时不能 require 应用相对路径，故走 argv 注入。
  */
 const { contextBridge, ipcRenderer } = require('electron');
