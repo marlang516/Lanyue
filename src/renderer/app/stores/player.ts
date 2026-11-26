@@ -30,6 +30,7 @@ import {
   normalizeCrossfadeMs,
 } from '../../js/playback/crossfade.js';
 import { createAudibleSlots, createPlayableResolver } from '../../js/playback/wire.js';
+import { playingSourceId, switchSourceOptions } from '../../js/playerSourceBadge.js';
 import { call, callSafe, on } from '../core/bridge';
 import { getPref, getPrefBool, setPref } from '../core/prefs';
 import { normalizeSong, songKey } from '../core/song';
@@ -71,6 +72,8 @@ interface PlayerState {
   queueOpen: boolean;
   /** 播放舞台投到桌面歌词那一扇窗上。主窗口此时改走便宜档。 */
   desktopStage: boolean;
+  /** 这次音频实际来自的平台。换源成功后可能和 current.source 不同。 */
+  playSource: string;
 }
 
 export const player = reactive<PlayerState>({
@@ -92,6 +95,7 @@ export const player = reactive<PlayerState>({
   fullscreen: false,
   queueOpen: false,
   desktopStage: false,
+  playSource: '',
 });
 
 export async function restorePlaybackPrefs(): Promise<void> {
@@ -187,9 +191,18 @@ const audibleSlots = createAudibleSlots({
   },
 });
 
+interface PlayableHit {
+  fileUrl?: string;
+  error?: string;
+  source?: string;
+  matchedSong?: { source?: string; id?: string } | null;
+  degradedLocal?: boolean;
+  fromAltMemory?: boolean;
+}
+
 const resolvePlayable = createPlayableResolver({
   invoke: (method, ...args) => (call as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args),
-});
+}) as (song: Song, quality: string, options?: { allowToggleSource?: boolean; avoidSource?: string } | null) => Promise<PlayableHit>;
 
 function parkElement(el: HTMLAudioElement | null): void {
   if (!el) return;
@@ -223,6 +236,7 @@ function commitCrossfadeSong(song: Song, index: number, el: HTMLAudioElement | n
   else player.duration = (Number(song.duration) || 0) / 1000;
   player.playing = true;
   player.error = '';
+  publishNotedSource(song);
   void loadLyricsFor(song);
   addRecent(song);
   _lastSyncedKey = '';
@@ -568,10 +582,40 @@ function beginHandoff(
   }
 }
 
+/** 预取键 → 这次解析实际出声的平台。预取时只记账，成为当前曲才写上播放条。 */
+const sourceByKey = new Map<string, string>();
+
+function rememberMatched(song: Song, matched: { source?: unknown; id?: unknown } | null | undefined): void {
+  if (!matched || matched.source == null || matched.id == null) return;
+  if (String(matched.source).trim() === '' || String(matched.id).trim() === '') return;
+  song._altSource = { source: String(matched.source), id: String(matched.id) };
+}
+
+function notePlaySource(
+  song: Song,
+  resolved: { source?: string; fileUrl?: string; degradedLocal?: boolean; error?: string; matchedSong?: { source?: unknown; id?: unknown } | null } | null,
+  publish: boolean,
+): void {
+  const id = playingSourceId(song, resolved);
+  const key = prepKey(song, player.quality);
+  if (key && id) sourceByKey.set(key, id);
+  if (resolved) rememberMatched(song, resolved.matchedSong);
+  if (publish && id) player.playSource = id;
+}
+
+function publishNotedSource(song: Song): void {
+  const key = prepKey(song, player.quality);
+  const noted = key ? sourceByKey.get(key) : '';
+  player.playSource = noted || playingSourceId(song, song.filePath ? { fileUrl: 'file:' } : null);
+}
+
 const prep = createSkipPrep({
   resolve: async (song, quality) => {
     const resolved = await resolvePlayable(song as Song, quality);
-    if ('fileUrl' in resolved && resolved.fileUrl) return { fileUrl: resolved.fileUrl };
+    if ('fileUrl' in resolved && resolved.fileUrl) {
+      notePlaySource(song as Song, resolved, false);
+      return { fileUrl: resolved.fileUrl };
+    }
     return null;
   },
   onReady: ({ key, fileUrl }) => {
@@ -957,6 +1001,8 @@ function maybeAutoCrossfade(el: HTMLAudioElement): void {
 interface PlaySongRequest {
   index?: number;
   forceHard?: boolean;
+  /** 播放条一键换源：正在听的平台 id，交给现有智能取流跳过它。 */
+  avoidSource?: string;
 }
 
 /**
@@ -966,27 +1012,37 @@ interface PlaySongRequest {
 export async function playSong(song: unknown, request: PlaySongRequest = {}): Promise<void> {
   const s = normalizeSong(song);
   if (!s) return;
+  const avoid = typeof request.avoidSource === 'string' ? request.avoidSource : '';
+  const switching = avoid.length > 0;
+  const sameSong = !!(player.current && songKey(player.current) === songKey(s));
   if (xfade) collapseCrossfade('none');
   const index = Number.isInteger(request.index) ? Number(request.index) : player.queueIdx;
-  if (!request.forceHard && tryBeginCrossfade(s, index)) return;
+  if (!switching && !request.forceHard && tryBeginCrossfade(s, index)) return;
   const reqId = ++_reqSeq;
   player.queueIdx = index;
   player.current = s;
   player.error = '';
-  player.progress = 0;
-  player.duration = (Number(s.duration) || 0) / 1000;
+  if (!switching) {
+    player.progress = 0;
+    player.duration = (Number(s.duration) || 0) / 1000;
+    publishNotedSource(s);
+  }
   player.loading = true;
-  // 歌词异步加载：不阻塞出声，到达后歌词面板/桌面歌词自动刷新
-  void loadLyricsFor(s);
+  // 歌词异步加载：不阻塞出声。同一首只换源时不重载歌词，免得打断演出。
+  if (!(switching && sameSong)) void loadLyricsFor(s);
 
   try {
     // hold 住即将播放的这首，避免「索引已经挪过去」把正在飞的预取拆掉。
-    armNeighbors(s);
-    const played = await playPreparedOrCold(s, reqId);
+    if (!switching) armNeighbors(s);
+    const played = await playPreparedOrCold(s, reqId, avoid);
     if (reqId !== _reqSeq) return;
     if (played) {
       addRecent(s);
+      if (switching) prep.invalidate();
       armNeighbors(null);
+    } else if (switching && activeEl && activeEl.src) {
+      // 换源失败：原来的那路还在，停掉它用户会以为整首歌没了。
+      player.playing = !activeEl.paused;
     } else {
       // 取流失败时 activate 还没换元素，上一首会在新标题下面继续出声。
       if (activeEl) activeEl.pause();
@@ -995,7 +1051,7 @@ export async function playSong(song: unknown, request: PlaySongRequest = {}): Pr
     }
   } catch (e) {
     if (reqId === _reqSeq && !isBenignPlayError(e)) {
-      player.playing = false;
+      if (!(switching && activeEl && activeEl.src)) player.playing = false;
       player.error = errorMessage(e) || (s.filePath ? '本地文件播放失败' : '播放异常');
     }
   } finally {
@@ -1003,12 +1059,27 @@ export async function playSong(song: unknown, request: PlaySongRequest = {}): Pr
   }
 }
 
-async function playPreparedOrCold(s: Song, reqId: number): Promise<boolean> {
+/** 播放条一键换到其他可用源。走现有智能取流，只声明不要再试正在听的这个。 */
+export async function switchPlaySource(): Promise<void> {
+  const song = player.current;
+  if (!song || song.source === 'drop' || player.loading) return;
+  const avoid = player.playSource || playingSourceId(song, song.filePath ? { fileUrl: 'file:' } : null);
+  const opts = switchSourceOptions(avoid);
+  if (!opts) return;
+  await playSong(song, {
+    index: player.queueIdx,
+    forceHard: true,
+    avoidSource: opts.avoidSource,
+  });
+}
+
+async function playPreparedOrCold(s: Song, reqId: number, avoidSource = ''): Promise<boolean> {
+  const switching = avoidSource.length > 0;
   const qualityAtStart = player.quality;
   const key = prepKey(s, qualityAtStart);
-  let el: HTMLAudioElement | null = key ? bufferedElement(s, qualityAtStart) : null;
+  let el: HTMLAudioElement | null = (!switching && key) ? bufferedElement(s, qualityAtStart) : null;
 
-  if (!el && key && (prep.peek(s, qualityAtStart) || prep.isInflight(s, qualityAtStart))) {
+  if (!switching && !el && key && (prep.peek(s, qualityAtStart) || prep.isInflight(s, qualityAtStart))) {
     const hit = await prep.join(s, qualityAtStart);
     if (reqId !== _reqSeq) return false;
     el = bufferedElement(s, player.quality);
@@ -1018,14 +1089,24 @@ async function playPreparedOrCold(s: Song, reqId: number): Promise<boolean> {
     }
   }
 
+  if (el) publishNotedSource(s);
+
   if (!el) {
     const quality = player.quality;
-    const resolved = await resolvePlayable(s, quality);
+    const options = switching ? switchSourceOptions(avoidSource) : null;
+    if (switching && !options) {
+      player.error = '没有其他可用音源';
+      return false;
+    }
+    const resolved = options
+      ? await resolvePlayable(s, quality, options)
+      : await resolvePlayable(s, quality);
     if (reqId !== _reqSeq) return false;
     if (!('fileUrl' in resolved) || !resolved.fileUrl) {
       player.error = 'error' in resolved && resolved.error ? resolved.error : '无可用音源';
       return false;
     }
+    notePlaySource(s, resolved, true);
     const freshKey = prepKey(s, quality);
     el = (freshKey && bufferedElement(s, quality)) || ensureActive();
     if (urlOf.get(el) !== resolved.fileUrl || !el.src) attachUrl(el, freshKey, resolved.fileUrl, false);
@@ -1218,6 +1299,7 @@ export function removeFromQueue(index: number): void {
   if (!player.queue.length) {
     player.queueIdx = -1;
     player.current = null;
+    player.playSource = '';
     prep.invalidate();
     return;
   }
@@ -1248,11 +1330,23 @@ export function appendToQueue(songs: unknown): number {
 /** 队列持久化：主进程 save-play-queue / load-play-queue */
 export async function persistQueue(): Promise<void> {
   await callSafe('savePlayQueue', [{
-    queue: player.queue.map((s) => ({
-      id: s.id, source: s.source, title: s.title, artist: s.artist,
-      album: s.album, duration: s.duration, cover: s.cover,
-      ...(s.filePath ? { filePath: s.filePath } : {}),
-    })),
+    queue: player.queue.map((s) => {
+      const alt = s._altSource;
+      const altOk = alt && typeof alt === 'object'
+        && (alt as { source?: unknown }).source != null
+        && (alt as { id?: unknown }).id != null;
+      return {
+        id: s.id, source: s.source, title: s.title, artist: s.artist,
+        album: s.album, duration: s.duration, cover: s.cover,
+        ...(s.filePath ? { filePath: s.filePath } : {}),
+        ...(altOk ? {
+          _altSource: {
+            source: String((alt as { source?: unknown }).source),
+            id: String((alt as { id?: unknown }).id),
+          },
+        } : {}),
+      };
+    }),
     playIdx: player.queueIdx,
   }], null);
 }
@@ -1270,6 +1364,7 @@ export async function restoreQueue(): Promise<void> {
   const cur = player.queue[player.queueIdx];
   if (cur) {
     player.current = cur;
+    publishNotedSource(cur);
     player.duration = (Number(cur.duration) || 0) / 1000;
     player.progress = 0;
     void loadLyricsFor(cur);

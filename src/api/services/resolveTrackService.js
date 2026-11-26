@@ -96,6 +96,17 @@ function isDecisivelyDeadProbe(probe) {
   return probe.status === 404 || probe.status === 410;
 }
 
+/** 播放条点「换源」时传来的平台 id。别的形状一律当成没传。 */
+function avoidSourceOf(options) {
+  if (!options || typeof options.avoidSource !== 'string') return '';
+  const id = options.avoidSource.trim().toLowerCase();
+  return /^[a-z0-9_-]{1,32}$/.test(id) ? id : '';
+}
+
+function isAvoidedSource(source, avoid) {
+  return !!avoid && String(source || '').trim().toLowerCase() === avoid;
+}
+
 /**
  * 试听片段判定阈值：实测长度不足声明时长的**一半**才算片段。
  *
@@ -271,6 +282,10 @@ function createResolveTrackService({
    *        （记忆路径与候选路径），本源成功不调用。给程序化消费方
    *        （MCP 工具 / AI 助手）一个事件通道 —— 它们从结果对象里读不到
    *        「中途换过源」这件事。
+   * @param {string} [options.avoidSource] 这一次不要试的平台 id（播放条一键换源）。
+   *        只跳过这一个源，候选仍由 findCandidates 找、再按健康度重排。
+   *        非字符串或空串按未传。要真的去试别的源，调用方还得允许换源
+   *        （allowToggleSource 或全局开关）。
    * @param {boolean} [options.isRefresh] 强制重新解析，**跳过 `_altSource` 记忆**，
    *        强制走本源重新取流。
    *
@@ -310,6 +325,7 @@ function createResolveTrackService({
     const allowToggle = typeof options.allowToggleSource === 'boolean'
       ? options.allowToggleSource
       : crossSourceOn();
+    const avoid = avoidSourceOf(options);
 
     /**
      * 换源事件回调（可选）。
@@ -342,6 +358,7 @@ function createResolveTrackService({
      * 取流，'local' 不是平台 id，记忆会把下一次播放带进死胡同。
      */
     async function tryLocalFallback() {
+      if (isAvoidedSource('local', avoid)) return null;
       if (typeof findLocalMatch !== 'function') return null;
       let match = null;
       try {
@@ -378,7 +395,8 @@ function createResolveTrackService({
     const skipAltMemory = options.isRefresh === true;
     if (!skipAltMemory
         && allowToggle && alt && alt.source && alt.id && alt.source !== song.source && !hasCookie(song.source)
-        && !disabledPlatforms().has(alt.source)) {
+        && !disabledPlatforms().has(alt.source)
+        && !isAvoidedSource(alt.source, avoid)) {
       const r = await trySource(String(alt.id), alt.source, quality, verifyPreviewClip);
       if (isTrackSuccess(r)) {
         notifyToggled(song.source, alt.source, null);
@@ -389,21 +407,31 @@ function createResolveTrackService({
       // 记忆失效则继续走正常流程（不返回，不记日志噪声）
     }
 
-    // 2. 本源
-    const result = await trySource(song.id, song.source, quality, verifyPreviewClip);
-    if (isTrackSuccess(result)) {
-      return normalizeTrackResult(result);
+    // 2. 本源。播放条点了换源、且正在听的就是本源时，这一步不打请求。
+    let result = null;
+    let skippedOwn = false;
+    if (isAvoidedSource(song.source, avoid)) {
+      skippedOwn = true;
+    } else {
+      result = await trySource(song.id, song.source, quality, verifyPreviewClip);
+      if (isTrackSuccess(result)) {
+        return normalizeTrackResult(result);
+      }
     }
 
     // 3. 失败且可换源 ⇒ 跨源候选逐个尝试
+    //    主动换源（skippedOwn）同样要总开关或本次 allowToggle 允许，
+    //    否则不因为多了一个 avoidSource 就擅自去搜别的平台。
     //    总开关关闭时这一步整体跳过：用户诉求是「播放即本源，本源没有音源就诚实失败」，
     //    宁可少播一首，也不要拿别家平台的版本冒充这首歌。
     //    本地回退（005）例外于这条诉求：本地文件是用户自己下载的副本，不是别家冒充，
     //    总开关关闭时依然尝试——断网/下架时能听比诚实失败更重要。
-    if (!allowToggle || !shouldFallbackToOtherSource(result)) {
+    if (!allowToggle || (!skippedOwn && !shouldFallbackToOtherSource(result))) {
       const localHit = await tryLocalFallback();
       if (isTrackSuccess(localHit)) return localHit;
-      return normalizeTrackResult(result);
+      return normalizeTrackResult(skippedOwn
+        ? { error: '没有其他可用音源' }
+        : result);
     }
 
     let candidates = [];
@@ -437,11 +465,14 @@ function createResolveTrackService({
       : verifyPreviewClip;
 
     let tried = 0;
+    let lastFail = null;
     for (const cand of (Array.isArray(candidates) ? candidates : [])) {
       if (!cand || !cand.id || !cand.source) continue;
+      if (isAvoidedSource(cand.source, avoid)) continue;
       if (tried >= MAX_CANDIDATE_TRIES) break;
       tried++;
       const r = await trySource(String(cand.id), cand.source, quality, verifyCandidate);
+      if (!isTrackSuccess(r)) lastFail = r;
       if (isTrackSuccess(r)) {
         logger.log(`[ResolveTrack] 换源成功: "${song.title}" ${song.source} → ${cand.source}`);
         notifyToggled(song.source, cand.source, cand);
@@ -451,9 +482,14 @@ function createResolveTrackService({
       }
     }
 
-    // 4. 全失败：本地同曲回退（005）→ 仍无则返回本源原始错误（UI 文案与未换源时一致）
+    // 4. 全失败：本地同曲回退（005）→ 仍无则返回本源原始错误（UI 文案与未换源时一致）。
+    //    本源被这次换源跳过时，没有「本源原始错误」可回，改回最后一条候选失败，
+    //    候选也没试到就告诉用户没有其他可用源。
     const localHit = await tryLocalFallback();
     if (isTrackSuccess(localHit)) return localHit;
+    if (skippedOwn) {
+      return normalizeTrackResult(lastFail || { error: '没有其他可用音源' });
+    }
     return normalizeTrackResult(result);
   }
 

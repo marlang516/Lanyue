@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import {
   player, currentKey, togglePlay, next, prev, seekTo, setVolume, setRate,
   setQuality, cycleMode, forceSyncOutputs, setDesktopStage, openDesktopLyricWindow,
+  switchPlaySource,
 } from '../../stores/player';
 import type { PlayMode } from '../../stores/types';
 import { lyrics } from '../../stores/lyrics';
@@ -20,6 +21,20 @@ const MODE_LABEL: Readonly<Record<PlayMode, string>> = {
 const RATES: readonly number[] = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
 const fav = computed(() => (player.current ? isFavorite(player.current) : false));
+const sourceId = computed(() => player.playSource || player.current?.source || '');
+const sourceLabel = computed(() => (sourceId.value ? platformName(sourceId.value) : ''));
+const canSwitchSource = computed(() => {
+  const song = player.current;
+  if (!song || song.source === 'drop' || player.loading) return false;
+  return !!sourceId.value;
+});
+const sourceTitle = computed(() => (
+  sourceLabel.value ? `当前音源：${sourceLabel.value}。点击换到其他可用源` : ''
+));
+
+function onSwitchSource(): void {
+  void switchPlaySource();
+}
 const modeIcon = computed(() => MODE_ICON[player.mode] || 'list');
 const modeLabel = computed(() => MODE_LABEL[player.mode] || '顺序播放');
 const progressPct = computed(() => pct(player.progress, player.duration));
@@ -98,8 +113,17 @@ function onHeart(): void {
       </button>
       <div class="tx">
         <div class="t" :title="player.current?.title">{{ player.current ? player.current.title : '未在播放' }}</div>
-        <div class="a" :title="player.current ? `${player.current.artist} · ${platformName(player.current.source)}` : ''">
-          {{ player.current ? `${player.current.artist || '未知歌手'} · ${platformName(player.current.source)}` : '从列表点一首开始' }}
+        <div class="a">
+          <span class="who">{{ player.current ? (player.current.artist || '未知歌手') : '从列表点一首开始' }}</span>
+          <button
+            v-if="player.current && sourceLabel"
+            class="ly-tag src-badge"
+            type="button"
+            :disabled="!canSwitchSource"
+            :title="sourceTitle"
+            :aria-label="sourceTitle"
+            @click="onSwitchSource"
+          >{{ sourceLabel }}</button>
         </div>
       </div>
       <button
@@ -213,7 +237,16 @@ function onHeart(): void {
 @keyframes spin { to { transform: rotate(360deg); } }
 .tx { min-width: 0; flex: 1; }
 .t { font-size: var(--fs-sm); font-weight: var(--fw-bold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.a { margin-top: 2px; font-size: var(--fs-xs); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.a {
+  margin-top: 2px; display: flex; align-items: center; gap: 6px; min-width: 0;
+  font-size: var(--fs-xs); color: var(--ink-3);
+}
+.who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.src-badge {
+  flex-shrink: 0; max-width: 7em; overflow: hidden; text-overflow: ellipsis;
+  cursor: pointer; font: inherit; letter-spacing: 0;
+}
+.src-badge:disabled { cursor: default; opacity: .7; }
 .heart:disabled { opacity: .4; }
 .heart.on { color: var(--au-3); }
 .ly-icon-btn.on { color: var(--au-1); }

@@ -231,6 +231,7 @@ const resolveTrack = createResolveTrackService({
  * @param {(event:{type:'toggled',from:string,to:string})=>void} [options.onToggleSource]
  *        换源回调：只在真正发生切换时调用。
  * @param {boolean} [options.isRefresh] 跳过 `_altSource` 记忆，强制重新解析。
+ * @param {string} [options.avoidSource] 这次跳过的平台 id（播放条一键换源）。
  * @returns {Promise<{url,ext,...}|{error,code,...}>}
  */
 async function getDownloadUrlSmart(song, quality, options) {

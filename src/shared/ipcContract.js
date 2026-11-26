@@ -115,7 +115,7 @@ const CHANNELS = {
   // id/source 的最终合法性判定仍留在 handler（safeId/safeToken，错误文案是产品约定）
   // id/source 跨平台可能是 string/number，故保持 t.any()；最终合法性由 handler 判。
   'get-download-url':       { invoke: MAIN, args: [['id', t.any()], ['source', t.any()], ['quality', t.enum(['lossless', 'hq', 'standard'], 'standard')]] },
-  'get-download-url-smart': { invoke: MAIN, args: [['song', t.any()], ['quality', t.str(16)], ['options', t.shape({ fields: { allowToggleSource: t.bool(), isRefresh: t.bool() }, required: [] })]] },
+  'get-download-url-smart': { invoke: MAIN, args: [['song', t.any()], ['quality', t.str(16)], ['options', t.shape({ fields: { allowToggleSource: t.bool(), isRefresh: t.bool(), avoidSource: t.str(32) }, required: [] })]] },
   'add-to-queue':           { invoke: MAIN, args: [['song', t.shape({ fields: { id: t.any(), source: t.str(32), title: t.str(500), artist: t.str(500), album: t.str(500), cover: t.str(4000), duration: t.int(0, 86400000), quality: t.str(16), saveDir: t.str(1024), forceRedownload: t.bool(), numId: t.any(), albumMid: t.str(64), filePath: t.str(1024), url: t.str(4000) }, required: [] })]] },
   'cancel-download':        { invoke: MAIN, args: [['taskId', t.any()]] },
   'retry-download':         { invoke: MAIN, args: [['taskId', t.any()]] },

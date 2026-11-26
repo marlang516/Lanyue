@@ -31,6 +31,7 @@ import { createPlaybackEngine } from './engine.js';
 import { createAudioPool } from './audioPool.js';
 import { createProgressWriter } from '../player/progressStore.js';
 import { fileUrlFromPath } from '../../../shared/fileUrl.mjs';
+import { humanPlayFailure } from '../playerSourceBadge.js';
 
 /** 与旧播放器同一份来源页，在线歌代理时带上。 */
 const PLAY_REFERERS = Object.freeze({
@@ -57,28 +58,49 @@ function errorText(e) {
  * @param {object} deps
  * @param {(method: string, ...args: unknown[]) => Promise<unknown>} deps.invoke
  * @param {(filePath: string) => string} [deps.localFileUrl]
+ * @param {(key: string) => string} [deps.translate] 失败文案。缺省用中文，与播放条其它句子一致。
  */
-export function createPlayableResolver({ invoke, localFileUrl = fileUrlFromPath } = {}) {
+export function createPlayableResolver({ invoke, localFileUrl = fileUrlFromPath, translate } = {}) {
   if (typeof invoke !== 'function') throw new Error('[playback/wire] 缺少 invoke');
-  return async function resolvePlayable(song, quality) {
+  /**
+   * @param {object|null|undefined} song
+   * @param {string} quality
+   * @param {{ allowToggleSource?: boolean, avoidSource?: string }|null|undefined} [options]
+   * @returns {Promise<{ fileUrl?: string, error?: string, source?: string, matchedSong?: { source?: string, id?: string }|null, degradedLocal?: boolean, fromAltMemory?: boolean }>}
+   */
+  return async function resolvePlayable(song, quality, options) {
+    const ownSource = (song && song.source) || '';
     try {
-      if (song && song.filePath) return { fileUrl: localFileUrl(song.filePath) };
-      const result = await invoke('getDownloadUrlSmart', song, quality);
-      if (!result || !result.url) {
-        const err = result && (result.error || result.code);
-        return { error: err ? String(err) : '无可用音源' };
+      const leavingFile = options && typeof options.avoidSource === 'string' && options.avoidSource;
+      if (song && song.filePath && !leavingFile) {
+        return { fileUrl: localFileUrl(song.filePath), source: 'local' };
       }
-      if (result.degradedLocal) return { fileUrl: result.url };
-      const playSource = result.source || (song && song.source) || '';
+      const result = options
+        ? await invoke('getDownloadUrlSmart', song, quality, options)
+        : await invoke('getDownloadUrlSmart', song, quality);
+      if (!result || !result.url) {
+        return { error: humanPlayFailure(result, ownSource, translate) };
+      }
+      if (result.degradedLocal) {
+        return { fileUrl: result.url, source: 'local', degradedLocal: true };
+      }
+      const playSource = result.source || ownSource || '';
       const proxied = await invoke('proxyPlay', result.url, PLAY_REFERERS[playSource] || '', {
         id: String(result.id != null ? result.id : (song && song.id)),
         source: playSource,
         quality,
       });
-      if (!proxied || !proxied.fileUrl) return { error: (proxied && proxied.error) || '流代理失败' };
-      return { fileUrl: proxied.fileUrl };
+      if (!proxied || !proxied.fileUrl) {
+        return { error: humanPlayFailure({ error: (proxied && proxied.error) || '流代理失败' }, playSource, translate) };
+      }
+      return {
+        fileUrl: proxied.fileUrl,
+        source: playSource,
+        matchedSong: result.matchedSong || null,
+        fromAltMemory: !!result.fromAltMemory,
+      };
     } catch (e) {
-      return { error: errorText(e) || '播放异常' };
+      return { error: humanPlayFailure({ error: errorText(e) || '播放异常' }, ownSource, translate) };
     }
   };
 }
