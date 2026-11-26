@@ -42,7 +42,7 @@ export interface BridgeMethods {
   "getDefaultDir": () => Promise<unknown>;
   "getDownloadTemplates": () => Promise<unknown>;
   "getDownloadUrl": (id?: unknown, source?: unknown, quality?: "lossless" | "hq" | "standard") => Promise<unknown>;
-  "getDownloadUrlSmart": (song?: unknown, quality?: string, options?: { "allowToggleSource"?: boolean; "isRefresh"?: boolean }) => Promise<unknown>;
+  "getDownloadUrlSmart": (song?: unknown, quality?: string, options?: { "allowToggleSource"?: boolean; "isRefresh"?: boolean; "avoidSource"?: string }) => Promise<unknown>;
   "getHistoryStats": () => Promise<unknown>;
   "getHomeRecommendations": () => Promise<unknown>;
   "getHomeSection": (section?: string) => Promise<unknown>;

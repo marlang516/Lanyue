@@ -63,13 +63,14 @@ const PLATFORM_NAMES: Readonly<Record<string, string>> = Object.freeze({
   bilibili: 'B 站',
   soda: '汽水',
   fivesing: '5sing',
+  audiomack: 'Audiomack',
   local: '本地',
 });
 
 /**
  * 已注册、但不在上面这张旧表里的平台显示名。
  * 由 getPlatforms 的 manifest.name 灌入，避免每加一个源就改这张表或 i18n。
- * 已有中文名的八个源不在这里覆盖，以免搜索结果里的标签改口。
+ * 表里已经有显示名的源不在这里覆盖，以免搜索结果里的标签改口。
  */
 const liveNames: Record<string, string> = {};
 

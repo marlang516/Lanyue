@@ -44,14 +44,15 @@ function register() {
   //
   // options 是 2026-10-22 新增的第三参（P0 换源参数化，见
   // docs/design/P0-fallback-params.md）：
-  //   { allowToggleSource?, isRefresh?, onToggleSource? }
+  //   { allowToggleSource?, isRefresh?, avoidSource?, onToggleSource? }
   //
   // 安全约束：
   //   · onToggleSource 是**函数**，无法跨进程传递，因此这个键**永远不该出现**
   //     在渲染层发来的 options 里 —— 主进程收到就丢弃并告警。函数回调只能在
   //     主进程侧构造（见 MCP 工具面），或渲染层自己持有（不经过本通道）。
-  //   · 允许透传的是 allowToggleSource / isRefresh 两个布尔值。
-  //   · 契约规格是 t.obj()（只做形状检查），内部字段的语义校验放在这里。
+  //   · 允许透传的是 allowToggleSource / isRefresh 两个布尔，以及 avoidSource
+  //     这个平台 id（播放条一键换源，告诉现有 resolve 跳过正在听的源）。
+  //   · 契约规格是 t.shape()，内部字段的语义校验放在这里。
   handle('get-download-url-smart', async (_, song, quality, rawOptions) => {
 
     // 只摘取并校验可透传的两个布尔键。onToggleSource 若是函数，
@@ -67,6 +68,10 @@ function register() {
       }
       if (rawOptions.isRefresh === true) {
         cleaned.isRefresh = true;
+      }
+      if (typeof rawOptions.avoidSource === 'string') {
+        const token = rawOptions.avoidSource.trim().toLowerCase();
+        if (/^[a-z0-9_-]{1,32}$/.test(token)) cleaned.avoidSource = token;
       }
       if (typeof rawOptions.onToggleSource === 'function') {
         logger.warn('[stream] onToggleSource 是函数，无法跨 IPC 传递，已忽略');

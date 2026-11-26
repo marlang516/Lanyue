@@ -149,6 +149,25 @@ test('handler 处理脏入参：options 是 null/数组/垃圾值时不炸', asy
   }
 });
 
+test('handler 透传 avoidSource，并收成小写平台 id', async () => {
+  const api = require('../src/api');
+  const orig = api.getDownloadUrlSmart;
+  api.getDownloadUrlSmart = async (song, quality, options) => {
+    calls.push({ song, quality, options });
+    return { url: 'https://cdn/x.mp3', ext: 'mp3' };
+  };
+  try {
+    const song = { id: '1', source: 'netease', title: '测试曲', artist: '歌手A' };
+    await handler(null, song, 'standard', { allowToggleSource: true, avoidSource: 'Kuwo' });
+    const got = calls[calls.length - 1].options;
+    assert.deepStrictEqual(got, { allowToggleSource: true, avoidSource: 'kuwo' });
+    await handler(null, song, 'standard', { avoidSource: 'not a source' });
+    assert.strictEqual(calls[calls.length - 1].options, undefined, '非法平台 id 不应透传');
+  } finally {
+    api.getDownloadUrlSmart = orig;
+  }
+});
+
 test('handler 忽略非布尔的 allowToggleSource（脏值不污染语义）', async () => {
   const api = require('../src/api');
   const orig = api.getDownloadUrlSmart;
