@@ -142,3 +142,44 @@ export function switchSourceOptions(playingSource) {
   if (!/^[a-z0-9_-]{1,32}$/.test(avoid)) return null;
   return { allowToggleSource: true, avoidSource: avoid };
 }
+
+/** 一键换源最多等多久。再久徽章会停在 disabled，用户也看不到原因。 */
+export const SWITCH_SOURCE_DEADLINE_MS = 10000;
+/** 到期时播放条上的句子，与 toast.noSource 一致。 */
+export const SWITCH_TIMEOUT_ERROR = '暂无法获取音源，请稍后重试';
+
+let deadlineOverrideMs = 0;
+
+/**
+ * 测试把期限收短，避免真等 10 秒。生产路径不要调用。
+ * @param {number} ms
+ */
+export function _setSwitchDeadlineForTest(ms) {
+  const n = Number(ms);
+  deadlineOverrideMs = Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+export function switchSourceDeadlineMs() {
+  return deadlineOverrideMs > 0 ? deadlineOverrideMs : SWITCH_SOURCE_DEADLINE_MS;
+}
+
+/**
+ * 到期就交回 fallback，不再等 promise。
+ * 卡住的那次取流之后就算返回，结果也被丢掉，不会接着去换正在听的元素。
+ * @template T
+ * @param {Promise<T>} promise
+ * @param {number} ms
+ * @param {T} fallback
+ * @returns {Promise<T>}
+ */
+export function awaitWithin(promise, ms, fallback) {
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let timer = null;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  const guarded = Promise.resolve(promise).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+  return Promise.race([guarded, timeout]);
+}

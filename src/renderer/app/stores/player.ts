@@ -30,7 +30,13 @@ import {
   normalizeCrossfadeMs,
 } from '../../js/playback/crossfade.js';
 import { createAudibleSlots, createPlayableResolver } from '../../js/playback/wire.js';
-import { playingSourceId, switchSourceOptions } from '../../js/playerSourceBadge.js';
+import {
+  awaitWithin,
+  playingSourceId,
+  SWITCH_TIMEOUT_ERROR,
+  switchSourceDeadlineMs,
+  switchSourceOptions,
+} from '../../js/playerSourceBadge.js';
 import { call, callSafe, on } from '../core/bridge';
 import { getPref, getPrefBool, setPref } from '../core/prefs';
 import { normalizeSong, songKey } from '../core/song';
@@ -1110,9 +1116,14 @@ async function playPreparedOrCold(s: Song, reqId: number, avoidSource = ''): Pro
       player.error = '没有其他可用音源';
       return false;
     }
-    const resolved = options
-      ? await resolvePlayable(s, quality, options)
-      : await resolvePlayable(s, quality);
+    const pending = options
+      ? resolvePlayable(s, quality, options)
+      : resolvePlayable(s, quality);
+    // 换源时取流可能停在候选 DNS / getUrl 上，IPC 永远不回来。
+    // 到期就当这次没换上，原来的元素还没被换掉，接着听。
+    const resolved = switching
+      ? await awaitWithin(pending, switchSourceDeadlineMs(), { error: SWITCH_TIMEOUT_ERROR })
+      : await pending;
     if (reqId !== _reqSeq) return false;
     if (!('fileUrl' in resolved) || !resolved.fileUrl) {
       player.error = 'error' in resolved && resolved.error ? resolved.error : '无可用音源';

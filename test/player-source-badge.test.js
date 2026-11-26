@@ -15,6 +15,8 @@ import {
   playingSourceId,
   humanPlayFailure,
   switchSourceOptions,
+  awaitWithin,
+  SWITCH_TIMEOUT_ERROR,
 } from '../src/renderer/js/playerSourceBadge.js';
 import { sourceErrorText } from '../src/renderer/js/sourceError.js';
 import { createPlayableResolver } from '../src/renderer/js/playback/wire.js';
@@ -99,6 +101,24 @@ test('失败人话与 sourceError 的句子一致', () => {
       `${source} ${code}`,
     );
   }
+});
+
+test('换源超过期限就交回人话，不等那次卡住的取流', async () => {
+  assert.equal(SWITCH_TIMEOUT_ERROR, zh['toast.noSource']);
+  const hung = new Promise(() => {});
+  const started = Date.now();
+  const late = awaitWithin(hung, 30, { error: SWITCH_TIMEOUT_ERROR });
+  const result = await late;
+  assert.equal(result.error, zh['toast.noSource']);
+  assert.ok(Date.now() - started < 500);
+  const fast = await awaitWithin(Promise.resolve({ fileUrl: 'lanyue-stream://1', source: 'kuwo' }), 200, {
+    error: SWITCH_TIMEOUT_ERROR,
+  });
+  assert.equal(fast.source, 'kuwo');
+  assert.equal(
+    humanPlayFailure({ error: SWITCH_TIMEOUT_ERROR, code: 'INTERNAL_ERROR' }, 'netease'),
+    zh['toast.noSource'],
+  );
 });
 
 test('一键换源只生成现有取流选项，不自己挑平台', () => {

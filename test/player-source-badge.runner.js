@@ -84,6 +84,9 @@ g.window.__LY_MOCK__ = {
     if (options && options.avoidSource === 'kuwo' && song.id === '1') {
       return { code: 'COPYRIGHT_RESTRICTED', error: 'COPYRIGHT_RESTRICTED' };
     }
+    if (options && options.avoidSource && song.id === 'hang') {
+      return new Promise(() => {});
+    }
     if (options && options.avoidSource === 'netease' && song.id === '1') {
       return {
         url: 'https://cdn.example/kuwo.mp3',
@@ -171,5 +174,20 @@ await playSong(song('bad'));
 await waitFor(() => player.error, '取流失败');
 assert.match(String(player.error), /VIP/);
 assert.doesNotMatch(String(player.error), /^VIP_REQUIRED$/);
+
+const { _setSwitchDeadlineForTest } = await import('../src/renderer/js/playerSourceBadge.js');
+_setSwitchDeadlineForTest(40);
+await playSong(song('hang'));
+await waitFor(() => player.playSource === 'netease' && player.current.id === 'hang' && !player.loading, '卡住曲开播');
+const hangSrc = audios.find((a) => !a.paused && a.src.includes('hang'));
+assert.ok(hangSrc, '换源前卡住曲应正在出声');
+player.error = '';
+await switchPlaySource();
+await waitFor(() => player.error && !player.loading, '换源卡住要给人话并解开徽章');
+assert.match(String(player.error), /暂无法获取音源/);
+assert.equal(player.loading, false, '徽章不能一直停在 disabled');
+assert.equal(player.playSource, 'netease', '没换成就不要改正在听的源');
+assert.equal(hangSrc.paused, false, '换源失败或超时应继续播原来的那路');
+assert.ok(String(hangSrc.src).includes('hang'), '原来的地址不能被换源尝试拆掉');
 
 console.log('player source badge runner ok');
