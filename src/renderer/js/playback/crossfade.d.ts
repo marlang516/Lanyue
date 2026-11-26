@@ -31,6 +31,34 @@ export function decideCrossfade(opts?: {
   trigger?: 'manual' | 'auto';
 }): CrossfadeDecision;
 
+/** 单源交接默认提前量（ms）。交叉档位开着时改用那一档。 */
+export const HANDOFF_LEAD_MS: number;
+
+/** prefs 键 singleSourceHandoff。 */
+export const HANDOFF_PREF_KEY: string;
+
+export interface TrackTransitionDecision {
+  mode: 'none' | 'hardCut' | 'handoff';
+  durationMs: number;
+  midpointMs: number;
+  fadeOutMs: number;
+  fadeInMs: number;
+  reason: string;
+  leadMs?: number;
+}
+
+/** handoff 为 false 时与 decideCrossfade 相同；为 true 时成功路径是单源交接。 */
+export function decideTrackTransition(opts?: {
+  handoff?: boolean;
+  fadeMs?: number;
+  enabled?: boolean;
+  preloadOk?: boolean;
+  remainingMs?: number | null;
+  sameStream?: boolean;
+  predictable?: boolean;
+  trigger?: 'manual' | 'auto';
+}): TrackTransitionDecision;
+
 /** 元素实际音量 = 用户音量 × 交叉增益。 */
 export function audibleVolume(userVolume: number, gain: number): number;
 

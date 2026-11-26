@@ -28,6 +28,13 @@
  * ------------------
  * engine.js 是「<audio> 的唯一所有者」，本模块是「<audio> 的持有者」。
  * engine.js 通过 pool 拿实例，pool 不知道 engine 的存在。
+ *
+ * 隐藏预热与单源交接
+ * ------------------
+ * hiddenWarmup 把下一首载进备用实例，增益保持 0、元素保持静音，
+ * 预热过程不可闻。handoff 先把其它实例全部关掉，再只打开进来的那一个，
+ * 所以交接瞬间不会有两路同时出声。这是重叠交叉旁边的另一条路，
+ * 不替换 crossfade 的斜坡。
  */
 
 import { EQ_BANDS } from './eqBands.js';
@@ -69,7 +76,12 @@ export function createSingleInstancePool(audio) {
  * @param {object|null} [deps.logger]                  日志器
  * @returns {object} 池实例
  */
-export function createAudioPool({ elements = {}, audioContextFactory = null, logger = null } = {}) {
+export function createAudioPool({
+  elements = {},
+  audioContextFactory = null,
+  logger = null,
+  applyOutput = null,
+} = {}) {
   const ids = Object.keys(elements).filter((id) => elements[id]);
   if (!ids.length) throw new Error('[audioPool] 至少需要一个音频元素');
 
@@ -199,6 +211,141 @@ export function createAudioPool({ elements = {}, audioContextFactory = null, log
     return ids.slice();
   }
 
+  /** 每个实例的输出槽增益。缺省 0：没被打开过的槽不可闻。 */
+  const slotGain = new Map();
+
+  function clampSlotGain(gain) {
+    const n = Number(gain);
+    if (!Number.isFinite(n)) return 0;
+    return Math.min(1, Math.max(0, n));
+  }
+
+  function slotGainOf(id) {
+    return slotGain.has(id) ? slotGain.get(id) : 0;
+  }
+
+  /**
+   * 这一槽现在算不算在出声。静音或增益为 0 都不算，
+   * 即使 play() 已经调用过（隐藏预热就是这种）。
+   */
+  function isAudible(id) {
+    const el = elements[id];
+    if (!el) return false;
+    return slotGainOf(id) > 0 && el.muted !== true;
+  }
+
+  function writeSlotGain(id, gain) {
+    const next = clampSlotGain(gain);
+    slotGain.set(id, next);
+    const el = elements[id];
+    if (!el) return next;
+    el.muted = !(next > 0);
+    if (typeof applyOutput === 'function') applyOutput(el, next);
+    else if ('volume' in el) el.volume = next;
+    return next;
+  }
+
+  /**
+   * 把 src 载到备用槽上并点一次 play，迫使缓冲开始。
+   * 全程增益 0、muted。play 的承诺落地后如果这槽仍不该出声，就 pause，
+   * 缓冲留在元素上。stayHidden 返回 false 时不再 pause，避免交接或交叉
+   * 已经把这槽拉起来之后又被预热按停。
+   *
+   * @param {string} id
+   * @param {string} [src]
+   * @param {{ stayHidden?: () => boolean }} [opts]
+   */
+  function hiddenWarmup(id, src, opts = {}) {
+    const el = elements[id];
+    if (!el) return { ok: false, audible: false, reason: 'missing' };
+    writeSlotGain(id, 0);
+    if (typeof src === 'string' && src && el.src !== src) {
+      el.src = src;
+      el.preload = 'auto';
+      try {
+        if (typeof el.load === 'function') el.load();
+      } catch (e) {
+        warn('warmup load 失败:', e && e.message);
+      }
+    }
+    const stayHidden = typeof opts.stayHidden === 'function'
+      ? opts.stayHidden
+      : () => !(slotGainOf(id) > 0);
+    const conceal = () => {
+      if (!stayHidden()) return;
+      try {
+        if (typeof el.pause === 'function') el.pause();
+      } catch (e) {
+        warn('warmup pause 失败:', e && e.message);
+      }
+      writeSlotGain(id, 0);
+    };
+    let pending = null;
+    try {
+      pending = typeof el.play === 'function' ? el.play() : null;
+    } catch (e) {
+      warn('warmup play 失败:', e && e.message);
+      conceal();
+      return { ok: true, audible: false, reason: 'play' };
+    }
+    if (pending && typeof pending.then === 'function') pending.then(conceal, conceal);
+    else conceal();
+    return { ok: true, audible: isAudible(id) };
+  }
+
+  /**
+   * 单源交接。先把除了进来这一槽以外的全部增益打到 0 并 pause，
+   * 然后才打开进来的槽。prepare 在仍然静音时调用（例如把进度拨回 0）。
+   * 进来的槽没有 src，或元素报错，则什么都不改，调用方硬切。
+   *
+   * @param {string} fromId 正在出声的槽；不在池里时仍会关掉池内其它槽
+   * @param {string} toId
+   * @param {{ prepare?: (el: HTMLAudioElement) => void }} [opts]
+   */
+  function handoff(fromId, toId, opts = {}) {
+    const to = elements[toId];
+    if (!to || !to.src || to.error) {
+      return { ok: false, mode: 'hardCut', reason: 'preload' };
+    }
+    const silenceOrder = [];
+    if (fromId && fromId !== toId && elements[fromId]) silenceOrder.push(fromId);
+    for (const id of ids) {
+      if (id !== toId && !silenceOrder.includes(id)) silenceOrder.push(id);
+    }
+    for (const id of silenceOrder) {
+      writeSlotGain(id, 0);
+      const el = elements[id];
+      if (!el || typeof el.pause !== 'function') continue;
+      try {
+        el.pause();
+      } catch (e) {
+        warn('handoff pause 失败:', e && e.message);
+      }
+    }
+    if (typeof opts.prepare === 'function') {
+      try {
+        opts.prepare(to);
+      } catch (e) {
+        warn('handoff prepare 失败:', e && e.message);
+      }
+    }
+    writeSlotGain(toId, 1);
+    let play = null;
+    try {
+      play = typeof to.play === 'function' ? to.play() : null;
+    } catch (e) {
+      warn('handoff play 失败:', e && e.message);
+      return { ok: false, mode: 'hardCut', reason: 'play' };
+    }
+    const audibleIds = ids.filter((id) => isAudible(id));
+    return {
+      ok: audibleIds.length <= 1,
+      mode: 'handoff',
+      play,
+      audibleIds,
+    };
+  }
+
   /**
    * 挂载一个额外的实例（交叉淡入淡出启用时才建第二个元素）。
    *
@@ -246,6 +393,9 @@ export function createAudioPool({ elements = {}, audioContextFactory = null, log
     listIds,
     attach,
     detach,
+    hiddenWarmup,
+    handoff,
+    isAudible,
     /** 取共享的 AudioContext（引擎负责它的生命周期） */
     getContext: resolveContext,
     INSTANCE_IDS,

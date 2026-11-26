@@ -274,6 +274,83 @@ export function decideCrossfade({
 }
 
 /**
+ * 单源交接没选交叉时长时，用这一档判断「还够不够交接」。
+ * 和交叉同一套尾部窗口，只是交接时不让两路同时出声。
+ */
+export const HANDOFF_LEAD_MS = 1000;
+
+/** prefs 键。和 crossfadeMs 并列，打开它不改写交叉档位。 */
+export const HANDOFF_PREF_KEY = 'singleSourceHandoff';
+
+/** 有交叉档位就用那一档当提前量，否则用默认提前量。 */
+export function handoffLeadMs(fadeMs) {
+  const fade = normalizeCrossfadeMs(fadeMs);
+  return fade > 0 ? fade : HANDOFF_LEAD_MS;
+}
+
+/**
+ * 切歌走重叠交叉还是单源交接。
+ *
+ * handoff 为 false 时与 decideCrossfade 同一结果（重叠或硬切）。
+ * handoff 为 true 时，本来会重叠的情况改成 handoff；随机、未预热、
+ * 剩余时间不够、同一条流，仍是硬切。两套不叠在同一次切歌上。
+ *
+ * @param {object} [opts]
+ * @param {boolean} [opts.handoff]
+ * @param {number} [opts.fadeMs]
+ * @param {boolean} [opts.enabled] 仅重叠路径使用；交接路径自己有开关
+ * @param {boolean} [opts.preloadOk]
+ * @param {number|null} [opts.remainingMs]
+ * @param {boolean} [opts.sameStream]
+ * @param {boolean} [opts.predictable]
+ * @param {'manual'|'auto'} [opts.trigger]
+ * @returns {{ mode: 'none'|'hardCut'|'handoff', durationMs: number, midpointMs: number, fadeOutMs: number, fadeInMs: number, reason: string, leadMs?: number }}
+ */
+export function decideTrackTransition({
+  handoff = false,
+  fadeMs = 0,
+  enabled = true,
+  preloadOk = false,
+  remainingMs = null,
+  sameStream = false,
+  predictable = true,
+  trigger = 'manual',
+} = {}) {
+  if (handoff) {
+    const lead = handoffLeadMs(fadeMs);
+    const decided = decideCrossfade({
+      fadeMs: lead,
+      enabled: true,
+      preloadOk,
+      remainingMs,
+      sameStream,
+      predictable,
+      trigger,
+    });
+    if (decided.mode === 'hardCut') return decided;
+    return {
+      mode: 'handoff',
+      durationMs: 0,
+      midpointMs: 0,
+      fadeOutMs: 0,
+      fadeInMs: 0,
+      reason: 'ok',
+      leadMs: lead,
+    };
+  }
+  const fade = normalizeCrossfadeMs(fadeMs);
+  return decideCrossfade({
+    fadeMs: fade,
+    enabled: enabled !== false && fade > 0,
+    preloadOk,
+    remainingMs,
+    sameStream,
+    predictable,
+    trigger,
+  });
+}
+
+/**
  * 元素实际音量。交叉层只产增益，写 audio.volume 的那一处用这个合成。
  * @param {number} userVolume 用户音量 0..1
  * @param {number} gain 该实例的交叉增益 0..1
