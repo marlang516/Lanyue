@@ -69,6 +69,8 @@ interface PlayerState {
   // 播放器扩展面板（不进入导航）
   fullscreen: boolean;
   queueOpen: boolean;
+  /** 播放舞台投到桌面歌词那一扇窗上。主窗口此时改走便宜档。 */
+  desktopStage: boolean;
 }
 
 export const player = reactive<PlayerState>({
@@ -89,6 +91,7 @@ export const player = reactive<PlayerState>({
   // 播放器扩展面板（不进入导航）
   fullscreen: false,
   queueOpen: false,
+  desktopStage: false,
 });
 
 export async function restorePlaybackPrefs(): Promise<void> {
@@ -653,11 +656,16 @@ interface MiniPlayerPayload {
   quality?: string;
 }
 
-/** 桌面歌词载荷（changed 时才附加整份歌词） */
+/** 桌面歌词载荷（changed 时才附加整份歌词；舞台投射多带封面和播放态） */
 interface DesktopLyricPayload {
   currentTime: number;
   lyrics?: DesktopLyricLine[];
   title?: string;
+  artist?: string;
+  cover?: string;
+  stage?: boolean;
+  playing?: boolean;
+  rate?: number;
 }
 
 /** 播放态推进一步歌词轨。暂停不建行。 */
@@ -726,7 +734,18 @@ function syncOutputs(force = false): void {
   }
   void callSafe('syncMiniPlayer', [payload], null);
 
-  const dl: DesktopLyricPayload = { currentTime: player.progress };
+  const dl: DesktopLyricPayload = {
+    currentTime: player.progress,
+    stage: player.desktopStage,
+  };
+  // 舞台那一份要封面和播放态。歌词正文仍只在换歌时附上。
+  if (player.desktopStage) {
+    dl.cover = song?.cover || '';
+    dl.artist = song?.artist || '';
+    dl.title = song?.title || '';
+    dl.playing = player.playing;
+    dl.rate = Number(player.rate) || 1;
+  }
   // 暂停和恢复同一首都不重发整轨，桌面窗口留着已经建好的行。
   if (shouldAttachDesktopLyrics(changed, player.playing)) {
     dl.lyrics = forDesktop();
@@ -747,6 +766,23 @@ export function forceSyncOutputs(): void {
   syncOutputs(true);
 }
 
+/** 把播放舞台铺到现有的桌面歌词窗上。关掉时主窗口恢复全价绘制。 */
+export function setDesktopStage(on: boolean): void {
+  const next = !!on;
+  player.desktopStage = next;
+  if (next) {
+    void callSafe('openDesktopLyric', ['stage'], null).then(() => forceSyncOutputs());
+    return;
+  }
+  void callSafe('openDesktopLyric', ['off'], null);
+}
+
+/** 打开桌面歌词条。若舞台正在投射，先收回便宜档，再把同一扇窗收成歌词条。 */
+export function openDesktopLyricWindow(): void {
+  player.desktopStage = false;
+  void callSafe('openDesktopLyric', ['lyric'], null).then(() => forceSyncOutputs());
+}
+
 let _outputSyncReady = false;
 
 /**
@@ -757,7 +793,13 @@ export function initOutputSync(): void {
   if (_outputSyncReady) return;
   _outputSyncReady = true;
   ensureLyricPerformanceLoop();
-  on('onSyncDesktopLyric', () => forceSyncOutputs());
+  on('onSyncDesktopLyric', (data?: { closed?: boolean }) => {
+    if (data && data.closed) {
+      player.desktopStage = false;
+      return;
+    }
+    forceSyncOutputs();
+  });
   on('onSyncMiniPlayer', () => forceSyncOutputs());
   on('onMiniNext', () => next());
   on('onMiniPrev', () => prev());

@@ -86,9 +86,75 @@
     }
     .dl-btn:hover { background: var(--elev-2); color: var(--fg-1); border-color: var(--stroke-2); }
     .dl-btn.active { color: var(--accent-ui); border-color: var(--accent-line); }
+
+    /* 舞台投桌面：同一页铺满，封面半透明垫底。控制条藏起来，窗本身已经穿透。 */
+    .stage-wash, .stage-meta { display: none; }
+    body.stage-wall { position: relative; }
+    body.stage-wall .stage-wash {
+      display: block;
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      pointer-events: none;
+    }
+    body.stage-wall .stage-wash img {
+      position: absolute;
+      top: -8%;
+      left: -8%;
+      width: 116%;
+      height: 116%;
+      object-fit: cover;
+      filter: blur(8px) saturate(1.2);
+      opacity: .58;
+    }
+    body.stage-wall .stage-veil {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, rgba(0,0,0,.28), rgba(0,0,0,.12) 40%, rgba(0,0,0,.35));
+    }
+    body.stage-wall .stage-meta {
+      display: block;
+      position: absolute;
+      z-index: 2;
+      top: 8vh;
+      left: 8vw;
+      right: 8vw;
+      text-align: left;
+      pointer-events: none;
+    }
+    body.stage-wall .stage-meta b,
+    body.stage-wall .stage-meta span {
+      display: block;
+      max-width: 100%;
+      color: #fff;
+      text-shadow: 0 1px 4px rgba(0,0,0,.55);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    body.stage-wall .stage-meta b { font-size: 22px; font-weight: var(--fw-bold); }
+    body.stage-wall .stage-meta span { margin-top: 4px; font-size: 15px; color: rgba(255,255,255,.72); }
+    body.stage-wall .control-bar { display: none !important; }
+    body.stage-wall .lyric-stage {
+      -webkit-app-region: no-drag;
+      position: relative;
+      z-index: 1;
+      pointer-events: none;
+    }
+    body.stage-wall .lyric-line { font-size: 40px; }
+    body.stage-wall .lyric-line.prev,
+    body.stage-wall .lyric-line.next { font-size: 28px; }
   </style>
 </head>
 <body>
+  <div class="stage-wash" id="stageWash" hidden>
+    <img id="stageCover" alt="" />
+    <div class="stage-veil"></div>
+  </div>
+  <div class="stage-meta" id="stageMeta" hidden>
+    <b id="stageTitle"></b>
+    <span id="stageArtist"></span>
+  </div>
   <div class="lyric-stage" id="lyricStage">
     <div class="lyric-line prev" id="lyricPrev"></div>
     <div class="lyric-line" id="lyricCur"></div>
@@ -114,6 +180,11 @@
     let curIdx = -1;       // 当前行索引
     let locked = false;     // 锁定 = 正文穿透
     let fontSize = 28;     // 主行字号（持久化由主窗口 prefs 代理，本地兜底 localStorage 不可用时用内存）
+    let stagePlaying = false;
+    let stageRate = 1;
+    let stageAnchorMs = 0;
+    let stageAnchorTime = 0;
+    let stageRaf = 0;
     try { fontSize = +localStorage.getItem('dlFont') || 28; } catch (e) { /* transparent 窗口有时禁存储 */ }
 
     const elPrev = document.getElementById('lyricPrev');
@@ -212,9 +283,55 @@
       return out;
     }
 
+    const stageTitle = document.getElementById('stageTitle');
+    const stageArtist = document.getElementById('stageArtist');
+    const stageCover = document.getElementById('stageCover');
+    const stageWash = document.getElementById('stageWash');
+    const stageMeta = document.getElementById('stageMeta');
+
+    function stopStageClock() {
+      if (stageRaf) cancelAnimationFrame(stageRaf);
+      stageRaf = 0;
+    }
+
+    // 舞台模式自己按播放态往前走。暂停停住，不拆已经建好的行。
+    function stageClock(now) {
+      stageRaf = 0;
+      if (!document.body.classList.contains('stage-wall') || !stagePlaying) return;
+      currentTime = stageAnchorTime + ((now - stageAnchorMs) / 1000) * (stageRate || 1);
+      locate();
+      stageRaf = requestAnimationFrame(stageClock);
+    }
+
+    function armStageClock() {
+      stopStageClock();
+      stageAnchorMs = performance.now();
+      stageAnchorTime = currentTime;
+      if (document.body.classList.contains('stage-wall') && stagePlaying) {
+        stageRaf = requestAnimationFrame(stageClock);
+      }
+    }
+
+    function applyStage(data) {
+      if (typeof data.stage !== 'boolean') return;
+      document.body.classList.toggle('stage-wall', data.stage);
+      if (stageWash) stageWash.hidden = !data.stage;
+      if (stageMeta) stageMeta.hidden = !data.stage;
+      if (typeof data.cover === 'string' && stageCover && stageCover.getAttribute('src') !== data.cover) {
+        if (data.cover) stageCover.setAttribute('src', data.cover);
+        else stageCover.removeAttribute('src');
+      }
+      if (typeof data.title === 'string' && stageTitle) stageTitle.textContent = data.title;
+      if (typeof data.artist === 'string' && stageArtist) stageArtist.textContent = data.artist;
+      if (!data.stage) stopStageClock();
+    }
+
     // ── 数据接收 ─────────────────────────────────────────
     window.miniAPI.on('desktop-lyric-data', (data) => {
       if (!data) return;
+      if (typeof data.playing === 'boolean') stagePlaying = data.playing;
+      if (typeof data.rate === 'number' && data.rate > 0) stageRate = data.rate;
+      applyStage(data);
       if (data.lyrics) {
         // 整份歌词（换歌时推送；含 wordTimes 供逐字高亮）
         // 暂停或重复推送同一轨时签名不变，保留已经建好的行。
@@ -232,6 +349,7 @@
         applyFontSize();
       }
       locate();
+      if (document.body.classList.contains('stage-wall')) armStageClock();
     });
 
     // ── 控制条 ───────────────────────────────────────────

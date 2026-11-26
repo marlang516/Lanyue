@@ -23,6 +23,7 @@
  *   · 建行按时间预算分帧。一帧建不完，下一帧从剩下的行接着建。
  *   · 光带用到的合成程序（扫过、亮带、余光）预热一次后常驻，
  *     显示、暂停、恢复、藏起都不再编译。
+ *   · 舞台投到桌面时，主窗口改走缩小的便宜档，不同时画两份全价场景。
  *
  * 逐字状态用的是调用方已经算好的同一播放秒（含偏移），不是第二只钟。
  * 光带也吃这一秒和这个字自己的起止，并提前 WORD_LEAD_SEC：时间戳到达时
@@ -687,6 +688,18 @@ export const LYRIC_BUILD_BUDGET_MS = 8;
 /** 同一帧里的多次推进合成一次，避免全屏页和舞台各建一遍。 */
 export const LYRIC_BUILD_FRAME_MS = 16;
 
+/** 主窗口舞台跟屏幕走的一帧。投射关掉时按这个节奏画。 */
+export const STAGE_FULL_FRAME_MS = 16;
+
+/**
+ * 舞台投到桌面时，主窗口把同一场景缩到这个比例。
+ * 小于 1，桌面那一份才是全尺寸。
+ */
+export const STAGE_PROJECTED_SCALE = 0.5;
+
+/** 投射开着时主窗口隔这么久才画一次，把帧留给桌面那一份。 */
+export const STAGE_PROJECTED_FRAME_MS = 200;
+
 /** 光带实际用到的三种合成。预热后程序对象一直留在 residence 上。 */
 export const LYRIC_SHADER_NAMES = Object.freeze(['sweep', 'band', 'bloom']);
 
@@ -956,6 +969,89 @@ export function desktopTrackSignature(list) {
     out += `\n${line.t}\t${text}`;
   }
   return out;
+}
+
+/**
+ * @typedef {object} MainStagePlan
+ * @property {boolean} projecting
+ * @property {number} scale
+ * @property {'full' | 'cheap'} tier
+ * @property {number} frameMs
+ * @property {boolean} blurCover
+ * @property {boolean} sweep
+ * @property {boolean} fullCost
+ */
+
+/**
+ * @typedef {object} DesktopStageCost
+ * @property {boolean} running
+ * @property {boolean} fullCost
+ * @property {number} scale
+ */
+
+/**
+ * 主窗口播放舞台的画价。投射打开时缩小、去掉模糊和光带，不再跟桌面那一份抢帧。
+ * @param {boolean} [projecting]
+ * @returns {MainStagePlan}
+ */
+export function mainStageRenderPlan(projecting) {
+  if (!projecting) {
+    return {
+      projecting: false,
+      scale: 1,
+      tier: 'full',
+      frameMs: STAGE_FULL_FRAME_MS,
+      blurCover: true,
+      sweep: true,
+      fullCost: true,
+    };
+  }
+  return {
+    projecting: true,
+    scale: STAGE_PROJECTED_SCALE,
+    tier: 'cheap',
+    frameMs: STAGE_PROJECTED_FRAME_MS,
+    blurCover: false,
+    sweep: false,
+    fullCost: false,
+  };
+}
+
+/**
+ * 桌面窗和主窗口各自的画价。两边同时 fullCost 才算在抢同一帧。
+ * 投射打开时只有桌面是全价；关掉时桌面不画。
+ * @param {boolean} [projecting]
+ * @returns {{ main: MainStagePlan, desktop: DesktopStageCost, competingFullScenes: boolean }}
+ */
+export function stageFrameBudget(projecting) {
+  const on = !!projecting;
+  const main = mainStageRenderPlan(on);
+  /** @type {DesktopStageCost} */
+  const desktop = on
+    ? { running: true, fullCost: true, scale: 1 }
+    : { running: false, fullCost: false, scale: 0 };
+  return {
+    main,
+    desktop,
+    competingFullScenes: !!(main.fullCost && desktop.fullCost),
+  };
+}
+
+/**
+ * 全价档每一帧都可以画。便宜档要隔开 frameMs。
+ * @param {number} lastPaintMs 上一笔绘制的时间；还没画过则传负数
+ * @param {number} nowMs
+ * @param {MainStagePlan | null | undefined} plan
+ * @returns {boolean}
+ */
+export function shouldPaintMainStage(lastPaintMs, nowMs, plan) {
+  if (!plan || plan.tier !== 'cheap') return true;
+  const frame = plan.frameMs > 0 ? plan.frameMs : STAGE_PROJECTED_FRAME_MS;
+  const now = Number(nowMs);
+  const last = Number(lastPaintMs);
+  if (!Number.isFinite(now)) return false;
+  if (!Number.isFinite(last) || last < 0) return true;
+  return now - last >= frame;
 }
 
 /**
