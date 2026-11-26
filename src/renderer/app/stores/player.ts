@@ -36,6 +36,11 @@ import { normalizeSong, songKey } from '../core/song';
 import type { Song } from '../core/song';
 import { addRecent } from '../core/recent';
 import { lyrics as lyricsState, loadFor as loadLyricsFor, forDesktop, activeLineIndex } from './lyrics';
+import {
+  lyricDisplaySeconds,
+  shouldAttachDesktopLyrics,
+  stepLyricPerformance,
+} from '../core/lyricMotion.js';
 import type {
   DesktopLyricLine,
   PlayMode,
@@ -655,11 +660,44 @@ interface DesktopLyricPayload {
   title?: string;
 }
 
+/** 播放态推进一步歌词轨。暂停不建行。 */
+function stepLyricTrackNow(nowMs?: number): void {
+  const now = Number.isFinite(nowMs)
+    ? Number(nowMs)
+    : (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  const items = lyricsState.items;
+  stepLyricPerformance({
+    sourceKey: lyricsState.loadedKey,
+    playing: player.playing,
+    items,
+    duration: player.duration > 0 ? player.duration : undefined,
+    nowMs: now,
+    focusIndex: activeLineIndex(items, lyricDisplaySeconds(player.progress, lyricsState.offsetMs)),
+    reason: player.playing ? 'show' : 'pause',
+  });
+}
+
+let lyricPerfLoop = false;
+
+/** 全屏页和舞台不在时也分帧建行。暂停只停住，不重做整轨。 */
+function ensureLyricPerformanceLoop(): void {
+  const raf = globalThis.requestAnimationFrame;
+  if (lyricPerfLoop || typeof raf !== 'function') return;
+  lyricPerfLoop = true;
+  const tick = (now: number): void => {
+    if (!lyricPerfLoop) return;
+    stepLyricTrackNow(now);
+    raf(tick);
+  };
+  raf(tick);
+}
+
 /**
  * 托盘 / 迷你播放器 / 桌面歌词三处同步。
  * 每帧只推播放态与进度；元信息与整份歌词只在换歌或歌词就绪时推。
  */
 function syncOutputs(force = false): void {
+  stepLyricTrackNow();
   const now = Date.now();
   if (!force && now - _lastSyncAt < 300) return;
   _lastSyncAt = now;
@@ -689,7 +727,8 @@ function syncOutputs(force = false): void {
   void callSafe('syncMiniPlayer', [payload], null);
 
   const dl: DesktopLyricPayload = { currentTime: player.progress };
-  if (changed) {
+  // 暂停和恢复同一首都不重发整轨，桌面窗口留着已经建好的行。
+  if (shouldAttachDesktopLyrics(changed, player.playing)) {
     dl.lyrics = forDesktop();
     dl.title = song?.title || '';
   }
@@ -717,6 +756,7 @@ let _outputSyncReady = false;
 export function initOutputSync(): void {
   if (_outputSyncReady) return;
   _outputSyncReady = true;
+  ensureLyricPerformanceLoop();
   on('onSyncDesktopLyric', () => forceSyncOutputs());
   on('onSyncMiniPlayer', () => forceSyncOutputs());
   on('onMiniNext', () => next());

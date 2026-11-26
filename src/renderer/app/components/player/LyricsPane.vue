@@ -4,14 +4,18 @@ import { lyrics, setOffset } from '../../stores/lyrics';
 import { player, seekTo } from '../../stores/player';
 import Icon from '../common/Icon.vue';
 import {
+  builtLyricLine,
   displayWords,
   glowFromCoverPixels,
   lineFitScale,
   lyricDisplaySeconds,
+  lyricLayoutDecision,
   lyricPlaySeconds,
   projectPlayhead,
   resolveLyricFrame,
   resolveWordSweep,
+  retainLyricShaders,
+  stepLyricPerformance,
 } from '../../core/lyricMotion.js';
 
 const motionMq = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -56,6 +60,8 @@ const stageEl = ref<HTMLElement | null>(null);
 const nowBand = ref<HTMLElement | null>(null);
 const lineEl = ref<HTMLElement | null>(null);
 let wordsSig = '';
+let layoutIndex = -2;
+let lyricTrack: Parameters<typeof builtLyricLine>[0] = null;
 
 let raf = 0;
 let snapGen = 0;
@@ -131,6 +137,7 @@ function paintContext(lyricFrame: LyricFrame): void {
 }
 
 function clearWords(): void {
+  layoutIndex = -2;
   if (!shownWords.value.length && !lookAt.value.length) return;
   shownWords.value = [];
   wordFrame.value = { index: -1, states: [], sweep: [], band: [], bloom: [], linger: [] };
@@ -145,20 +152,33 @@ function clearWords(): void {
  * 只在活动句上铺光带。位置来自 resolveWordSweep，和行时钟是同一播放秒。
  * 减弱动效时当前字直接全亮，不让光带走动。
  */
-function paintWords(seconds: number, lyricFrame: LyricFrame): void {
+function paintWords(seconds: number, lyricFrame: LyricFrame, seeked: boolean): void {
   paintContext(lyricFrame);
   if (lyricFrame.role !== 'active' || lyricFrame.index < 0) {
     clearWords();
     return;
   }
+  const keep = lyricLayoutDecision({
+    playing: !!player.playing,
+    seeked,
+    sameLine: layoutIndex === lyricFrame.index,
+    hasLayout: shownWords.value.length > 0,
+  }) === 'keep';
   const line = lyrics.items[lyricFrame.index];
   const nextLine = lyrics.items[lyricFrame.index + 1];
-  const words = displayWords(line, nextLine, player.duration > 0 ? player.duration : undefined);
-  const sig = words.map((w) => `${w.t}|${w.dur}|${w.text}`).join('\n');
-  const lineChanged = sig !== wordsSig;
-  if (lineChanged) {
-    wordsSig = sig;
-    shownWords.value = words;
+  const built = builtLyricLine(lyricTrack, lyricFrame.index);
+  const words = keep
+    ? shownWords.value
+    : ((built && built.words) ? built.words : displayWords(line, nextLine, player.duration > 0 ? player.duration : undefined));
+  let layoutChanged = false;
+  if (!keep) {
+    const sig = words.map((w) => `${w.t}|${w.dur}|${w.text}`).join('\n');
+    layoutChanged = sig !== wordsSig;
+    if (layoutChanged) {
+      wordsSig = sig;
+      shownWords.value = words;
+      layoutIndex = lyricFrame.index;
+    }
   }
   const glow = resolveWordSweep(words, seconds);
   const sweep: number[] = [];
@@ -184,7 +204,7 @@ function paintWords(seconds: number, lyricFrame: LyricFrame): void {
     look.push(face);
   }
   if (
-    !lineChanged
+    !layoutChanged
     && sameStates(wordFrame.value.states, glow.states)
     && sameNums(sweepAt.value, sweep)
     && sameNums(bandAt.value, band)
@@ -245,9 +265,19 @@ function publish(now: number, retarget: boolean): void {
   const displaySeconds = lyricDisplaySeconds(projected.seconds, lyrics.offsetMs);
   if (projected.seeked) armSnap();
   const next = resolveLyricFrame(lyrics.items, displaySeconds, retarget ? null : cursor, now, frameOpts());
+  const stepped = stepLyricPerformance({
+    sourceKey: lyrics.loadedKey,
+    playing: !!player.playing,
+    items: lyrics.items,
+    duration: player.duration > 0 ? player.duration : undefined,
+    nowMs: now,
+    focusIndex: next.index,
+    reason: player.playing ? 'show' : 'pause',
+  });
+  lyricTrack = stepped.track;
   const held = !retarget && !!cursor && cursor.index === next.index && cursor.role === next.role;
   if (!held) commit(next, now);
-  paintWords(playSeconds, held ? frame.value : next);
+  paintWords(playSeconds, held ? frame.value : next, !!projected.seeked);
 }
 
 function loop(now: number): void {
@@ -262,6 +292,7 @@ watch(
     cursor = null;
     anchor = null;
     wordsSig = '';
+    layoutIndex = -2;
     publish(performance.now(), true);
   },
 );
@@ -341,6 +372,8 @@ onBeforeUnmount(() => {
   cancelAnimationFrame(raf);
   if (ro) ro.disconnect();
   motionMq.removeEventListener('change', onMotionMq);
+  // 关掉全屏页只是藏起。光带程序留在模块里，下次打开不再编译。
+  retainLyricShaders('hide');
 });
 </script>
 
