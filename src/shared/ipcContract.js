@@ -293,6 +293,8 @@ const CHANNELS = {
   'desktop-lyric-close':   { send: BOTH },
   'desktop-lyric-lock':    { send: BOTH, args: [['locked', t.bool()]] },
   'desktop-lyric-set-ignore-mouse': { send: BOTH, args: [['ignore', t.bool()]] },
+  // 只给桌面歌词窗。true 打开舞台关闭钮的点击孔；其它值回到穿透并继续转发移动。
+  'desktop-stage-hit': { send: ['secondary'], args: [['open', t.bool()]] },
   'tray-update-play-state': { send: MAIN, args: [['state', t.any()]] },
   'set-global-shortcuts':   { send: MAIN, args: [['enabled', t.bool()]] },
   'mini-next':       { send: BOTH, receive: MAIN },

@@ -9,6 +9,7 @@
  *
  * 舞台投桌面沿用桌面歌词这一扇窗：透明、点击穿透、不抢焦点。
  * 不改系统壁纸，也不把窗口挂进桌面宿主。
+ * 舞台上只有关闭钮能打开一个点击孔，其余区域仍然穿透。
  */
 
 const { handle, on } = require('./register');
@@ -124,8 +125,12 @@ function presentDesktopLyric(win, mode, workArea) {
     if (typeof win.setBounds === 'function') win.setBounds(spec.bounds);
     if (typeof win.setAlwaysOnTop === 'function') win.setAlwaysOnTop(true);
     if (typeof win.setSkipTaskbar === 'function') win.setSkipTaskbar(true);
-    // 整窗穿透，不把移动事件再送回来，控制条也就抢不回点击。
-    if (typeof win.setIgnoreMouseEvents === 'function') win.setIgnoreMouseEvents(true);
+    // 整窗穿透，但转发移动：关闭钮靠 mouseenter 打开点击孔。
+    // 不带 forward 的话渲染层收不到移动，按钮永远点不中。
+    // 歌词控制条的 lock / set-ignore 在舞台模式下仍然被丢掉，抢不回整窗。
+    if (typeof win.setIgnoreMouseEvents === 'function') {
+      win.setIgnoreMouseEvents(true, { forward: true });
+    }
     if (typeof win.showInactive === 'function') win.showInactive();
     return spec;
   }
@@ -172,7 +177,8 @@ function createDesktopLyric(mode) {
     transparent: true,
     // 点击穿透：正文区域 setIgnoreMouseEvents(true)，控制条区域在渲染层
     // 用 mouseenter/leave 切回 false（锁定的拖动条始终可点）。
-    // 舞台模式整窗穿透，并且 focusable/show 在下面改掉，避免一创建就抢焦点。
+    // 舞台模式整窗穿透（移动仍转发，只给关闭钮留孔），并且 focusable/show
+    // 在下面改掉，避免一创建就抢焦点。
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -356,6 +362,17 @@ function register(opts = {}) {
     if (desktopLyricWin && !desktopLyricWin.isDestroyed()) {
       desktopLyricWin.setIgnoreMouseEvents(ignore, { forward: true });
     }
+  });
+
+  // 舞台关闭钮的点击孔。只有 open === true 才暂时接收鼠标，离开按钮必须回到穿透。
+  // 不 setFocusable、不 focus、不 show：孔只解决“点得中”，不把舞台窗变成活动窗。
+  on('desktop-stage-hit', (_, open) => {
+    if (desktopLyricMode !== 'stage') return;
+    const win = desktopLyricWin;
+    if (!win || (typeof win.isDestroyed === 'function' && win.isDestroyed())) return;
+    if (typeof win.setIgnoreMouseEvents !== 'function') return;
+    if (open === true) win.setIgnoreMouseEvents(false);
+    else win.setIgnoreMouseEvents(true, { forward: true });
   });
 
   // 选择下载目录

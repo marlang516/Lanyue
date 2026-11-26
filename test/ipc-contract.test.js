@@ -99,7 +99,7 @@ test('通道数量钉死（意外增删即失败，逼迫改动者过目契约�
   assert.strictEqual(MAIN_INVOKE.size, 115); // +aggregate-cross-source（3-B 跨源聚合） // +ai-cancel-generation（AI 生成中断） // +mcp-audit +mcp-audit-clear（MCP 调用审计） +mcp-connect-snippet（接入配置片段）；+ai-assistant-tools/plan/tool-call（应用内助手）；+smart-playlist-generate（AI 智能歌单，只读：写库仍走既有 save-user-playlist）；+ai-provider-config/save（大模型厂商配置：名单与判据在 api/aiProviders.js，界面经通道取而不镜像）；+get-song-story（歌曲讲解，候选方向 1）；+get-taste-profile（品味解读，候选方向 2：出网文本在服务层收口，只带歌手聚合不含歌名）；+playlist-audit（歌单语义运维，候选方向 3：只读，改名/删歌仍走既有 save/remove 通道）；余项：-flush-prefs -flush-history（无人调用的僵尸通道）；+generate-heartbeat（心动模式：队列播完续播候选）
   assert.strictEqual(MAIN_SEND.size, 16);
   assert.strictEqual(MAIN_RECEIVE.size, 26); // 余项：-library-scan-progress（main 发了没人收）
-  assert.strictEqual(SEC_SEND.size, 7);
+  assert.strictEqual(SEC_SEND.size, 8); // +desktop-stage-hit（舞台关闭钮的点击孔，仅 secondary）
   assert.strictEqual(SEC_RECEIVE.size, 2);
   assert.strictEqual(Object.keys(METHODS).length, 112); // +aggregateCrossSource（3-B 跨源聚合） // +aiCancelGeneration；+aiProviderConfig/aiProviderSave（厂商配置下拉）；+getSongStory（歌曲讲解，候选方向 1）；+getTasteProfile（品味解读，候选方向 2）；+playlistAudit（歌单语义运维，候选方向 3）；余项：-windowToggleFullscreen -closeDesktopLyric（死键）// mcp-* 走 ipcRenderer.invoke，不进 METHODS 语法糖；+generateHeartbeat（心动模式）
 });
@@ -514,6 +514,7 @@ const UNMAPPED_ALLOWLIST = new Set([
   'desktop-lyric-close',
   'desktop-lyric-lock',
   'desktop-lyric-set-ignore-mouse',
+  'desktop-stage-hit',
   'mini-close',
   // 桌面歌词数据推送：仅 secondary 窗口 receive，主窗口无对应 onXxx 订阅
   'desktop-lyric-data',
@@ -557,7 +558,7 @@ test('未映射通道必须在显式豁免白名单中（新增通道漏声明�
     `UNMAPPED_ALLOWLIST 中存在契约里不存在的通道: ${phantom.join(', ')}`
   );
 
-  // 数量钉死：与 M1-BASELINE 实测一致，意外增删即失败
-  assert.strictEqual(unmapped.length, 24, `未映射通道数量应为 24，实际 ${unmapped.length}: ${unmapped.join(', ')}`);
-  assert.strictEqual(UNMAPPED_ALLOWLIST.size, 24);
+  // 数量钉死：意外增删即失败
+  assert.strictEqual(unmapped.length, 25, `未映射通道数量应为 25，实际 ${unmapped.length}: ${unmapped.join(', ')}`); // +desktop-stage-hit
+  assert.strictEqual(UNMAPPED_ALLOWLIST.size, 25);
 });

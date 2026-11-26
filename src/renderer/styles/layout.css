@@ -11,20 +11,21 @@
 
 /* ── 窗口控制按钮（D6.1：原 52px 品牌标题栏并入顶栏，这里只剩按钮组） ── */
 .winctrls {
-  display: flex; gap: var(--sp-1); margin-left: var(--sp-2);
+  display: flex; gap: var(--sp-1); margin-left: var(--sp-2); flex-shrink: 0;
   padding-left: var(--sp-3); border-left: 1px solid var(--stroke-1);
   -webkit-app-region: no-drag;
 }
 .winctrls button {
-  width: 30px; height: 30px; border-radius: var(--r-sm); border: none;
+  width: 40px; height: 40px; flex-shrink: 0;
+  border-radius: var(--r-sm); border: none;
   background: transparent; color: var(--fg-3); font-size: var(--fs-md);
   cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
   transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
 }
 .winctrls button:hover { background: var(--surface-3); color: var(--fg-1); }
 .winctrls button:active { transform: scale(.94); }
-/* 图标化后按钮内不再有文字，SVG 统一 12px 描边 1.25 与顶栏右侧图标同族 */
-.winctrls button svg { width: 12px; height: 12px; stroke-width: 1.25; }
+/* 图标化后按钮内不再有文字。顶栏 64px，钮跟搜索条同高（40px），图标 15px。 */
+.winctrls button svg { width: 15px; height: 15px; stroke-width: 1.5; }
 /* 关闭按钮是窗口管理器的约定色（红=关闭），与主题无关，刻意不跟主题走 */
 .winctrls .close:hover { background: #e5484d; color: #fff; }
 
