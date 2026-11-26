@@ -3,7 +3,7 @@ import { onMounted } from 'vue';
 import {
   settings, TABS, loadSettings, setTab,
   chooseTheme, chooseLanguage, chooseQuality, changeVolume, changeRate,
-  changeCrossfade, changeHandoff, changeLyricOffset, chooseSaveDir,
+  changeCrossfade, changeHandoff, changeCoverParticles, changeLyricOffset, chooseSaveDir,
   toggleCookieEditor, saveCookie, verifyCookie, clearCookie, openLogin,
   saveTemplate, deleteTemplate, activateTemplate,
   exportData, importData, checkUpdate, downloadUpdate, restartInstall,
@@ -149,6 +149,25 @@ function onVolumeInput(e: Event) {
               :class="{ 'ly-btn-primary': player.singleSourceHandoff }"
               :aria-pressed="player.singleSourceHandoff"
               @click="changeHandoff(true)"
+            >开</button>
+          </div>
+        </div>
+
+        <div class="group">
+          <h4>封面微尘</h4>
+          <p class="hint">在播放舞台和全屏歌词的封面周围，轻轻漂一点光点，跟着播放起伏。默认关闭，画面与现在一样。打开「舞台投桌面」时，同一层会出现在现有的那一扇桌面窗上；主窗口这时少画一些，不另开窗口。</p>
+          <div class="row">
+            <button
+              class="ly-btn ly-btn-sm"
+              :class="{ 'ly-btn-primary': !player.coverParticles }"
+              :aria-pressed="!player.coverParticles"
+              @click="changeCoverParticles(false)"
+            >关</button>
+            <button
+              class="ly-btn ly-btn-sm"
+              :class="{ 'ly-btn-primary': player.coverParticles }"
+              :aria-pressed="player.coverParticles"
+              @click="changeCoverParticles(true)"
             >开</button>
           </div>
         </div>

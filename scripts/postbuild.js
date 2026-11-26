@@ -99,7 +99,9 @@ function runPostbuild(options = {}) {
     const to = path.join(dist, 'renderer', page);
     if (fs.existsSync(from)) {
       fs.mkdirSync(path.dirname(to), { recursive: true });
-      fs.copyFileSync(from, to);
+      let html = fs.readFileSync(from, 'utf8');
+      if (page === 'desktop-lyric.html') html = injectCoverDustRuntime(html, src);
+      fs.writeFileSync(to, html);
       console.log(`  copied: ${path.relative(root, from)} -> ${path.relative(root, to)}`);
     }
   }
@@ -120,9 +122,36 @@ function runPostbuild(options = {}) {
   console.log('[postbuild] done');
 }
 
+/**
+ * 桌面歌词页不走 Vite。把封面微尘收成一段普通脚本塞进同一页，
+ * 不另开窗口，也不让 file:// 去加载模块。
+ * @param {string} html
+ * @param {string} srcRoot src 目录
+ * @returns {string}
+ */
+function injectCoverDustRuntime(html, srcRoot) {
+  const marker = '/*__COVER_DUST_RUNTIME__*/';
+  if (!html.includes(marker)) return html;
+  const dustFrom = path.join(srcRoot, 'renderer', 'app', 'core', 'coverParticles.js');
+  if (!fs.existsSync(dustFrom)) return html;
+  const body = fs.readFileSync(dustFrom, 'utf8').replace(/^export /gm, '');
+  const runtime = [
+    '(function () {',
+    body,
+    '  window.__coverDustApi = {',
+    '    mountDesktopCoverDust: mountDesktopCoverDust,',
+    '    coverDustPlan: coverDustPlan,',
+    '    readDesktopCoverDust: readDesktopCoverDust',
+    '  };',
+    '})();',
+  ].join('\n');
+  return html.replace(marker, () => runtime);
+}
+
 module.exports = {
   planMainRuntimeCopies,
   runPostbuild,
+  injectCoverDustRuntime,
 };
 
 // 被测试 require 时不写 dist；只有 `node scripts/postbuild.js` 才执行。

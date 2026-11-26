@@ -15,6 +15,7 @@ import {
 import { platformName } from '../core/format';
 import DiscoverRankList from '../components/data/DiscoverRankList.vue';
 import PlaylistPeek from '../components/data/PlaylistPeek.vue';
+import CoverDustLayer from '../components/player/CoverDustLayer.vue';
 import Icon from '../components/common/Icon.vue';
 
 const sec = computed(() => activeSection());
@@ -261,6 +262,10 @@ function openStage(): void {
             @error="dropBrokenImg"
           />
           <div class="veil"></div>
+          <CoverDustLayer
+            v-if="player.coverParticles"
+            surface="main"
+          />
           <div
             class="stage-body"
             :class="{ cheap: stagePlan.tier === 'cheap' }"
