@@ -141,9 +141,9 @@ let api = buildApi();
 let _audio = null;
 
 /**
- * 播放引擎实例（阶段 3 · P0）。
- * 创建后暂不接管调用方；P1-P5 逐个把 audio 的直接操作者接过来。
- * 阶段 4 收口时，它将成为全仓唯一持有 #audioPlayer 的模块。
+ * 旧渲染层的播放引擎实例（阶段 3）。
+ * 出货的 Vue 播放器经 playback/wire.js 取流和单源交接，不走这个实例。
+ * 这里仍把引擎接到 #audioPlayer，供旧层只读快照（EQ、歌词、媒体键）。
  */
 let playbackEngine = null;
 
@@ -239,10 +239,9 @@ async function init() {
     logger.warn('[init] 沉浸页接线失败:', e.message);
   }
 
-  // ── 播放引擎接线（阶段 3 · P0）──────────────────────────
+  // ── 播放引擎接线（阶段 3）──────────────────────────────
   // 独立 try-catch：引擎接线失败不得影响上面的既有事件绑定。
-  // 此刻引擎只被创建、无人订阅、无人调用 —— 对用户可见行为零影响。
-  // 后续 P1-P5 逐个迁移调用方时，每一步都从这里取实例。
+  // 出货播放走 Vue，经 wire.js 取流；这里的实例服务旧层只读快照。
   try {
     if (_audio) {
       playbackEngine = createWiredPlaybackEngine({ audio: _audio, api, logger });

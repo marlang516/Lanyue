@@ -1,18 +1,17 @@
 /**
  * stores/player.ts —— 播放状态与取流链路（P1 基础闭环，P4 增强）
  *
- * 链路与旧层一致：
- *   getDownloadUrlSmart(song, quality) → {url, source, id, degradedLocal?}
- *   → proxyPlay(url, referer, {id, source, quality}) → {fileUrl}
- *   → audio.src = lanyue-stream://...
+ * 取流与静音预热经 playback/wire.js：本地文件直接成 file URL，在线歌
+ * 先取直链再登记代理，备用元素由 audioPool 隐藏预热。
  *
  * 切歌延迟：若等用户点了下一首才串行做上面两步，出声前会空一段。
  * 可预测的邻居在当前这首一开始就解析，并静音预热到备用元素上；
  * 点击时直接播那个元素，不再等新的取流。随机模式猜不到下一首，仍走冷路径。
  *
- * 邻居已经在备用元素上、并且交叉档位开着时，切歌改成重叠：
+ * 邻居已经在备用元素上、并且交叉档位开着、单源交接关着时，切歌改成重叠：
  * 出去的歌变轻、进来的歌同时变响，中间不留一段静音。编排在
  * playback/crossfade.js，本模块仍是唯一的 audio 所有者和音量写手。
+ * 单源交接打开时走 audioPool 的交接：预热保持不可闻，交接只留一路出声。
  * 旧引擎的 crossfadeTo 继续是占位 —— 生产路径不迁回去。
  *
  * 竞态：切歌后旧请求的结果必须丢弃（_reqSeq），否则慢源会盖掉快源。
@@ -20,17 +19,19 @@
  */
 import { reactive, computed, watch } from 'vue';
 import type { ComputedRef } from 'vue';
-import { fileUrlFromPath } from '../../../shared/fileUrl.mjs';
 import { createSkipPrep, neighborIndex, prepKey } from '../../js/skipPrep.js';
 import {
   CROSSFADE_PREF_KEY,
+  HANDOFF_PREF_KEY,
   audibleVolume,
   createCrossfadeController,
   decideCrossfade,
+  decideTrackTransition,
   normalizeCrossfadeMs,
 } from '../../js/playback/crossfade.js';
+import { createAudibleSlots, createPlayableResolver } from '../../js/playback/wire.js';
 import { call, callSafe, on } from '../core/bridge';
-import { getPref, setPref } from '../core/prefs';
+import { getPref, getPrefBool, setPref } from '../core/prefs';
 import { normalizeSong, songKey } from '../core/song';
 import type { Song } from '../core/song';
 import { addRecent } from '../core/recent';
@@ -39,21 +40,7 @@ import type {
   DesktopLyricLine,
   PlayMode,
   PlayQueueSnapshot,
-  PlayUrlInfo,
-  ProxyPlayResult,
 } from './types';
-
-const REFERERS: Readonly<Record<string, string>> = {
-  bilibili: 'https://www.bilibili.com/',
-  qq: 'https://y.qq.com/',
-  netease: 'https://music.163.com/',
-  kugou: 'https://www.kugou.com/',
-  kuwo: 'https://www.kuwo.cn/',
-  migu: 'https://music.migu.cn/',
-  soda: 'https://music.douyin.com/',
-  fivesing: 'https://5sing.kugou.com/',
-  audiomack: 'https://audiomack.com/',
-};
 
 /** 播放器状态 */
 interface PlayerState {
@@ -72,6 +59,8 @@ interface PlayerState {
   quality: string;
   /** 无缝交叉时长（ms）。0 关，其余只取 FADE_STEPS 那几档。 */
   crossfadeMs: number;
+  /** 单源交接。打开后不再重叠，预热保持不可闻，交接只留一路出声。 */
+  singleSourceHandoff: boolean;
   // 播放器扩展面板（不进入导航）
   fullscreen: boolean;
   queueOpen: boolean;
@@ -91,22 +80,25 @@ export const player = reactive<PlayerState>({
   error: '',
   quality: 'standard',
   crossfadeMs: 0,
+  singleSourceHandoff: false,
   // 播放器扩展面板（不进入导航）
   fullscreen: false,
   queueOpen: false,
 });
 
 export async function restorePlaybackPrefs(): Promise<void> {
-  const [quality, volume, rate, crossfade] = await Promise.all([
+  const [quality, volume, rate, crossfade, handoff] = await Promise.all([
     getPref('quality', 'standard'),
     getPref('playerVolume', 0.8),
     getPref('playbackRate', 1),
     getPref(CROSSFADE_PREF_KEY, 0),
+    getPrefBool(HANDOFF_PREF_KEY, false),
   ]);
   setQuality(String(quality || 'standard'), false);
   setVolume(Number(volume), false);
   setRate(Number(rate), false);
   setCrossfadeMs(Number(crossfade), false);
+  setSingleSourceHandoff(handoff, false);
 }
 
 export const hasCurrent: ComputedRef<boolean> = computed(() => !!player.current);
@@ -140,6 +132,10 @@ interface CrossfadeSession {
 }
 
 let xfade: CrossfadeSession | null = null;
+/** 交接进行中：这段时间元素的 pause/play 不是用户操作。 */
+let handoffSeal = false;
+/** 即将成为唯一出声源的元素。预热的 pause 不能落在它身上。 */
+let openingEl: HTMLAudioElement | null = null;
 
 interface CrossfadeClock {
   now: number;
@@ -169,11 +165,23 @@ function gainOf(el: HTMLAudioElement): number {
   return g;
 }
 
-/** 全文件唯一的 audio.volume 写点。交叉层只改增益。 */
+/** 全文件唯一的 audio.volume 写点。交叉层和交接层只改增益。 */
 function applyAudibleVolume(el: HTMLAudioElement | null): void {
   if (!el) return;
   el.volume = audibleVolume(player.volume, gainOf(el));
 }
+
+/** 隐藏预热与单源交接走 audioPool，经 wire 接进来。 */
+const audibleSlots = createAudibleSlots({
+  applyOutput: (el, gain) => {
+    gains.set(el, gain);
+    applyAudibleVolume(el);
+  },
+});
+
+const resolvePlayable = createPlayableResolver({
+  invoke: (method, ...args) => (call as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args),
+});
 
 function parkElement(el: HTMLAudioElement | null): void {
   if (!el) return;
@@ -340,6 +348,7 @@ export function pumpCrossfade(nowMs?: number): void {
 function createBoundAudio(): HTMLAudioElement {
   created += 1;
   const a = new Audio();
+  audibleSlots.attach(elementId(a), a);
   a.preload = 'auto';
   a.muted = true;
   gains.set(a, 0);
@@ -348,6 +357,7 @@ function createBoundAudio(): HTMLAudioElement {
   // 备用元素也会 play/pause（用来逼 Chromium 真的去缓冲）。
   // 不是当前元素的事件一律丢掉，否则预热会把界面打成「已暂停」。
   a.addEventListener('timeupdate', () => {
+    if (handoffSeal) return;
     // 中点之后进度跟进来的那首，哪怕主元素还没交过去。
     if (xfade && xfade.metaSwapped && a === xfade.toEl) {
       player.progress = a.currentTime || 0;
@@ -366,12 +376,14 @@ function createBoundAudio(): HTMLAudioElement {
     maybeAutoCrossfade(a);
   });
   a.addEventListener('play', () => {
+    if (handoffSeal) return;
     if (xfade && a === xfade.fromEl) return;
     if (a !== activeEl) return;
     player.playing = true;
     syncOutputs(true);
   });
   a.addEventListener('pause', () => {
+    if (handoffSeal) return;
     // 出去的歌播到结尾会先 pause 再 ended。交叉还没完时这不是用户暂停。
     if (xfade && (a === xfade.fromEl || a === xfade.toEl)) return;
     if (a !== activeEl) return;
@@ -379,11 +391,13 @@ function createBoundAudio(): HTMLAudioElement {
     syncOutputs(true);
   });
   a.addEventListener('ended', () => {
+    if (handoffSeal) return;
     if (xfade && (a === xfade.fromEl || a === xfade.toEl)) return;
     if (a !== activeEl) return;
     next(true);
   });
   a.addEventListener('error', () => {
+    if (handoffSeal) return;
     if (xfade && a === xfade.toEl) {
       const song = xfade.toSong;
       const index = xfade.toIndex;
@@ -457,18 +471,9 @@ function elementFor(key: string): HTMLAudioElement {
  */
 function prime(el: HTMLAudioElement): void {
   if (el === activeEl) return;
-  el.muted = true;
-  gains.set(el, 0);
-  applyAudibleVolume(el);
-  const pending = el.play();
-  if (pending && typeof pending.then === 'function') {
-    pending.then(() => {
-      if (el === activeEl) return;
-      // 预热的 pause 若落在交叉已经把这路拉起来之后，会把进来的歌按停。
-      if (xfade && el === xfade.toEl) return;
-      el.pause();
-    }).catch(() => { /* 预热被切歌打断不是失败 */ });
-  }
+  audibleSlots.hiddenWarmup(elementId(el), undefined, {
+    stayHidden: () => el !== activeEl && el !== openingEl && !(xfade && el === xfade.toEl),
+  });
 }
 
 function attachUrl(el: HTMLAudioElement, key: string | null, fileUrl: string, primeIt: boolean): void {
@@ -519,27 +524,39 @@ async function activate(el: HTMLAudioElement, restart: boolean): Promise<void> {
   await el.play();
 }
 
-type ResolvedPlayable = { fileUrl: string } | { error: string };
-
-async function resolvePlayable(song: Song, quality: string): Promise<ResolvedPlayable> {
+function beginHandoff(
+  fromEl: HTMLAudioElement,
+  toEl: HTMLAudioElement,
+  song: Song,
+  index: number,
+): boolean {
+  openingEl = toEl;
+  handoffSeal = true;
   try {
-    if (song.filePath) return { fileUrl: fileUrlFromPath(song.filePath) };
-    const result = await call<PlayUrlInfo>('getDownloadUrlSmart', song, quality);
-    if (!result || !result.url) {
-      const err = result && (result.error || result.code);
-      return { error: err ? String(err) : '无可用音源' };
-    }
-    if (result.degradedLocal) return { fileUrl: result.url };
-    const playSource = result.source || song.source;
-    const proxied = await call<ProxyPlayResult>('proxyPlay', result.url, REFERERS[playSource] || '', {
-      id: String(result.id ?? song.id),
-      source: playSource,
-      quality,
+    const result = audibleSlots.handoff(elementId(fromEl), elementId(toEl), {
+      prepare: (el) => {
+        el.playbackRate = player.rate;
+        try {
+          if (el.currentTime !== 0) el.currentTime = 0;
+        } catch { /* 还没有 metadata，play() 会从头开始 */ }
+      },
     });
-    if (!proxied || !proxied.fileUrl) return { error: (proxied && proxied.error) || '流代理失败' };
-    return { fileUrl: proxied.fileUrl };
-  } catch (e) {
-    return { error: errorMessage(e) || '播放异常' };
+    if (!result.ok) return false;
+    _reqSeq += 1;
+    activeEl = toEl;
+    commitCrossfadeSong(song, index, toEl);
+    const pending = result.play;
+    if (pending && typeof pending.then === 'function') {
+      pending.catch((e: unknown) => {
+        if (activeEl !== toEl) return;
+        if (isBenignPlayError(e)) return;
+        void playSong(song, { index, forceHard: true });
+      });
+    }
+    return true;
+  } finally {
+    openingEl = null;
+    handoffSeal = false;
   }
 }
 
@@ -779,17 +796,31 @@ function beginCrossfade(
   });
 }
 
-/** 手动切歌：备用元素已经热好，并且决策允许重叠时才交叉。否则返回 false，调用方硬切。 */
+/** 手动切歌：备用元素已经热好才考虑无缝。交接优先于重叠；否则硬切。 */
 function tryBeginCrossfade(song: Song, index: number): boolean {
   const fromEl = activeEl;
   if (!fromEl || !fromEl.src || fromEl.error || fromEl.paused) return false;
   const incoming = bufferedElement(song, player.quality);
   if (!incoming || incoming === fromEl || incoming.error) return false;
+  const remainingMs = remainingMsOf(fromEl);
+  if (player.singleSourceHandoff) {
+    const decision = decideTrackTransition({
+      handoff: true,
+      fadeMs: player.crossfadeMs,
+      preloadOk: true,
+      remainingMs,
+      sameStream: false,
+      predictable: player.mode !== 'shuffle',
+      trigger: 'manual',
+    });
+    if (decision.mode !== 'handoff') return false;
+    return beginHandoff(fromEl, incoming, song, index);
+  }
   const decision = decideCrossfade({
     fadeMs: player.crossfadeMs,
     enabled: player.crossfadeMs > 0,
     preloadOk: true,
-    remainingMs: remainingMsOf(fromEl),
+    remainingMs,
     sameStream: false,
     predictable: player.mode !== 'shuffle',
     trigger: 'manual',
@@ -804,20 +835,35 @@ function tryBeginCrossfade(song: Song, index: number): boolean {
  * 等 ended 走原来的硬切 —— 这里不再发一次取流，避免预载失败打成换源风暴。
  */
 function maybeAutoCrossfade(el: HTMLAudioElement): void {
-  if (xfade || el !== activeEl || el.paused) return;
+  if (handoffSeal || xfade || el !== activeEl || el.paused) return;
   if (player.mode === 'shuffle' || player.mode === 'single') return;
-  if (!(player.crossfadeMs > 0)) return;
+  if (!player.singleSourceHandoff && !(player.crossfadeMs > 0)) return;
   const idx = neighborIndex(player.queue.length, player.queueIdx, player.mode, 1);
   if (idx == null) return;
   const song = player.queue[idx];
   if (!song) return;
   const incoming = bufferedElement(song, player.quality);
   if (!incoming || incoming === el || incoming.error) return;
+  const remainingMs = remainingMsOf(el);
+  if (player.singleSourceHandoff) {
+    const decision = decideTrackTransition({
+      handoff: true,
+      fadeMs: player.crossfadeMs,
+      preloadOk: true,
+      remainingMs,
+      sameStream: false,
+      predictable: true,
+      trigger: 'auto',
+    });
+    if (decision.mode !== 'handoff') return;
+    beginHandoff(el, incoming, song, idx);
+    return;
+  }
   const decision = decideCrossfade({
     fadeMs: player.crossfadeMs,
     enabled: true,
     preloadOk: true,
-    remainingMs: remainingMsOf(el),
+    remainingMs,
     sameStream: false,
     predictable: true,
     trigger: 'auto',
@@ -976,6 +1022,18 @@ export function setCrossfadeMs(ms: number, persist = true): number {
     collapseCrossfade(keep);
   }
   return n;
+}
+
+/** 单源交接。不改 crossfadeMs，关掉之后重叠交叉照原档位回来。 */
+export function setSingleSourceHandoff(on: boolean, persist = true): boolean {
+  const next = on === true;
+  player.singleSourceHandoff = next;
+  if (persist) void setPref(HANDOFF_PREF_KEY, next);
+  if (next && xfade) {
+    const keep = xfade.metaSwapped ? 'to' : 'from';
+    collapseCrossfade(keep);
+  }
+  return next;
 }
 
 export function setRate(r: number | string, persist = true): number {

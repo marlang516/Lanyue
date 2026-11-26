@@ -3,7 +3,7 @@ import { onMounted } from 'vue';
 import {
   settings, TABS, loadSettings, setTab,
   chooseTheme, chooseLanguage, chooseQuality, changeVolume, changeRate,
-  changeCrossfade, changeLyricOffset, chooseSaveDir,
+  changeCrossfade, changeHandoff, changeLyricOffset, chooseSaveDir,
   toggleCookieEditor, saveCookie, verifyCookie, clearCookie, openLogin,
   saveTemplate, deleteTemplate, activateTemplate,
   exportData, importData, checkUpdate, downloadUpdate, restartInstall,
@@ -131,6 +131,25 @@ function onVolumeInput(e: Event) {
               :aria-pressed="player.crossfadeMs === ms"
               @click="changeCrossfade(ms)"
             >{{ crossfadeStepLabel(ms) }}</button>
+          </div>
+        </div>
+
+        <div class="group">
+          <h4>单源交接</h4>
+          <p class="hint">与上面的重叠交叉二选一。打开后，下一首在备用元素上静音预热，交接时只让一首出声，两首不会叠在一起。随机、还没预热好、或剩下的时间不够时，仍立刻切换。关掉则沿用上面的无缝交叉。</p>
+          <div class="row">
+            <button
+              class="ly-btn ly-btn-sm"
+              :class="{ 'ly-btn-primary': !player.singleSourceHandoff }"
+              :aria-pressed="!player.singleSourceHandoff"
+              @click="changeHandoff(false)"
+            >关</button>
+            <button
+              class="ly-btn ly-btn-sm"
+              :class="{ 'ly-btn-primary': player.singleSourceHandoff }"
+              :aria-pressed="player.singleSourceHandoff"
+              @click="changeHandoff(true)"
+            >开</button>
           </div>
         </div>
 

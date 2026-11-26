@@ -20,13 +20,108 @@
  *
  * 阶段 3 的推进方式
  * ----------------
- * P0 只创建实例、**不接管任何调用方**。此时引擎收到的事件全部来自 audio 元素，
- * 但没有任何模块订阅它、也没有模块调它的方法 —— 对用户可见行为零影响。
- * 后续 P1-P5 逐个把调用方接过来，每一步都单独可回滚。
+ * 旧渲染层仍由 createWiredPlaybackEngine 把引擎接到 #audioPlayer。
+ * 现在出货的 Vue 播放器不再自己取流、也不再自己做一套静音预热：
+ * createPlayableResolver 是取流的唯一实现，createAudibleSlots 把
+ * audioPool 的隐藏预热和单源交接到调用方手上。重叠交叉仍由
+ * playback/crossfade.js 编排，这一条交接是它旁边的可选项。
  */
 
 import { createPlaybackEngine } from './engine.js';
+import { createAudioPool } from './audioPool.js';
 import { createProgressWriter } from '../player/progressStore.js';
+import { fileUrlFromPath } from '../../../shared/fileUrl.mjs';
+
+/** 与旧播放器同一份来源页，在线歌代理时带上。 */
+const PLAY_REFERERS = Object.freeze({
+  bilibili: 'https://www.bilibili.com/',
+  qq: 'https://y.qq.com/',
+  netease: 'https://music.163.com/',
+  kugou: 'https://www.kugou.com/',
+  kuwo: 'https://www.kuwo.cn/',
+  migu: 'https://music.migu.cn/',
+  soda: 'https://music.douyin.com/',
+  fivesing: 'https://5sing.kugou.com/',
+  audiomack: 'https://audiomack.com/',
+});
+
+function errorText(e) {
+  if (e && typeof e === 'object' && typeof e.message === 'string') return e.message;
+  return '';
+}
+
+/**
+ * 生产播放器的取流。本地文件直接变成 file URL；在线歌先取直链再登记代理。
+ * 调用方只提供 invoke，通道名留在这里，避免各处再写一套。
+ *
+ * @param {object} deps
+ * @param {(method: string, ...args: unknown[]) => Promise<unknown>} deps.invoke
+ * @param {(filePath: string) => string} [deps.localFileUrl]
+ */
+export function createPlayableResolver({ invoke, localFileUrl = fileUrlFromPath } = {}) {
+  if (typeof invoke !== 'function') throw new Error('[playback/wire] 缺少 invoke');
+  return async function resolvePlayable(song, quality) {
+    try {
+      if (song && song.filePath) return { fileUrl: localFileUrl(song.filePath) };
+      const result = await invoke('getDownloadUrlSmart', song, quality);
+      if (!result || !result.url) {
+        const err = result && (result.error || result.code);
+        return { error: err ? String(err) : '无可用音源' };
+      }
+      if (result.degradedLocal) return { fileUrl: result.url };
+      const playSource = result.source || (song && song.source) || '';
+      const proxied = await invoke('proxyPlay', result.url, PLAY_REFERERS[playSource] || '', {
+        id: String(result.id != null ? result.id : (song && song.id)),
+        source: playSource,
+        quality,
+      });
+      if (!proxied || !proxied.fileUrl) return { error: (proxied && proxied.error) || '流代理失败' };
+      return { fileUrl: proxied.fileUrl };
+    } catch (e) {
+      return { error: errorText(e) || '播放异常' };
+    }
+  };
+}
+
+/**
+ * 给调用方一个会长大的 audioPool。
+ * 池要求至少一个元素，所以拖到第一次 attach 才建。
+ * applyOutput 由调用方落地音量，池自己只负责静音位和「先关再开」。
+ *
+ * @param {object} [deps]
+ * @param {(el: HTMLAudioElement, gain: number) => void} [deps.applyOutput]
+ * @param {object|null} [deps.logger]
+ * @param {Function|null} [deps.audioContextFactory]
+ */
+export function createAudibleSlots({ applyOutput = null, logger = null, audioContextFactory = null } = {}) {
+  let pool = null;
+
+  function attach(id, el) {
+    if (!id || !el) return false;
+    if (!pool) {
+      pool = createAudioPool({
+        elements: { [id]: el },
+        logger,
+        audioContextFactory,
+        applyOutput,
+      });
+      return true;
+    }
+    return pool.attach(id, el);
+  }
+
+  function hiddenWarmup(id, src, opts) {
+    if (!pool) return { ok: false, audible: false, reason: 'missing' };
+    return pool.hiddenWarmup(id, src, opts);
+  }
+
+  function handoff(fromId, toId, opts) {
+    if (!pool) return { ok: false, mode: 'hardCut', reason: 'preload' };
+    return pool.handoff(fromId, toId, opts);
+  }
+
+  return { attach, hiddenWarmup, handoff };
+}
 
 /** 进度记忆的 key 口径，必须与 player.js:166 逐字一致，否则会读到两份互不相认的记录 */
 function playProgressKey(song) {

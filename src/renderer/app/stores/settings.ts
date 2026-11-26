@@ -9,7 +9,7 @@ import { rememberPlatformNames } from '../core/format';
 import { toast, errText } from '../core/toast';
 import { confirmDialog } from '../core/dialog';
 import { ui, applyTheme, setLanguage as setUiLanguage } from './ui';
-import { setCrossfadeMs, setQuality, setVolume } from './player';
+import { setCrossfadeMs, setQuality, setSingleSourceHandoff, setVolume } from './player';
 import { lyrics, setOffset } from './lyrics';
 import type {
   DownloadTemplate,
@@ -136,6 +136,11 @@ export async function changeRate(v: number | string): Promise<void> {
 /** 无缝交叉档位。只接受播放器收进来的那几档，脏值会在那边被当成关。 */
 export function changeCrossfade(ms: number): void {
   setCrossfadeMs(ms);
+}
+
+/** 单源交接。与交叉档位并列，打开后这一次切歌不再重叠。 */
+export function changeHandoff(on: boolean): void {
+  setSingleSourceHandoff(on);
 }
 
 export async function changeLyricOffset(ms: number): Promise<void> {

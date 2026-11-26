@@ -67,6 +67,8 @@ const ALLOWED_PREF_KEYS = new Set([
   'fadeInMs', 'fadeOutMs',
   // 无缝交叉时长（ms，关/500/1000/2000；Vue 播放器读写，0 为硬切）
   'crossfadeMs',
+  // 单源交接（与 crossfadeMs 并列，不改写重叠档位；打开后预热仍静音，交接只留一路出声）
+  'singleSourceHandoff',
   // 歌词区显隐与逐曲偏移覆盖（player/lyrics.js 读写）
   'lyricsVisible', 'lyricOverrides',
   // 搜索页「不感兴趣」屏蔽清单（views/dismissed.js 读写）
