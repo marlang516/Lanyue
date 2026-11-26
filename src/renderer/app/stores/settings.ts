@@ -9,7 +9,7 @@ import { rememberPlatformNames } from '../core/format';
 import { toast, errText } from '../core/toast';
 import { confirmDialog } from '../core/dialog';
 import { ui, applyTheme, setLanguage as setUiLanguage } from './ui';
-import { setCrossfadeMs, setQuality, setSingleSourceHandoff, setVolume } from './player';
+import { setCoverParticles, setCrossfadeMs, setQuality, setSingleSourceHandoff, setVolume } from './player';
 import { lyrics, setOffset } from './lyrics';
 import type {
   DownloadTemplate,
@@ -141,6 +141,11 @@ export function changeCrossfade(ms: number): void {
 /** 单源交接。与交叉档位并列，打开后这一次切歌不再重叠。 */
 export function changeHandoff(on: boolean): void {
   setSingleSourceHandoff(on);
+}
+
+/** 封面微尘。默认关，只叠在现有封面和桌面舞台上。 */
+export function changeCoverParticles(on: boolean): void {
+  setCoverParticles(on);
 }
 
 export async function changeLyricOffset(ms: number): Promise<void> {

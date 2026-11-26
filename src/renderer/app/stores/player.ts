@@ -42,6 +42,7 @@ import {
   shouldAttachDesktopLyrics,
   stepLyricPerformance,
 } from '../core/lyricMotion.js';
+import { COVER_PARTICLES_PREF_KEY } from '../core/coverParticles.js';
 import type {
   DesktopLyricLine,
   PlayMode,
@@ -72,6 +73,8 @@ interface PlayerState {
   queueOpen: boolean;
   /** 播放舞台投到桌面歌词那一扇窗上。主窗口此时改走便宜档。 */
   desktopStage: boolean;
+  /** 封面微尘。默认关，打开后叠在现有封面上，不另做一层窗。 */
+  coverParticles: boolean;
   /** 这次音频实际来自的平台。换源成功后可能和 current.source 不同。 */
   playSource: string;
 }
@@ -95,22 +98,25 @@ export const player = reactive<PlayerState>({
   fullscreen: false,
   queueOpen: false,
   desktopStage: false,
+  coverParticles: false,
   playSource: '',
 });
 
 export async function restorePlaybackPrefs(): Promise<void> {
-  const [quality, volume, rate, crossfade, handoff] = await Promise.all([
+  const [quality, volume, rate, crossfade, handoff, coverParticles] = await Promise.all([
     getPref('quality', 'standard'),
     getPref('playerVolume', 0.8),
     getPref('playbackRate', 1),
     getPref(CROSSFADE_PREF_KEY, 0),
     getPrefBool(HANDOFF_PREF_KEY, false),
+    getPrefBool(COVER_PARTICLES_PREF_KEY, false),
   ]);
   setQuality(String(quality || 'standard'), false);
   setVolume(Number(volume), false);
   setRate(Number(rate), false);
   setCrossfadeMs(Number(crossfade), false);
   setSingleSourceHandoff(handoff, false);
+  setCoverParticles(coverParticles, false);
 }
 
 export const hasCurrent: ComputedRef<boolean> = computed(() => !!player.current);
@@ -710,6 +716,8 @@ interface DesktopLyricPayload {
   stage?: boolean;
   playing?: boolean;
   rate?: number;
+  /** 封面微尘开关。不附带歌词正文。 */
+  coverParticles?: boolean;
 }
 
 /** 播放态推进一步歌词轨。暂停不建行。 */
@@ -781,6 +789,7 @@ function syncOutputs(force = false): void {
   const dl: DesktopLyricPayload = {
     currentTime: player.progress,
     stage: player.desktopStage,
+    coverParticles: player.coverParticles,
   };
   // 舞台那一份要封面和播放态。歌词正文仍只在换歌时附上。
   if (player.desktopStage) {
@@ -858,6 +867,9 @@ watch(() => lyricsState.items, () => {
 
 // 播放态变化立即同步（不等 timeupdate）
 watch(() => player.playing, () => syncOutputs(true));
+watch(() => player.coverParticles, () => {
+  if (_outputSyncReady) syncOutputs(true);
+});
 
 /** 设置队列与当前项，不开始播放。已经在播时顺手预取新的邻居。 */
 export function setQueue(list: unknown, index = 0): void {
@@ -1185,6 +1197,14 @@ export function setCrossfadeMs(ms: number, persist = true): number {
     collapseCrossfade(keep);
   }
   return n;
+}
+
+/** 封面微尘。默认关。不改交叉档位，也不重做歌词轨。 */
+export function setCoverParticles(on: boolean, persist = true): boolean {
+  const next = on === true;
+  player.coverParticles = next;
+  if (persist) void setPref(COVER_PARTICLES_PREF_KEY, next);
+  return next;
 }
 
 /** 单源交接。不改 crossfadeMs，关掉之后重叠交叉照原档位回来。 */

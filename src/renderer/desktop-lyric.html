@@ -112,6 +112,14 @@
       inset: 0;
       background: linear-gradient(180deg, rgba(0,0,0,.28), rgba(0,0,0,.12) 40%, rgba(0,0,0,.35));
     }
+    #coverDust {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+      pointer-events: none;
+    }
     body.stage-wall .stage-meta {
       display: block;
       position: absolute;
@@ -150,6 +158,7 @@
   <div class="stage-wash" id="stageWash" hidden>
     <img id="stageCover" alt="" />
     <div class="stage-veil"></div>
+    <canvas id="coverDust" hidden aria-hidden="true"></canvas>
   </div>
   <div class="stage-meta" id="stageMeta" hidden>
     <b id="stageTitle"></b>
@@ -173,6 +182,16 @@
   </div>
 
   <script>
+    try {
+      /*__COVER_DUST_RUNTIME__*/
+      const coverDustCanvas = document.getElementById('coverDust');
+      const coverDustApi = window.__coverDustApi;
+      if (coverDustApi && coverDustCanvas instanceof HTMLCanvasElement) {
+        window.__coverDust = coverDustApi.mountDesktopCoverDust(coverDustCanvas);
+        if (window.__pendingCoverDust) window.__coverDust.apply(window.__pendingCoverDust);
+      }
+    } catch (e) { /* 微尘没装上时，桌面歌词照旧 */ }
+
     // ── 状态 ─────────────────────────────────────────────
     let lyrics = [];        // [{t, text, subText, words:[], wordTimes:[]}]
     let lyricSig = '';     // 同一轨再推一次时不拆已经建好的行
@@ -350,11 +369,25 @@
       }
       locate();
       if (document.body.classList.contains('stage-wall')) armStageClock();
+      publishCoverDust(data);
     });
 
     // ── 控制条 ───────────────────────────────────────────
     const ICON_UNLOCKED = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.9-1"/></svg>';
     const ICON_LOCKED = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
+
+    // 微尘只看 stage 与 coverParticles。不改歌词数组，也不改签名。
+    function publishCoverDust(data) {
+      const packet = data || {};
+      const slot = window.__coverDust;
+      if (slot && typeof slot.apply === 'function') {
+        slot.apply(packet);
+        return;
+      }
+      window.__pendingCoverDust = packet;
+      const canvas = document.getElementById('coverDust');
+      if (canvas) canvas.hidden = !(packet.stage && packet.coverParticles);
+    }
 
     function setLocked(v) {
       locked = !!v;
