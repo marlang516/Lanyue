@@ -287,7 +287,8 @@ const CHANNELS = {
   'window-close':    { send: MAIN },
   'open-mini-player':      { send: MAIN },
   'mini-player-update':    { send: MAIN, receive: BOTH, args: [['data', t.any()]] },
-  'open-desktop-lyric':    { send: MAIN },
+  // lyric：原来的桌面歌词条。stage：同一扇窗铺成舞台。off：关掉。没有壁纸模式。
+  'open-desktop-lyric':    { send: MAIN, args: [['mode', t.enum(['lyric', 'stage', 'off'], 'lyric')]] },
   'desktop-lyric-update':  { send: MAIN, args: [['data', t.any()]] },
   'desktop-lyric-close':   { send: BOTH },
   'desktop-lyric-lock':    { send: BOTH, args: [['locked', t.bool()]] },

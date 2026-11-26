@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { lyrics, setOffset } from '../../stores/lyrics';
 import { player, seekTo } from '../../stores/player';
 import Icon from '../common/Icon.vue';
@@ -11,16 +11,19 @@ import {
   lyricDisplaySeconds,
   lyricLayoutDecision,
   lyricPlaySeconds,
+  mainStageRenderPlan,
   projectPlayhead,
   resolveLyricFrame,
   resolveWordSweep,
   retainLyricShaders,
+  shouldPaintMainStage,
   stepLyricPerformance,
 } from '../../core/lyricMotion.js';
 
 const motionMq = window.matchMedia('(prefers-reduced-motion: reduce)');
 const reduced = ref(motionMq.matches);
 const visualSnap = ref(false);
+const stagePlan = computed(() => mainStageRenderPlan(player.desktopStage));
 
 type LyricFrame = ReturnType<typeof resolveLyricFrame>;
 type WordFrame = ReturnType<typeof resolveWordSweep>;
@@ -64,6 +67,8 @@ let layoutIndex = -2;
 let lyricTrack: Parameters<typeof builtLyricLine>[0] = null;
 
 let raf = 0;
+let stageWait = 0;
+let lastStagePaint = -1;
 let snapGen = 0;
 let coverGen = 0;
 let alive = true;
@@ -72,7 +77,7 @@ let ro: ResizeObserver | null = null;
 function frameOpts(): { duration?: number; reducedMotion?: boolean } {
   return {
     duration: player.duration > 0 ? player.duration : undefined,
-    reducedMotion: reduced.value,
+    reducedMotion: reduced.value || stagePlan.value.projecting,
   };
 }
 
@@ -192,7 +197,7 @@ function paintWords(seconds: number, lyricFrame: LyricFrame, seeked: boolean): v
     let m = quant(glow.bloom[i] || 0);
     let face: WordLook = state === 'active' && glow.linger[i] ? 'linger' : state;
     if (state === 'active' && s <= 0 && m <= 0) face = 'unreached';
-    if (reduced.value && (state === 'active' || state === 'sung')) {
+    if ((reduced.value || !stagePlan.value.sweep) && (state === 'active' || state === 'sung')) {
       s = 1;
       b = 0;
       if (state === 'active') m = Math.max(m, 0.7);
@@ -282,7 +287,18 @@ function publish(now: number, retarget: boolean): void {
 
 function loop(now: number): void {
   if (!alive) return;
-  if (document.visibilityState !== 'hidden') publish(now, false);
+  const plan = stagePlan.value;
+  if (document.visibilityState !== 'hidden' && shouldPaintMainStage(lastStagePaint, now, plan)) {
+    lastStagePaint = now;
+    publish(now, false);
+  }
+  if (plan.tier === 'cheap') {
+    stageWait = window.setTimeout(() => {
+      stageWait = 0;
+      if (alive) raf = requestAnimationFrame(loop);
+    }, plan.frameMs);
+    return;
+  }
   raf = requestAnimationFrame(loop);
 }
 
@@ -366,10 +382,20 @@ onMounted(() => {
   raf = requestAnimationFrame(loop);
 });
 
+const lyricStageStyle = computed(() => {
+  const style: Record<string, string> = { ...glowVars.value };
+  if (stagePlan.value.projecting) {
+    style.transform = `scale(${stagePlan.value.scale})`;
+    style.transformOrigin = 'center center';
+  }
+  return style;
+});
+
 onBeforeUnmount(() => {
   alive = false;
   coverGen += 1;
   cancelAnimationFrame(raf);
+  window.clearTimeout(stageWait);
   if (ro) ro.disconnect();
   motionMq.removeEventListener('change', onMotionMq);
   // 关掉全屏页只是藏起。光带程序留在模块里，下次打开不再编译。
@@ -414,8 +440,8 @@ onBeforeUnmount(() => {
       v-else
       ref="stageEl"
       class="stage"
-      :class="{ snap: visualSnap || reduced }"
-      :style="glowVars"
+      :class="{ snap: visualSnap || reduced || stagePlan.projecting, cheap: stagePlan.projecting }"
+      :style="lyricStageStyle"
       :data-lyric-role="frame.role"
       :data-lyric-motion="frame.motion"
     >

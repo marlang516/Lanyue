@@ -35,6 +35,7 @@ export interface BridgeMethods {
   "exportPlaylist": (params?: { "songs"?: unknown[]; "format"?: "m3u" | "pls"; "name"?: string }) => Promise<unknown>;
   "fetchOnlineCover": (title?: string, artist?: string) => Promise<unknown>;
   "findContentDuplicates": (dirPath?: string) => Promise<unknown>;
+  "generateHeartbeat": (opts?: { "currentSong"?: { "id"?: unknown; "title"?: string; "artist"?: string; "album"?: string; "source"?: string }; "exclude"?: unknown[]; "limit"?: number }) => Promise<unknown>;
   "getAlbumSongs": (platform?: string, albumMid?: string, limit?: number) => Promise<unknown>;
   "getCacheSize": () => Promise<unknown>;
   "getCookies": () => Promise<unknown>;
@@ -62,7 +63,7 @@ export interface BridgeMethods {
   "loadLibraryIndex": () => Promise<unknown>;
   "loadPlayQueue": () => Promise<unknown>;
   "nlSearchMusic": (phrase?: string) => Promise<unknown>;
-  "openDesktopLyric": () => Promise<unknown>;
+  "openDesktopLyric": (mode?: "lyric" | "stage" | "off") => Promise<unknown>;
   "openExternal": (url?: string) => Promise<unknown>;
   "openFolder": (folder?: string) => Promise<unknown>;
   "openLoginWindow": (platform?: string) => Promise<unknown>;

@@ -2,7 +2,7 @@
 import { computed } from 'vue';
 import {
   player, currentKey, togglePlay, next, prev, seekTo, setVolume, setRate,
-  setQuality, cycleMode, forceSyncOutputs,
+  setQuality, cycleMode, forceSyncOutputs, setDesktopStage, openDesktopLyricWindow,
 } from '../../stores/player';
 import type { PlayMode } from '../../stores/types';
 import { lyrics } from '../../stores/lyrics';
@@ -76,8 +76,10 @@ function openQueue(): void {
   player.queueOpen = true;
 }
 function openDesktopLyric(): void {
-  // 窗口创建是同步的，但页面监听要等 load。两边都推一次全量状态。
-  void callSafe('openDesktopLyric', [], null).then(() => forceSyncOutputs());
+  openDesktopLyricWindow();
+}
+function toggleDesktopStage(): void {
+  setDesktopStage(!player.desktopStage);
 }
 function openMini(): void {
   void callSafe('openMiniPlayer', [], null).then(() => forceSyncOutputs());
@@ -173,6 +175,14 @@ function onHeart(): void {
       <button class="ly-icon-btn" title="桌面歌词" aria-label="桌面歌词" @click="openDesktopLyric">
         <Icon name="layers" :size="15" />
       </button>
+      <button
+        class="ly-icon-btn" :class="{ on: player.desktopStage }"
+        title="舞台投桌面" aria-label="舞台投桌面"
+        :aria-pressed="player.desktopStage"
+        @click="toggleDesktopStage"
+      >
+        <Icon name="wave" :size="15" />
+      </button>
       <button class="ly-icon-btn" title="迷你播放器" aria-label="迷你播放器" @click="openMini">
         <Icon name="external" :size="15" />
       </button>
@@ -206,6 +216,7 @@ function onHeart(): void {
 .a { margin-top: 2px; font-size: var(--fs-xs); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .heart:disabled { opacity: .4; }
 .heart.on { color: var(--au-3); }
+.ly-icon-btn.on { color: var(--au-1); }
 
 .center { display: flex; flex-direction: column; align-items: center; gap: 5px; min-width: 0; }
 .ctl { display: flex; align-items: center; gap: 6px; }

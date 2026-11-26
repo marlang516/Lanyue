@@ -8,7 +8,10 @@ import type { DiscoverSectionState, PlaylistSummary } from '../stores/types';
 import type { DiscoverPlaylistRef } from '../core/discoverFeed';
 import { player, currentKey, playFromList } from '../stores/player';
 import { lyrics } from '../stores/lyrics';
-import { activeLineIndex, lyricDisplaySeconds, projectPlayhead, stepLyricPerformance } from '../core/lyricMotion.js';
+import {
+  activeLineIndex, lyricDisplaySeconds, mainStageRenderPlan, projectPlayhead,
+  shouldPaintMainStage, stepLyricPerformance,
+} from '../core/lyricMotion.js';
 import { platformName } from '../core/format';
 import DiscoverRankList from '../components/data/DiscoverRankList.vue';
 import PlaylistPeek from '../components/data/PlaylistPeek.vue';
@@ -31,9 +34,12 @@ type PlayAnchor = { progress: number; at: number; rate: number };
 
 const lyricLines = ref<LyricWindow>({ prev: '', cur: '', next: '' });
 const coverGone = ref(false);
+const stagePlan = computed(() => mainStageRenderPlan(player.desktopStage));
 let anchor: PlayAnchor | null = null;
 let followKey = '';
 let raf = 0;
+let stageWait = 0;
+let lastStagePaint = -1;
 let alive = true;
 
 const songKeyNow = computed(() => (
@@ -99,7 +105,19 @@ function publishLines(now: number): void {
 
 function loop(now: number): void {
   if (!alive) return;
-  if (document.visibilityState !== 'hidden') publishLines(now);
+  const plan = stagePlan.value;
+  if (document.visibilityState !== 'hidden' && shouldPaintMainStage(lastStagePaint, now, plan)) {
+    lastStagePaint = now;
+    publishLines(now);
+  }
+  // 便宜档不再占着每一帧。桌面那一份才按帧走。
+  if (plan.tier === 'cheap') {
+    stageWait = window.setTimeout(() => {
+      stageWait = 0;
+      if (alive) raf = requestAnimationFrame(loop);
+    }, plan.frameMs);
+    return;
+  }
   raf = requestAnimationFrame(loop);
 }
 
@@ -118,6 +136,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   alive = false;
   cancelAnimationFrame(raf);
+  window.clearTimeout(stageWait);
 });
 
 function onPlay(i: number) {
@@ -235,12 +254,18 @@ function openStage(): void {
           <img
             v-if="player.current.cover && !coverGone"
             class="wash"
+            :class="{ cheap: stagePlan.tier === 'cheap' }"
+            :style="stagePlan.projecting ? { transform: `scale(${stagePlan.scale})` } : undefined"
             :src="player.current.cover"
             alt=""
             @error="dropBrokenImg"
           />
           <div class="veil"></div>
-          <div class="stage-body">
+          <div
+            class="stage-body"
+            :class="{ cheap: stagePlan.tier === 'cheap' }"
+            :style="stagePlan.projecting ? { transform: `scale(${stagePlan.scale})`, transformOrigin: 'center center' } : undefined"
+          >
             <div class="meta">
               <b>{{ player.current.title }}</b>
               <span>{{ player.current.artist || '未知歌手' }}</span>
@@ -426,6 +451,10 @@ function openStage(): void {
   color: var(--ink); opacity: 1;
 }
 .line.gap { opacity: 0; }
+/* 舞台已经投到桌面。封面不再模糊；缩放写在样式绑定上，跟着 mainStageRenderPlan。 */
+.wash.cheap {
+  filter: none;
+}
 .none {
   display: block; font-size: var(--fs-xl); font-weight: var(--fw-bold); line-height: 1.4;
   color: var(--ink-2);

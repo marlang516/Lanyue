@@ -6,6 +6,9 @@
  *      open-mini-player / mini-toggle-play / mini-next / mini-prev / mini-close /
  *      open-desktop-lyric / desktop-lyric-close / desktop-lyric-lock /
  *      desktop-lyric-update / desktop-lyric-sync
+ *
+ * 舞台投桌面沿用桌面歌词这一扇窗：透明、点击穿透、不抢焦点。
+ * 不改系统壁纸，也不把窗口挂进桌面宿主。
  */
 
 const { handle, on } = require('./register');
@@ -47,14 +50,120 @@ function _app() {
 
 let miniPlayerWin = null;
 let desktopLyricWin = null;
+/** @type {'lyric' | 'stage'} */
+let desktopLyricMode = 'lyric';
 
-// ── 桌面歌词窗口 ──────────────────────────────────────────
-function createDesktopLyric() {
-  if (desktopLyricWin && !desktopLyricWin.isDestroyed()) {
-    desktopLyricWin.focus();
-    return;
+function _screen() {
+  if (_port.screen && typeof _port.screen.getPrimaryDisplay === 'function') return _port.screen;
+  try {
+    const screen = require('electron').screen;
+    if (screen && typeof screen.getPrimaryDisplay === 'function') return screen;
+  } catch (_e) { /* 单测里没有 electron */ }
+  return null;
+}
+
+/** @param {{ getPrimaryDisplay?: () => { workArea?: object, bounds?: object } } | null | undefined} screen */
+function desktopWorkArea(screen) {
+  let area = null;
+  try {
+    const display = screen && typeof screen.getPrimaryDisplay === 'function'
+      ? screen.getPrimaryDisplay()
+      : null;
+    area = display && (display.workArea || display.bounds);
+  } catch (_e) {
+    area = null;
   }
-  desktopLyricWin = new _BrowserWindow({
+  const width = area && Number(area.width);
+  const height = area && Number(area.height);
+  if (width > 0 && height > 0) {
+    return { x: Number(area.x) || 0, y: Number(area.y) || 0, width, height };
+  }
+  return { x: 0, y: 0, width: 1280, height: 720 };
+}
+
+/**
+ * 舞台投到桌面时的窗口规格。独立透明窗，不是系统壁纸，也不挂进桌面宿主。
+ * @param {{ x?: number, y?: number, width?: number, height?: number } | null | undefined} workArea
+ */
+function desktopStageSpec(workArea) {
+  const width = workArea && Number(workArea.width);
+  const height = workArea && Number(workArea.height);
+  const bounds = width > 0 && height > 0
+    ? { x: Number(workArea.x) || 0, y: Number(workArea.y) || 0, width, height }
+    : { x: 0, y: 0, width: 1280, height: 720 };
+  return {
+    mode: 'stage',
+    independent: true,
+    transparent: true,
+    frame: false,
+    focusable: false,
+    clickThrough: true,
+    skipTaskbar: true,
+    show: 'inactive',
+    alwaysOnTop: true,
+    hasShadow: false,
+    resizable: false,
+    wallpaper: false,
+    hostInjection: false,
+    bounds,
+  };
+}
+
+/**
+ * 把已经存在的桌面歌词窗收成歌词条，或铺成穿透的舞台。
+ * 舞台模式只 showInactive，不 focus、不 show。
+ * @param {object} win
+ * @param {'lyric' | 'stage'} mode
+ * @param {{ x?: number, y?: number, width?: number, height?: number } | null | undefined} workArea
+ */
+function presentDesktopLyric(win, mode, workArea) {
+  if (!win || (typeof win.isDestroyed === 'function' && win.isDestroyed())) return null;
+  if (mode === 'stage') {
+    const spec = desktopStageSpec(workArea);
+    if (typeof win.setFocusable === 'function') win.setFocusable(false);
+    if (typeof win.setBounds === 'function') win.setBounds(spec.bounds);
+    if (typeof win.setAlwaysOnTop === 'function') win.setAlwaysOnTop(true);
+    if (typeof win.setSkipTaskbar === 'function') win.setSkipTaskbar(true);
+    // 整窗穿透，不把移动事件再送回来，控制条也就抢不回点击。
+    if (typeof win.setIgnoreMouseEvents === 'function') win.setIgnoreMouseEvents(true);
+    if (typeof win.showInactive === 'function') win.showInactive();
+    return spec;
+  }
+  if (typeof win.setFocusable === 'function') win.setFocusable(true);
+  if (typeof win.setAlwaysOnTop === 'function') win.setAlwaysOnTop(true);
+  if (typeof win.setIgnoreMouseEvents === 'function') win.setIgnoreMouseEvents(false);
+  if (typeof win.setSize === 'function') win.setSize(760, 120);
+  if (typeof win.show === 'function') win.show();
+  return {
+    mode: 'lyric',
+    independent: true,
+    transparent: true,
+    focusable: true,
+    clickThrough: false,
+    wallpaper: false,
+    hostInjection: false,
+    show: 'show',
+  };
+}
+
+function notifyDesktopStageClosed() {
+  const main = getMainWindow();
+  if (main && !main.isDestroyed() && main.webContents) {
+    main.webContents.send('sync-desktop-lyric', { closed: true });
+  }
+}
+
+// ── 桌面歌词窗口（舞台投射是这扇窗的另一种摆法，不是第二扇窗） ──
+function createDesktopLyric(mode) {
+  const stage = mode === 'stage';
+  desktopLyricMode = stage ? 'stage' : 'lyric';
+  const area = desktopWorkArea(_screen());
+  if (desktopLyricWin && typeof desktopLyricWin.isDestroyed === 'function' && !desktopLyricWin.isDestroyed()) {
+    presentDesktopLyric(desktopLyricWin, desktopLyricMode, area);
+    if (!stage && typeof desktopLyricWin.focus === 'function') desktopLyricWin.focus();
+    return desktopLyricWin;
+  }
+  const options = {
     width: 760, height: 120,
     frame: false,
     alwaysOnTop: true,
@@ -62,7 +171,8 @@ function createDesktopLyric() {
     resizable: false,
     transparent: true,
     // 点击穿透：正文区域 setIgnoreMouseEvents(true)，控制条区域在渲染层
-    // 用 mouseenter/leave 切回 false（锁定的拖动条始终可点）
+    // 用 mouseenter/leave 切回 false（锁定的拖动条始终可点）。
+    // 舞台模式整窗穿透，并且 focusable/show 在下面改掉，避免一创建就抢焦点。
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -72,7 +182,19 @@ function createDesktopLyric() {
       // sandbox preload 不能 require 应用文件：IPC 契约经 argv 序列化注入
       additionalArguments: [buildContractArg('secondary')],
     },
-  });
+  };
+  if (stage) {
+    const spec = desktopStageSpec(area);
+    options.x = spec.bounds.x;
+    options.y = spec.bounds.y;
+    options.width = spec.bounds.width;
+    options.height = spec.bounds.height;
+    options.focusable = false;
+    options.show = false;
+    options.hasShadow = false;
+  }
+  // _BrowserWindow() 返回的是构造器。直接 new 包装函数会拿到构造器本身，窗建不出来。
+  desktopLyricWin = new (_BrowserWindow())(options);
   // 二级窗口只登记 secondary 能力面：歌词/播放器通道之外一律在来源闸被拒
   senderTrust.trust(desktopLyricWin.webContents, 'secondary');
   // 二级窗口只加载本地固定页面，任何导航/弹窗一律拒绝
@@ -86,7 +208,19 @@ function createDesktopLyric() {
       main.webContents.send('sync-desktop-lyric');
     }
   });
-  desktopLyricWin.on('closed', () => { desktopLyricWin = null; });
+  desktopLyricWin.on('closed', () => {
+    const wasStage = desktopLyricMode === 'stage';
+    desktopLyricWin = null;
+    desktopLyricMode = 'lyric';
+    if (wasStage) notifyDesktopStageClosed();
+  });
+  if (stage) presentDesktopLyric(desktopLyricWin, 'stage', area);
+  return desktopLyricWin;
+}
+
+function closeDesktopLyric() {
+  const win = desktopLyricWin;
+  if (win && typeof win.isDestroyed === 'function' && !win.isDestroyed()) win.close();
 }
 
 /** 向桌面歌词窗口推送状态（主窗口渲染层经 desktop-lyric-update 转发） */
@@ -103,7 +237,7 @@ function createMiniPlayer() {
   }
   const main = getMainWindow();
   const [mx, my] = main ? main.getPosition() : [100, 100];
-  miniPlayerWin = new _BrowserWindow({
+  miniPlayerWin = new (_BrowserWindow())({
     width: 320, height: 72,
     x: mx, y: my,
     frame: false,
@@ -185,8 +319,14 @@ function register(opts = {}) {
     }
   });
 
-  // ── 桌面歌词 ────────────────────────────────────────
-  on('open-desktop-lyric', () => createDesktopLyric());
+  // ── 桌面歌词 / 舞台投桌面（同一扇窗） ──────────────
+  on('open-desktop-lyric', (_, mode) => {
+    if (mode === 'off') {
+      closeDesktopLyric();
+      return;
+    }
+    createDesktopLyric(mode === 'stage' ? 'stage' : 'lyric');
+  });
 
   // 主窗口渲染层推送状态到歌词窗口（歌词/进度/播放态）
   on('desktop-lyric-update', (_, data) => syncDesktopLyric(data));
@@ -197,8 +337,10 @@ function register(opts = {}) {
     }
   });
 
-  // 锁定切换：锁定=拖动条常驻可拖，解锁=正文穿透鼠标、悬停控制条才恢复点击
+  // 锁定切换：锁定=拖动条常驻可拖，解锁=正文穿透鼠标、悬停控制条才恢复点击。
+  // 舞台投射整窗穿透，这两条不能把点击或焦点抢回来。
   on('desktop-lyric-lock', (_, locked) => {
+    if (desktopLyricMode === 'stage') return;
     if (desktopLyricWin && !desktopLyricWin.isDestroyed()) {
       if (locked === false) {
         desktopLyricWin.setIgnoreMouseEvents(true, { forward: true });
@@ -210,6 +352,7 @@ function register(opts = {}) {
 
   // 点击穿透切换（渲染层 mouseenter/leave 控制条时调用）
   on('desktop-lyric-set-ignore-mouse', (_, ignore) => {
+    if (desktopLyricMode === 'stage') return;
     if (desktopLyricWin && !desktopLyricWin.isDestroyed()) {
       desktopLyricWin.setIgnoreMouseEvents(ignore, { forward: true });
     }
@@ -301,4 +444,7 @@ function register(opts = {}) {
   });
 }
 
-module.exports = { register, setWindowPort, syncMiniPlayer, createMiniPlayer, createDesktopLyric };
+module.exports = {
+  register, setWindowPort, syncMiniPlayer, createMiniPlayer, createDesktopLyric,
+  desktopStageSpec, presentDesktopLyric,
+};
