@@ -557,3 +557,316 @@ test('linesFromLyricResult / loadFor：酷狗与汽水保留逐字，纯 LRC 不
     else global.window = prevWindow;
   }
 });
+
+/** 时钟每读一次就前进 costMs，用来把「一帧能建几行」钉死。 */
+function budgetClock(start, costMs) {
+  let at = start;
+  return () => {
+    at += costMs;
+    return at;
+  };
+}
+
+function songLines(n) {
+  return Array.from({ length: n }, (_, i) => ({ t: i * 2, text: `你好世界${i}` }));
+}
+
+test('暂停保住已经建好的整轨，恢复从原布局继续而不是重做', async () => {
+  const {
+    retainLyricTrack,
+    buildLyricTrack,
+    stepLyricPerformance,
+    displayWords,
+    createLyricShaderResidence,
+    warmLyricShaders,
+    LYRIC_BUILD_BUDGET_MS,
+    LYRIC_BUILD_FRAME_MS,
+  } = await fresh();
+  const items = songLines(12);
+  const budget = LYRIC_BUILD_BUDGET_MS;
+  assert.ok(budget > 0);
+  assert.ok(LYRIC_BUILD_FRAME_MS > 1);
+
+  const track = retainLyricTrack(null, 'song-a', true);
+  const revision = track.revision;
+  const lines = track.lines;
+  const first = buildLyricTrack(track, items, 40, budget, 0, budgetClock(0, budget), 0);
+  assert.strictEqual(first.built, 1, '预算只够这一帧的第一行');
+  assert.ok(first.built < items.length);
+  const line0 = track.lines[0];
+  assert.ok(line0);
+  assert.strictEqual(line0.words, displayWords(items[0], items[1], 40), '建行沿用现有逐字，不另拆一套');
+  const built = track.built;
+  const nextIndex = track.nextIndex;
+
+  const held = retainLyricTrack(track, 'song-a', false);
+  assert.strictEqual(held, track);
+  assert.strictEqual(held.lines, lines);
+  assert.strictEqual(held.lines[0], line0);
+  assert.strictEqual(held.built, built);
+  assert.strictEqual(held.nextIndex, nextIndex);
+  assert.strictEqual(held.revision, revision);
+  assert.strictEqual(held.phase, 'held');
+  assert.strictEqual(held.playing, false);
+
+  const frozen = buildLyricTrack(held, items, 40, budget, LYRIC_BUILD_FRAME_MS, budgetClock(LYRIC_BUILD_FRAME_MS, 1), 0);
+  assert.strictEqual(frozen.held, true);
+  assert.strictEqual(frozen.built, 0);
+  assert.strictEqual(held.lines[0], line0);
+  assert.strictEqual(held.built, built);
+  assert.strictEqual(held.revision, revision);
+
+  const resumed = retainLyricTrack(held, 'song-a', true);
+  assert.strictEqual(resumed, track);
+  assert.strictEqual(resumed.lines, lines);
+  assert.strictEqual(resumed.phase, 'building');
+  const more = buildLyricTrack(
+    resumed, items, 40, budget, LYRIC_BUILD_FRAME_MS * 2, budgetClock(LYRIC_BUILD_FRAME_MS * 2, budget), 0,
+  );
+  assert.strictEqual(more.built, 1);
+  assert.strictEqual(resumed.lines[0], line0, '已建的行保持原对象');
+  assert.ok(resumed.built > built);
+  assert.strictEqual(resumed.revision, revision);
+
+  const other = retainLyricTrack(resumed, 'song-b', true);
+  assert.notStrictEqual(other, resumed);
+  assert.notStrictEqual(other.lines, lines);
+  assert.strictEqual(other.built, 0);
+
+  const residence = createLyricShaderResidence();
+  warmLyricShaders(residence, 1);
+  const compiles = residence.compiles;
+  const live = stepLyricPerformance({
+    sourceKey: 'live',
+    playing: true,
+    items,
+    duration: 40,
+    nowMs: 0,
+    budgetMs: budget,
+    clock: budgetClock(0, budget),
+    focusIndex: 4,
+    residence,
+  });
+  const shared = live.track;
+  const focusLine = shared.lines[4];
+  assert.ok(focusLine, '预算先留给当前句');
+  assert.strictEqual(shared.lines[0], undefined);
+  const paused = stepLyricPerformance({
+    sourceKey: 'live',
+    playing: false,
+    items,
+    duration: 40,
+    nowMs: LYRIC_BUILD_FRAME_MS / 2,
+    budgetMs: budget,
+    clock: budgetClock(LYRIC_BUILD_FRAME_MS / 2, 1),
+    focusIndex: 4,
+    residence,
+  });
+  assert.strictEqual(paused.track, shared);
+  assert.strictEqual(paused.held, true);
+  assert.strictEqual(paused.built, 0);
+  assert.strictEqual(shared.phase, 'held');
+  assert.strictEqual(shared.lines[4], focusLine);
+  assert.strictEqual(shared.revision, live.track.revision);
+  const again = stepLyricPerformance({
+    sourceKey: 'live',
+    playing: true,
+    items,
+    duration: 40,
+    nowMs: LYRIC_BUILD_FRAME_MS,
+    budgetMs: budget,
+    clock: budgetClock(LYRIC_BUILD_FRAME_MS, budget),
+    focusIndex: 4,
+    residence,
+  });
+  assert.strictEqual(again.track, shared);
+  assert.strictEqual(again.held, false);
+  assert.strictEqual(again.built, 1);
+  assert.strictEqual(shared.lines[4], focusLine);
+  assert.strictEqual(residence.compiles, compiles, '恢复不再编译着色器');
+  assert.strictEqual(residence.programs.sweep.resident, true);
+
+  const reloaded = songLines(3);
+  const reset = stepLyricPerformance({
+    sourceKey: 'live',
+    playing: true,
+    items: reloaded,
+    duration: 40,
+    nowMs: LYRIC_BUILD_FRAME_MS * 2,
+    budgetMs: budget,
+    clock: budgetClock(LYRIC_BUILD_FRAME_MS * 2, budget),
+    focusIndex: 0,
+    residence,
+  });
+  assert.notStrictEqual(reset.track, shared);
+  assert.strictEqual(reset.track.lines[4], undefined);
+  assert.notStrictEqual(reset.track.lines, shared.lines);
+});
+
+test('建行守时间预算，跨帧增量继续，同一帧不建第二次', async () => {
+  const {
+    retainLyricTrack,
+    buildLyricTrack,
+    LYRIC_BUILD_BUDGET_MS,
+    LYRIC_BUILD_FRAME_MS,
+  } = await fresh();
+  const items = songLines(6);
+  const budget = LYRIC_BUILD_BUDGET_MS;
+  const track = retainLyricTrack(null, 'budget', true);
+  const frames = [];
+  let now = 0;
+  while (!track.complete && frames.length <= items.length + 2) {
+    const step = buildLyricTrack(track, items, 80, budget, now, budgetClock(now, budget), -1);
+    frames.push(step.built);
+    now += LYRIC_BUILD_FRAME_MS;
+  }
+  assert.deepStrictEqual(frames, [1, 1, 1, 1, 1, 1], '每帧只建预算内容得下的一行');
+  assert.strictEqual(track.built, items.length);
+  assert.strictEqual(track.complete, true);
+  assert.strictEqual(track.phase, 'ready');
+  const kept = track.lines[0];
+  const idle = buildLyricTrack(track, items, 80, budget, now, budgetClock(now, budget), 0);
+  assert.strictEqual(idle.built, 0);
+  assert.strictEqual(track.lines[0], kept);
+
+  const focused = retainLyricTrack(null, 'focus', true);
+  const head = buildLyricTrack(focused, items, 80, budget, 0, budgetClock(0, budget), 3);
+  assert.strictEqual(head.built, 1);
+  assert.ok(focused.lines[3]);
+  assert.strictEqual(focused.lines[0], undefined);
+  const sameFrame = buildLyricTrack(
+    focused, items, 80, budget, LYRIC_BUILD_FRAME_MS / 2, budgetClock(LYRIC_BUILD_FRAME_MS / 2, 1), 3,
+  );
+  assert.strictEqual(sameFrame.coalesced, true);
+  assert.strictEqual(sameFrame.built, 0);
+  assert.strictEqual(focused.lines[0], undefined);
+  const follow = buildLyricTrack(
+    focused, items, 80, budget, LYRIC_BUILD_FRAME_MS, budgetClock(LYRIC_BUILD_FRAME_MS, budget), 3,
+  );
+  assert.strictEqual(follow.coalesced, false);
+  assert.strictEqual(follow.built, 1);
+  assert.ok(focused.lines[0]);
+  assert.strictEqual(focused.lines[3], head.track.lines[3]);
+
+  const blocked = retainLyricTrack(null, 'zero', true);
+  const none = buildLyricTrack(blocked, items, 80, 0, 0, budgetClock(0, 1), 0);
+  assert.strictEqual(none.built, 0);
+  assert.strictEqual(blocked.built, 0);
+});
+
+test('光带着色器预热后常驻，暂停、藏起、再显示都不再编译', async () => {
+  const {
+    createLyricShaderResidence,
+    warmLyricShaders,
+    retainLyricShaders,
+    lyricShaderResidence,
+    LYRIC_SHADER_NAMES,
+  } = await fresh();
+  const cold = createLyricShaderResidence();
+  assert.strictEqual(cold.warmed, false);
+  assert.strictEqual(cold.compiles, 0);
+  const nodes = [];
+  const fakeDoc = {
+    createElement() {
+      return {
+        style: {},
+        attrs: {},
+        setAttribute(name, value) { this.attrs[name] = value; },
+        textContent: '',
+      };
+    },
+    body: { appendChild(el) { nodes.push(el); } },
+  };
+  const first = warmLyricShaders(cold, 5, { document: fakeDoc });
+  assert.strictEqual(first.compiled, LYRIC_SHADER_NAMES.length);
+  assert.strictEqual(cold.warmed, true);
+  assert.strictEqual(nodes.length, 1);
+  assert.strictEqual(cold.programs.sweep.feature, 'clip-path');
+  assert.strictEqual(cold.programs.band.feature, 'background-clip');
+  assert.strictEqual(cold.programs.bloom.feature, 'drop-shadow');
+  assert.strictEqual(cold.programs.sweep.resident, true);
+  const sweep = cold.programs.sweep;
+  const band = cold.programs.band;
+  const bloom = cold.programs.bloom;
+
+  for (const reason of ['show', 'pause', 'resume', 'hide']) {
+    const next = retainLyricShaders(reason, cold, 10, { document: fakeDoc });
+    assert.strictEqual(next.compiled, 0, reason);
+    assert.strictEqual(next.kept, true, reason);
+    assert.strictEqual(next.residence, cold);
+  }
+  assert.strictEqual(cold.compiles, LYRIC_SHADER_NAMES.length);
+  assert.strictEqual(cold.programs.sweep, sweep);
+  assert.strictEqual(cold.programs.band, band);
+  assert.strictEqual(cold.programs.bloom, bloom);
+  assert.strictEqual(cold.surface, nodes[0]);
+  assert.strictEqual(nodes.length, 1, '预热面只挂一次，暂停不拆');
+
+  const live = lyricShaderResidence();
+  assert.strictEqual(live.warmed, true, '模块加载时已经预热');
+  assert.strictEqual(live.compiles, LYRIC_SHADER_NAMES.length);
+  const shown = retainLyricShaders('show');
+  assert.strictEqual(shown.compiled, 0);
+  assert.strictEqual(shown.residence, live);
+  const paused = retainLyricShaders('pause');
+  assert.strictEqual(paused.compiled, 0);
+  assert.strictEqual(paused.residence.programs.sweep, live.programs.sweep);
+  assert.strictEqual(paused.residence.programs.band, live.programs.band);
+  assert.strictEqual(paused.residence.programs.bloom, live.programs.bloom);
+});
+
+test('暂停不拆当前句布局；同一首暂停不向桌面歌词重发整轨', async () => {
+  const { lyricLayoutDecision, shouldAttachDesktopLyrics, desktopTrackSignature } = await fresh();
+  assert.strictEqual(
+    lyricLayoutDecision({ playing: false, seeked: false, sameLine: true, hasLayout: true }),
+    'keep',
+  );
+  assert.strictEqual(
+    lyricLayoutDecision({ playing: false, seeked: true, sameLine: false, hasLayout: true }),
+    'paint',
+  );
+  assert.strictEqual(
+    lyricLayoutDecision({ playing: true, seeked: false, sameLine: true, hasLayout: true }),
+    'paint',
+  );
+  assert.strictEqual(
+    lyricLayoutDecision({ playing: false, seeked: false, sameLine: false, hasLayout: true }),
+    'paint',
+  );
+  assert.strictEqual(
+    lyricLayoutDecision({ playing: false, seeked: false, sameLine: true, hasLayout: false }),
+    'paint',
+  );
+
+  assert.strictEqual(shouldAttachDesktopLyrics(false, false), false, '暂停不重发');
+  assert.strictEqual(shouldAttachDesktopLyrics(false, true), false, '恢复同一首不重发');
+  assert.strictEqual(shouldAttachDesktopLyrics(true, false), true, '换歌即使停着也要换轨');
+  assert.strictEqual(shouldAttachDesktopLyrics(true, true), true);
+  const lines = [{ t: 1, text: '甲' }, { t: 2, text: '乙' }];
+  const sig = desktopTrackSignature(lines);
+  assert.ok(sig);
+  assert.strictEqual(desktopTrackSignature(lines), sig);
+  assert.notStrictEqual(desktopTrackSignature([{ t: 1, text: '甲' }, { t: 2, text: '丙' }]), sig);
+  assert.strictEqual(desktopTrackSignature([]), '');
+  assert.strictEqual(desktopTrackSignature(null), '');
+});
+
+test('全屏光带、播放舞台和桌面歌词接在同一套守卫上', () => {
+  const disc = fs.readFileSync(path.join(ROOT, 'src/renderer/app/views/DiscoverView.vue'), 'utf8');
+  const desk = fs.readFileSync(path.join(ROOT, 'src/renderer/desktop-lyric.html'), 'utf8');
+  const player = fs.readFileSync(path.join(ROOT, 'src/renderer/app/stores/player.ts'), 'utf8');
+  const motion = fs.readFileSync(path.join(ROOT, 'src/renderer/app/core/lyricMotion.js'), 'utf8');
+  assert.match(PANE, /stepLyricPerformance/);
+  assert.match(PANE, /lyricLayoutDecision/);
+  assert.doesNotMatch(PANE, /releaseLyricShaders/);
+  assert.match(disc, /stepLyricPerformance/);
+  assert.doesNotMatch(disc, /releaseLyricShaders/);
+  assert.match(disc, /text-overflow:\s*ellipsis/);
+  assert.match(player, /stepLyricPerformance/);
+  assert.match(player, /shouldAttachDesktopLyrics/);
+  assert.match(desk, /function desktopTrackSignature/);
+  assert.match(desk, /sig !== lyricSig/);
+  assert.match(motion, /export function desktopTrackSignature/);
+  assert.match(motion, /WORD_LEAD_SEC = 0\.15/);
+  assert.match(motion, /LYRIC_BUILD_BUDGET_MS/);
+});

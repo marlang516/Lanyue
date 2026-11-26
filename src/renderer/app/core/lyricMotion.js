@@ -18,6 +18,12 @@
  *
  * 行号二分全屏页和桌面歌词同步共用，不要在播放器里再写一份。
  *
+ * 演出性能也收在这里，不另做一套歌词：
+ *   · 整轨布局建好就留着。暂停只把相位改成 held，不换 lines、不换 revision。
+ *   · 建行按时间预算分帧。一帧建不完，下一帧从剩下的行接着建。
+ *   · 光带用到的合成程序（扫过、亮带、余光）预热一次后常驻，
+ *     显示、暂停、恢复、藏起都不再编译。
+ *
  * 逐字状态用的是调用方已经算好的同一播放秒（含偏移），不是第二只钟。
  * 光带也吃这一秒和这个字自己的起止，并提前 WORD_LEAD_SEC：时间戳到达时
  * 这个字已经亮住，而不是等唱完才铺满。长音停得更亮，快词在自己的时长里
@@ -671,3 +677,408 @@ export function glowFromCoverPixels(rgba) {
   if (!(w > 0)) return '';
   return `rgb(${Math.round(r / w)}, ${Math.round(g / w)}, ${Math.round(b / w)})`;
 }
+
+/**
+ * 一帧里建行最多占用这么久。短于一帧，剩下的时间留给界面自己画。
+ * 调用方在同一帧里再进来时，用 LYRIC_BUILD_FRAME_MS 合并成一次。
+ */
+export const LYRIC_BUILD_BUDGET_MS = 8;
+
+/** 同一帧里的多次推进合成一次，避免全屏页和舞台各建一遍。 */
+export const LYRIC_BUILD_FRAME_MS = 16;
+
+/** 光带实际用到的三种合成。预热后程序对象一直留在 residence 上。 */
+export const LYRIC_SHADER_NAMES = Object.freeze(['sweep', 'band', 'bloom']);
+
+/** @type {Record<string, string>} */
+const SHADER_FEATURE = {
+  sweep: 'clip-path',
+  band: 'background-clip',
+  bloom: 'drop-shadow',
+};
+
+/**
+ * @typedef {object} LyricSourceLine
+ * @property {number} t
+ * @property {string} [text]
+ * @property {readonly {t:number, dur?:number, text?:string}[]} [words]
+ */
+
+/**
+ * @typedef {object} LyricTrackLine
+ * @property {number} index
+ * @property {number} t
+ * @property {string} text
+ * @property {readonly {t:number, dur:number, text:string}[]} words
+ */
+
+/**
+ * @typedef {object} LyricTrack
+ * @property {string} sourceKey
+ * @property {LyricTrackLine[]} lines
+ * @property {number} nextIndex
+ * @property {number} built
+ * @property {boolean} complete
+ * @property {number} revision
+ * @property {'building' | 'ready' | 'held'} phase
+ * @property {boolean} playing
+ * @property {readonly LyricSourceLine[] | null} itemRef
+ * @property {number | null} stepBucket
+ * @property {boolean} stepSpent
+ */
+
+/**
+ * @typedef {object} LyricShaderProgram
+ * @property {string} name
+ * @property {boolean} resident
+ * @property {number} compiledAt
+ * @property {string} feature
+ */
+
+/**
+ * @typedef {object} LyricShaderResidence
+ * @property {Record<string, LyricShaderProgram>} programs
+ * @property {number} compiles
+ * @property {boolean} warmed
+ * @property {HTMLElement | null} surface
+ */
+
+let trackRevision = 1;
+/** @type {Map<string, LyricTrack>} */
+const tracksByKey = new Map();
+
+/**
+ * 同一首歌暂停：还是这条轨道，lines 和 revision 都不换。
+ * 换 sourceKey 才新开一条，从头建。
+ * @param {LyricTrack | null | undefined} track
+ * @param {string} sourceKey
+ * @param {boolean} playing
+ * @returns {LyricTrack}
+ */
+export function retainLyricTrack(track, sourceKey, playing) {
+  const key = String(sourceKey || '');
+  const on = !!playing;
+  if (!track || track.sourceKey !== key) {
+    return {
+      sourceKey: key,
+      lines: [],
+      nextIndex: 0,
+      built: 0,
+      complete: false,
+      revision: trackRevision++,
+      phase: on ? 'building' : 'held',
+      playing: on,
+      itemRef: null,
+      stepBucket: null,
+      stepSpent: false,
+    };
+  }
+  track.playing = on;
+  if (!on) track.phase = 'held';
+  else if (track.phase === 'held') track.phase = track.complete ? 'ready' : 'building';
+  return track;
+}
+
+/**
+ * 当前这首的轨道。歌词数组换了（换歌或重新解析）才丢弃已建布局。
+ * 暂停传进来的仍是原来那份数组，因此不会重做。
+ * @param {string} sourceKey
+ * @param {boolean} playing
+ * @param {readonly LyricSourceLine[] | null | undefined} items
+ * @returns {LyricTrack}
+ */
+function openLyricTrack(sourceKey, playing, items) {
+  const key = String(sourceKey || '');
+  const list = Array.isArray(items) ? items : null;
+  let prev = tracksByKey.get(key) || null;
+  if (prev && list && prev.itemRef && prev.itemRef !== list) prev = null;
+  const track = retainLyricTrack(prev, key, playing);
+  if (list) track.itemRef = list;
+  tracksByKey.set(key, track);
+  for (const existing of tracksByKey.keys()) {
+    if (existing !== key) tracksByKey.delete(existing);
+  }
+  return track;
+}
+
+/**
+ * @param {LyricTrack | null | undefined} track
+ * @param {number} index
+ * @returns {LyricTrackLine | null}
+ */
+export function builtLyricLine(track, index) {
+  if (!track || !Array.isArray(track.lines)) return null;
+  const i = Number(index);
+  if (!Number.isInteger(i) || i < 0) return null;
+  return track.lines[i] || null;
+}
+
+/**
+ * 在预算内接着建还没建的行。已建的格子不重写。
+ * 暂停（held）直接返回，built 为 0。
+ * focusIndex 是此刻要唱的那句，有预算时先建它，再按顺序补前面的洞。
+ * @param {LyricTrack | null | undefined} track
+ * @param {readonly LyricSourceLine[] | null | undefined} items
+ * @param {number | undefined} duration
+ * @param {number} budgetMs
+ * @param {number} nowMs
+ * @param {(() => number) | undefined} clock
+ * @param {number} [focusIndex]
+ * @returns {{ track: LyricTrack | null, built: number, done: boolean, held: boolean, coalesced: boolean }}
+ */
+export function buildLyricTrack(track, items, duration, budgetMs, nowMs, clock, focusIndex) {
+  if (!track) {
+    return { track: null, built: 0, done: true, held: false, coalesced: false };
+  }
+  if (track.phase === 'held' || track.playing === false) {
+    return { track, built: 0, done: !!track.complete, held: true, coalesced: false };
+  }
+  const list = Array.isArray(items) ? items : [];
+  const budget = Number(budgetMs);
+  if (!(budget > 0)) {
+    return { track, built: 0, done: !!track.complete, held: false, coalesced: false };
+  }
+  const start = finite(nowMs, 0);
+  const frame = LYRIC_BUILD_FRAME_MS > 0 ? LYRIC_BUILD_FRAME_MS : 16;
+  const bucket = Math.floor(start / frame);
+  if (track.stepBucket === bucket && track.stepSpent) {
+    return { track, built: 0, done: !!track.complete, held: false, coalesced: true };
+  }
+  const read = typeof clock === 'function'
+    ? clock
+    : () => (typeof performance !== 'undefined' ? performance.now() : start);
+  const pending = [];
+  const focus = Number(focusIndex);
+  if (Number.isInteger(focus) && focus >= 0 && focus < list.length && !track.lines[focus]) {
+    pending.push(focus);
+  }
+  for (let i = track.nextIndex; i < list.length; i++) {
+    if (!track.lines[i] && i !== focus) pending.push(i);
+  }
+  let built = 0;
+  for (let p = 0; p < pending.length; p++) {
+    const i = pending[p];
+    if (track.lines[i]) continue;
+    if (built > 0 && read() - start >= budget) break;
+    const line = list[i];
+    const words = displayWords(line, list[i + 1], duration);
+    track.lines[i] = {
+      index: i,
+      t: finite(line && line.t, 0),
+      text: line && typeof line.text === 'string' ? line.text : '',
+      words,
+    };
+    track.built += 1;
+    built += 1;
+  }
+  while (track.nextIndex < list.length && track.lines[track.nextIndex]) track.nextIndex += 1;
+  track.complete = list.length > 0 && track.built >= list.length;
+  if (track.complete && track.playing) track.phase = 'ready';
+  if (built > 0 || track.complete) {
+    track.stepBucket = bucket;
+    track.stepSpent = true;
+  }
+  return { track, built, done: !!track.complete, held: false, coalesced: false };
+}
+
+/**
+ * 播放态推进一步。暂停不建行，轨道对象保持原样。
+ * @param {{
+ *   sourceKey?: string,
+ *   playing?: boolean,
+ *   items?: readonly LyricSourceLine[] | null,
+ *   duration?: number,
+ *   nowMs?: number,
+ *   budgetMs?: number,
+ *   clock?: () => number,
+ *   focusIndex?: number,
+ *   residence?: LyricShaderResidence,
+ *   env?: { document?: Document },
+ *   reason?: string,
+ * } | null | undefined} opts
+ * @returns {{ track: LyricTrack, built: number, done: boolean, held: boolean, coalesced: boolean, shaders: { compiled: number, resident: boolean } }}
+ */
+export function stepLyricPerformance(opts) {
+  const o = opts || {};
+  const playing = !!o.playing;
+  const items = Array.isArray(o.items) ? o.items : [];
+  const track = openLyricTrack(String(o.sourceKey || ''), playing, items);
+  const reason = playing ? (o.reason || 'show') : 'pause';
+  const shaders = retainLyricShaders(reason, o.residence, o.nowMs, o.env);
+  if (!playing) {
+    return { track, built: 0, done: !!track.complete, held: true, coalesced: false, shaders };
+  }
+  const budget = Number.isFinite(Number(o.budgetMs)) ? Number(o.budgetMs) : LYRIC_BUILD_BUDGET_MS;
+  const stepped = buildLyricTrack(track, items, o.duration, budget, finite(Number(o.nowMs), 0), o.clock, o.focusIndex);
+  return {
+    track,
+    built: stepped.built,
+    done: stepped.done,
+    held: false,
+    coalesced: !!stepped.coalesced,
+    shaders,
+  };
+}
+
+/**
+ * 暂停时全屏页已经摆好的当前句不要拆掉。拖进度或换句才重画。
+ * @param {{ playing?: boolean, seeked?: boolean, sameLine?: boolean, hasLayout?: boolean } | null | undefined} state
+ * @returns {'keep' | 'paint'}
+ */
+export function lyricLayoutDecision(state) {
+  const s = state || {};
+  if (!s.playing && !s.seeked && s.sameLine && s.hasLayout) return 'keep';
+  return 'paint';
+}
+
+/**
+ * 桌面歌词窗口只在换歌时收一整份歌词。
+ * 暂停和恢复同一首都不重发，窗口继续用已经建好的行。
+ * @param {boolean} songChanged
+ * @param {boolean} [_playing]
+ * @returns {boolean}
+ */
+export function shouldAttachDesktopLyrics(songChanged, _playing) {
+  return !!songChanged;
+}
+
+/**
+ * 桌面窗口用来认出「还是这一轨」。一样就不拆 DOM。
+ * @param {readonly {t?: number, text?: string}[] | null | undefined} list
+ * @returns {string}
+ */
+export function desktopTrackSignature(list) {
+  if (!Array.isArray(list) || !list.length) return '';
+  let out = String(list.length);
+  for (let i = 0; i < list.length; i++) {
+    const line = list[i] || {};
+    const text = typeof line.text === 'string' ? line.text : '';
+    out += `\n${line.t}\t${text}`;
+  }
+  return out;
+}
+
+/**
+ * @returns {LyricShaderResidence}
+ */
+export function createLyricShaderResidence() {
+  return {
+    programs: {},
+    compiles: 0,
+    warmed: false,
+    surface: null,
+  };
+}
+
+/** @type {LyricShaderResidence | null} */
+let shaderResidence = null;
+
+/** 进程里唯一的一份。全屏页关掉、舞台卸掉，程序还在。 */
+export function lyricShaderResidence() {
+  if (!shaderResidence) shaderResidence = createLyricShaderResidence();
+  return shaderResidence;
+}
+
+/**
+ * @param {string} name
+ * @param {number} now
+ * @returns {LyricShaderProgram}
+ */
+function compileLyricProgram(name, now) {
+  return {
+    name,
+    resident: true,
+    compiledAt: now,
+    feature: SHADER_FEATURE[name] || name,
+  };
+}
+
+/**
+ * 把光带会用到的合成挂进文档一次。节点留在 residence 上，谁都不要摘。
+ * @param {LyricShaderResidence} box
+ * @param {{ document?: Document } | null | undefined} env
+ */
+function attachWarmSurface(box, env) {
+  if (box.surface) return;
+  const doc = (env && env.document) || (typeof document !== 'undefined' ? document : null);
+  if (!doc || typeof doc.createElement !== 'function') return;
+  let el;
+  try {
+    el = doc.createElement('span');
+  } catch {
+    return;
+  }
+  if (!el) return;
+  if (typeof el.setAttribute === 'function') {
+    el.setAttribute('data-lyric-shader-warm', '');
+    el.setAttribute('aria-hidden', 'true');
+  }
+  el.textContent = '词';
+  if (el.style) {
+    el.style.cssText = [
+      'position:fixed',
+      'left:0',
+      'top:0',
+      'width:1px',
+      'height:1px',
+      'opacity:0',
+      'pointer-events:none',
+      'overflow:hidden',
+      'clip-path:inset(0 35% 0 0)',
+      'filter:drop-shadow(0 0 4px currentColor)',
+      'background-image:linear-gradient(90deg,transparent,currentColor,transparent)',
+      '-webkit-background-clip:text',
+      'background-clip:text',
+    ].join(';');
+  }
+  const parent = doc.body || doc.documentElement;
+  if (parent && typeof parent.appendChild === 'function') {
+    try { parent.appendChild(el); } catch { /* 文档还没好，节点先留在 residence 上 */ }
+  }
+  box.surface = el;
+}
+
+/**
+ * 缺的程序才编译。已经在的对象原样返回。
+ * @param {LyricShaderResidence | null | undefined} residence
+ * @param {number} [nowMs]
+ * @param {{ document?: Document } | null | undefined} [env]
+ * @returns {{ residence: LyricShaderResidence, compiled: number, resident: boolean }}
+ */
+export function warmLyricShaders(residence, nowMs, env) {
+  const box = residence || lyricShaderResidence();
+  const now = finite(Number(nowMs), 0);
+  let compiled = 0;
+  for (let i = 0; i < LYRIC_SHADER_NAMES.length; i++) {
+    const name = LYRIC_SHADER_NAMES[i];
+    const have = box.programs[name];
+    if (have && have.resident) continue;
+    box.programs[name] = compileLyricProgram(name, now);
+    box.compiles += 1;
+    compiled += 1;
+  }
+  box.warmed = LYRIC_SHADER_NAMES.every((name) => box.programs[name] && box.programs[name].resident);
+  attachWarmSurface(box, env);
+  return { residence: box, compiled, resident: box.warmed };
+}
+
+/**
+ * 显示、恢复、暂停、藏起都不释放程序。第一次才会编译。
+ * @param {string} [reason]
+ * @param {LyricShaderResidence | null | undefined} [residence]
+ * @param {number} [nowMs]
+ * @param {{ document?: Document } | null | undefined} [env]
+ * @returns {{ residence: LyricShaderResidence, compiled: number, resident: boolean, reason: string, kept: boolean }}
+ */
+export function retainLyricShaders(reason, residence, nowMs, env) {
+  const warmed = warmLyricShaders(residence, nowMs, env);
+  return {
+    residence: warmed.residence,
+    compiled: warmed.compiled,
+    resident: warmed.resident,
+    reason: reason || 'show',
+    kept: warmed.compiled === 0,
+  };
+}
+
+warmLyricShaders(lyricShaderResidence(), 0);

@@ -8,7 +8,7 @@ import type { DiscoverSectionState, PlaylistSummary } from '../stores/types';
 import type { DiscoverPlaylistRef } from '../core/discoverFeed';
 import { player, currentKey, playFromList } from '../stores/player';
 import { lyrics } from '../stores/lyrics';
-import { activeLineIndex, lyricDisplaySeconds, projectPlayhead } from '../core/lyricMotion.js';
+import { activeLineIndex, lyricDisplaySeconds, projectPlayhead, stepLyricPerformance } from '../core/lyricMotion.js';
 import { platformName } from '../core/format';
 import DiscoverRankList from '../components/data/DiscoverRankList.vue';
 import PlaylistPeek from '../components/data/PlaylistPeek.vue';
@@ -65,24 +65,30 @@ function publishLines(now: number): void {
     followKey = key;
     anchor = null;
   }
+  const projected = song
+    ? projectPlayhead(anchor, player.progress, now, Number(player.rate) || 1, !!player.playing)
+    : null;
+  if (projected) anchor = projected.anchor;
+  const seconds = projected ? lyricDisplaySeconds(projected.seconds, lyrics.offsetMs) : 0;
+  const idx = lyrics.items.length ? activeLineIndex(lyrics.items, seconds) : -1;
+  // 舞台和全屏共用同一轨。暂停只停住，不把已经建好的行拆掉。
+  stepLyricPerformance({
+    sourceKey: lyrics.loadedKey,
+    playing: !!player.playing,
+    items: lyrics.items,
+    duration: player.duration > 0 ? player.duration : undefined,
+    nowMs: now,
+    focusIndex: idx,
+    reason: player.playing ? 'resume' : 'pause',
+  });
   if (!song) {
     setLines({ prev: '', cur: '', next: '' });
     return;
   }
-  const projected = projectPlayhead(
-    anchor,
-    player.progress,
-    now,
-    Number(player.rate) || 1,
-    !!player.playing,
-  );
-  anchor = projected.anchor;
   if (lyrics.loadedKey !== key || !lyrics.items.length) {
     setLines({ prev: '', cur: '', next: '' });
     return;
   }
-  const seconds = lyricDisplaySeconds(projected.seconds, lyrics.offsetMs);
-  const idx = activeLineIndex(lyrics.items, seconds);
   const items = lyrics.items;
   const prev = idx > 0 ? (items[idx - 1]?.text ?? '') : '';
   const cur = idx >= 0 ? (items[idx]?.text ?? '') : '';

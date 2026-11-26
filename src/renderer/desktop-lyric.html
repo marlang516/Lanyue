@@ -109,6 +109,7 @@
   <script>
     // ── 状态 ─────────────────────────────────────────────
     let lyrics = [];        // [{t, text, subText, words:[], wordTimes:[]}]
+    let lyricSig = '';     // 同一轨再推一次时不拆已经建好的行
     let currentTime = 0;
     let curIdx = -1;       // 当前行索引
     let locked = false;     // 锁定 = 正文穿透
@@ -199,13 +200,31 @@
       }
     }
 
+    // 与 lyricMotion.desktopTrackSignature 同一算法：认不出变化就不重建 DOM。
+    function desktopTrackSignature(list) {
+      if (!list || !list.length) return '';
+      let out = String(list.length);
+      for (let i = 0; i < list.length; i++) {
+        const line = list[i] || {};
+        const text = typeof line.text === 'string' ? line.text : '';
+        out += '\n' + line.t + '\t' + text;
+      }
+      return out;
+    }
+
     // ── 数据接收 ─────────────────────────────────────────
     window.miniAPI.on('desktop-lyric-data', (data) => {
       if (!data) return;
       if (data.lyrics) {
         // 整份歌词（换歌时推送；含 wordTimes 供逐字高亮）
-        lyrics = Array.isArray(data.lyrics) ? data.lyrics : [];
-        curIdx = -2; // 强制重渲染
+        // 暂停或重复推送同一轨时签名不变，保留已经建好的行。
+        const next = Array.isArray(data.lyrics) ? data.lyrics : [];
+        const sig = desktopTrackSignature(next);
+        if (sig !== lyricSig) {
+          lyrics = next;
+          lyricSig = sig;
+          curIdx = -2; // 换轨才强制重渲染
+        }
       }
       if (typeof data.currentTime === 'number') currentTime = data.currentTime;
       if (typeof data.fontSize === 'number' && data.fontSize > 0 && data.fontSize !== fontSize) {
