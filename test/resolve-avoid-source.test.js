@@ -38,7 +38,7 @@ const SONG = { id: '1', source: 'netease', title: '晴天', artist: '周杰伦',
 function build(map, opts = {}) {
   const health = opts.health || makeHealth();
   const findCalls = [];
-  const getUrl = makeGetUrl(map);
+  const getUrl = opts.getUrl || makeGetUrl(map);
   const findCandidates = opts.findCandidates || (async () => {
     findCalls.push(true);
     return opts.candidates || [];
@@ -50,6 +50,7 @@ function build(map, opts = {}) {
     findCandidates,
     sourceHealth: health,
     fallbackEnabled: opts.fallbackEnabled,
+    switchDeadlineMs: opts.switchDeadlineMs,
   });
   return { svc, health, getUrl, findCalls };
 }
@@ -140,6 +141,41 @@ test('avoidSource 脏值按未传处理', async () => {
   assert.equal(r.source, 'netease');
   assert.deepEqual(getUrl.calls, [['netease', '1']]);
   assert.equal(findCalls.length, 0);
+});
+
+test('一键换源时候选取流卡住，到点返回人话而不是一直挂着', async () => {
+  const { svc } = build({}, {
+    switchDeadlineMs: 40,
+    candidates: [{ id: 'q1', source: 'qq', title: '晴天', artist: '周杰伦' }],
+    getUrl: () => new Promise(() => {}),
+  });
+  const started = Date.now();
+  const r = await Promise.race([
+    svc.resolve(SONG, 'standard', { allowToggleSource: true, avoidSource: 'netease' }),
+    new Promise((resolve) => setTimeout(() => resolve({ error: 'TEST_STILL_PENDING' }), 200)),
+  ]);
+  assert.ok(Date.now() - started < 200, '不能把整段候选查找挂到测试兜底');
+  assert.equal(r.error, '暂无法获取音源，请稍后重试');
+  assert.ok(!r.url);
+});
+
+test('截止时间内候选取流成功，仍然换到那个源', async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const getUrl = async (id, source) => {
+    await gate;
+    return ok({ source });
+  };
+  const { svc } = build({}, {
+    switchDeadlineMs: 400,
+    candidates: [{ id: 'q1', source: 'qq', title: '晴天', artist: '周杰伦' }],
+    getUrl,
+  });
+  const pending = svc.resolve(SONG, 'standard', { allowToggleSource: true, avoidSource: 'netease' });
+  setTimeout(release, 30);
+  const r = await pending;
+  assert.equal(r.source, 'qq');
+  assert.ok(r.url);
 });
 
 test('总开关关闭且没有显式 allowToggle 时，avoidSource 不擅自搜候选', async () => {

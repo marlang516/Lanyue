@@ -118,6 +118,34 @@ function isAvoidedSource(source, avoid) {
 const PREVIEW_MAX_RATIO = 0.5;
 /** 换源候选最多尝试数量：避免在一个明显不可用的歌曲上浪费太多时间 */
 const MAX_CANDIDATE_TRIES = 3;
+/**
+ * 播放条一键换源的总期限。
+ * 候选搜索自己有 15s，但候选取流前面的 DNS 不受 HTTP 超时约束，
+ * 一条卡住的 getUrl 会让整次 resolve 永远不回来。播放条在这期间
+ * 一直 loading，徽章就停在 disabled，也没有失败原因。
+ */
+const SWITCH_DEADLINE_MS = 10000;
+const SWITCH_TIMEOUT_ERROR = '暂无法获取音源，请稍后重试';
+
+/**
+ * 到期返回 fallback，不等原来的 promise。
+ * 原来的请求继续在后台跑完，但调用方已经拿到失败，不会把界面挂死。
+ * @template T
+ * @param {Promise<T>} promise
+ * @param {number} ms
+ * @param {T} fallback
+ * @returns {Promise<T>}
+ */
+function withDeadline(promise, ms, fallback) {
+  let timer = null;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  const guarded = Promise.resolve(promise).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+  return Promise.race([guarded, timeout]);
+}
 
 /** 判定为片段时对外给出的理由与错误码（NO_AUDIO_STREAM 在换源白名单内） */
 const PREVIEW_REJECT = Object.freeze({
@@ -182,12 +210,17 @@ function createResolveTrackService({
   getDisabledPlatforms,
   fallbackEnabled,
   findLocalMatch,
+  switchDeadlineMs,
 } = {}) {
   if (typeof getUrl !== 'function') throw new Error('[ResolveTrack] 必须注入 getUrl');
   if (typeof findCandidates !== 'function') throw new Error('[ResolveTrack] 必须注入 findCandidates');
   if (!sourceHealth || typeof sourceHealth.recordResult !== 'function') {
     throw new Error('[ResolveTrack] 必须注入 sourceHealth.recordResult');
   }
+
+  const explicitSwitchDeadlineMs = Number.isFinite(switchDeadlineMs) && switchDeadlineMs >= 0
+    ? switchDeadlineMs
+    : SWITCH_DEADLINE_MS;
 
   /** 安全记账：健康度统计失败绝不该影响取流主流程 */
   function record(source, ok) {
@@ -307,6 +340,18 @@ function createResolveTrackService({
    * @returns {Promise<import('../../shared/dto').TrackResult>}
    */
   async function resolve(rawSong, quality, options = {}) {
+    // 只有播放条点了「换一个源」才套总期限。普通播放仍走原来的本源取流，不加这一跳。
+    if (avoidSourceOf(options)) {
+      return withDeadline(
+        resolveOnce(rawSong, quality, options),
+        explicitSwitchDeadlineMs,
+        normalizeTrackResult({ error: SWITCH_TIMEOUT_ERROR }),
+      );
+    }
+    return resolveOnce(rawSong, quality, options);
+  }
+
+  async function resolveOnce(rawSong, quality, options = {}) {
     const song = normalizeSong(rawSong);
     if (!song.id || !song.source) {
       return normalizeTrackResult({ error: '参数无效：缺少歌曲 id/source', code: 'INVALID_ARGS' });
