@@ -113,7 +113,8 @@
       inset: 0;
       background: linear-gradient(180deg, rgba(0,0,0,.28), rgba(0,0,0,.12) 40%, rgba(0,0,0,.35));
     }
-    #coverDust {
+    #coverDust,
+    #stageSpectrum {
       position: absolute;
       inset: 0;
       width: 100%;
@@ -195,6 +196,7 @@
     <img id="stageCover" alt="" />
     <div class="stage-veil"></div>
     <canvas id="coverDust" hidden aria-hidden="true"></canvas>
+    <canvas id="stageSpectrum" hidden aria-hidden="true"></canvas>
   </div>
   <div class="stage-meta" id="stageMeta" hidden>
     <b id="stageTitle"></b>
@@ -231,6 +233,16 @@
         if (window.__pendingCoverDust) window.__coverDust.apply(window.__pendingCoverDust);
       }
     } catch (e) { /* 微尘没装上时，桌面歌词照旧 */ }
+
+    try {
+      /*__SPECTRUM_ATMOSPHERE_RUNTIME__*/
+      const spectrumCanvas = document.getElementById('stageSpectrum');
+      const spectrumApi = window.__spectrumAtmosphereApi;
+      if (spectrumApi && spectrumCanvas instanceof HTMLCanvasElement) {
+        window.__spectrumAtmosphere = spectrumApi.mountDesktopSpectrum(spectrumCanvas);
+        if (window.__pendingSpectrum) window.__spectrumAtmosphere.apply(window.__pendingSpectrum);
+      }
+    } catch (e) { /* 频谱没装上时，桌面歌词照旧 */ }
 
     // ── 状态 ─────────────────────────────────────────────
     let lyrics = [];        // [{t, text, subText, words:[], wordTimes:[]}]
@@ -391,6 +403,11 @@
     // ── 数据接收 ─────────────────────────────────────────
     window.miniAPI.on('desktop-lyric-data', (data) => {
       if (!data) return;
+      // 只带频谱柱的抽样。不重置歌词时钟，也不改歌词数组。
+      if (isSpectrumSample(data)) {
+        publishSpectrum(data);
+        return;
+      }
       if (typeof data.playing === 'boolean') stagePlaying = data.playing;
       if (typeof data.rate === 'number' && data.rate > 0) stageRate = data.rate;
       applyStage(data);
@@ -412,12 +429,36 @@
       }
       locate();
       if (document.body.classList.contains('stage-wall')) armStageClock();
+      publishSpectrum(data);
       publishCoverDust(data);
     });
 
     // ── 控制条 ───────────────────────────────────────────
     const ICON_UNLOCKED = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.9-1"/></svg>';
     const ICON_LOCKED = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
+
+    // 频谱抽样没有 currentTime / stage / lyrics。整包状态仍走下面的歌词路径。
+    function isSpectrumSample(data) {
+      return !!(data && Array.isArray(data.spectrum)
+        && typeof data.currentTime !== 'number'
+        && typeof data.stage !== 'boolean'
+        && !data.lyrics);
+    }
+
+    // 频谱只改自己的画布。不改歌词数组，也不改签名。
+    function publishSpectrum(data) {
+      const packet = data || {};
+      if (!Object.prototype.hasOwnProperty.call(packet, 'spectrumAtmosphere')
+          && !Object.prototype.hasOwnProperty.call(packet, 'spectrum')) return;
+      const slot = window.__spectrumAtmosphere;
+      if (slot && typeof slot.apply === 'function') {
+        slot.apply(packet);
+        return;
+      }
+      window.__pendingSpectrum = packet;
+      const canvas = document.getElementById('stageSpectrum');
+      if (canvas) canvas.hidden = !(packet.stage && packet.spectrumAtmosphere && packet.playing);
+    }
 
     // 微尘只看 stage 与 coverParticles。不改歌词数组，也不改签名。
     function publishCoverDust(data) {

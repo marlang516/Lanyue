@@ -142,7 +142,34 @@ export function createAudibleSlots({ applyOutput = null, logger = null, audioCon
     return pool.handoff(fromId, toId, opts);
   }
 
-  return { attach, hiddenWarmup, handoff };
+  /**
+   * 从这一槽已经建好的图上抄一帧频域。
+   * 图仍是 source → preamp → filters → analyser → destination。
+   * 这里不新建节点，也不做环回采集。槽还没挂上，或图建不起来，返回 false。
+   * target 至少要有 frequencyBinCount 那么长（池里的 analyser 是 128）。
+   *
+   * @param {string} id
+   * @param {Uint8Array} target
+   * @returns {boolean}
+   */
+  function copyFrequency(id, target) {
+    if (!pool || !id || !target || typeof target.length !== 'number' || target.length <= 0) return false;
+    const graph = pool.getGraph(id);
+    const analyser = graph && graph.analyser;
+    if (!analyser || typeof analyser.getByteFrequencyData !== 'function') return false;
+    const bins = Number(analyser.frequencyBinCount);
+    const need = Number.isFinite(bins) && bins > 0 ? bins : target.length;
+    if (target.length < need) return false;
+    const view = target.length === need ? target : target.subarray(0, need);
+    try {
+      analyser.getByteFrequencyData(view);
+    } catch (_e) {
+      return false;
+    }
+    return true;
+  }
+
+  return { attach, hiddenWarmup, handoff, copyFrequency };
 }
 
 /** 进度记忆的 key 口径，必须与 player.js:166 逐字一致，否则会读到两份互不相认的记录 */

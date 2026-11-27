@@ -9,7 +9,9 @@ import { rememberPlatformNames } from '../core/format';
 import { toast, errText } from '../core/toast';
 import { confirmDialog } from '../core/dialog';
 import { ui, applyTheme, setLanguage as setUiLanguage } from './ui';
-import { setCoverParticles, setCrossfadeMs, setQuality, setSingleSourceHandoff, setVolume } from './player';
+import {
+  setCoverParticles, setCrossfadeMs, setQuality, setSingleSourceHandoff, setSpectrumAtmosphere, setVolume,
+} from './player';
 import { lyrics, setOffset } from './lyrics';
 import type {
   DownloadTemplate,
@@ -146,6 +148,11 @@ export function changeHandoff(on: boolean): void {
 /** 封面微尘。默认关，只叠在现有封面和桌面舞台上。 */
 export function changeCoverParticles(on: boolean): void {
   setCoverParticles(on);
+}
+
+/** 舞台频谱。默认关，只在正在出声时叠在现有舞台上。 */
+export function changeSpectrumAtmosphere(on: boolean): void {
+  setSpectrumAtmosphere(on);
 }
 
 export async function changeLyricOffset(ms: number): Promise<void> {

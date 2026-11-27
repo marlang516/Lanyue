@@ -9,6 +9,7 @@ import { downloadSongs } from '../stores/search';
 import { toast } from '../core/toast';
 import LyricsPane from '../components/player/LyricsPane.vue';
 import CoverDustLayer from '../components/player/CoverDustLayer.vue';
+import SpectrumAtmosphereLayer from '../components/player/SpectrumAtmosphereLayer.vue';
 import Icon from '../components/common/Icon.vue';
 
 const progressPct = computed(() => pct(player.progress, player.duration));
@@ -84,6 +85,7 @@ async function onDownload() {
         <div class="bg" :style="player.current?.cover ? { backgroundImage: `url(${player.current.cover})` } : {}"></div>
         <div class="veil"></div>
         <CoverDustLayer v-if="player.coverParticles" surface="fullscreen" />
+        <SpectrumAtmosphereLayer v-if="player.spectrumAtmosphere" surface="fullscreen" />
 
         <header class="hd ly-drag">
           <button class="ly-icon-btn" title="收起" aria-label="收起播放页" @click="close">

@@ -43,6 +43,8 @@ export interface AudibleSlots {
     toId: string,
     opts?: { prepare?: (el: HTMLAudioElement) => void },
   ): AudibleHandoff;
+  /** 抄这一槽已有 analyser 的一帧频域。不另建节点。 */
+  copyFrequency(id: string, target: Uint8Array): boolean;
 }
 
 export function createAudibleSlots(deps?: {
