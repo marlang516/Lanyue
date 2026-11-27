@@ -100,7 +100,10 @@ function runPostbuild(options = {}) {
     if (fs.existsSync(from)) {
       fs.mkdirSync(path.dirname(to), { recursive: true });
       let html = fs.readFileSync(from, 'utf8');
-      if (page === 'desktop-lyric.html') html = injectCoverDustRuntime(html, src);
+      if (page === 'desktop-lyric.html') {
+        html = injectCoverDustRuntime(html, src);
+        html = injectSpectrumAtmosphereRuntime(html, src);
+      }
       fs.writeFileSync(to, html);
       console.log(`  copied: ${path.relative(root, from)} -> ${path.relative(root, to)}`);
     }
@@ -148,10 +151,36 @@ function injectCoverDustRuntime(html, srcRoot) {
   return html.replace(marker, () => runtime);
 }
 
+/**
+ * 舞台频谱跟微尘一样收进桌面歌词页，不另开窗口。
+ * @param {string} html
+ * @param {string} srcRoot src 目录
+ * @returns {string}
+ */
+function injectSpectrumAtmosphereRuntime(html, srcRoot) {
+  const marker = '/*__SPECTRUM_ATMOSPHERE_RUNTIME__*/';
+  if (!html.includes(marker)) return html;
+  const from = path.join(srcRoot, 'renderer', 'app', 'core', 'spectrumAtmosphere.js');
+  if (!fs.existsSync(from)) return html;
+  const body = fs.readFileSync(from, 'utf8').replace(/^export /gm, '');
+  const runtime = [
+    '(function () {',
+    body,
+    '  window.__spectrumAtmosphereApi = {',
+    '    mountDesktopSpectrum: mountDesktopSpectrum,',
+    '    spectrumAtmospherePlan: spectrumAtmospherePlan,',
+    '    foldSpectrumFrame: foldSpectrumFrame',
+    '  };',
+    '})();',
+  ].join('\n');
+  return html.replace(marker, () => runtime);
+}
+
 module.exports = {
   planMainRuntimeCopies,
   runPostbuild,
   injectCoverDustRuntime,
+  injectSpectrumAtmosphereRuntime,
 };
 
 // 被测试 require 时不写 dist；只有 `node scripts/postbuild.js` 才执行。

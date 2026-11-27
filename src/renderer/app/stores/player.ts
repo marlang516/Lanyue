@@ -49,6 +49,12 @@ import {
   stepLyricPerformance,
 } from '../core/lyricMotion.js';
 import { COVER_PARTICLES_PREF_KEY } from '../core/coverParticles.js';
+import {
+  DESKTOP_SPECTRUM_SAMPLE_MS,
+  SPECTRUM_ATMOSPHERE_PREF_KEY,
+  mixFrequencyChunks,
+  shapeBands,
+} from '../core/spectrumAtmosphere.js';
 import type {
   DesktopLyricLine,
   PlayMode,
@@ -81,6 +87,8 @@ interface PlayerState {
   desktopStage: boolean;
   /** 封面微尘。默认关，打开后叠在现有封面上，不另做一层窗。 */
   coverParticles: boolean;
+  /** 舞台频谱氛围。默认关，只在正在出声时叠一层很淡的频谱。 */
+  spectrumAtmosphere: boolean;
   /** 这次音频实际来自的平台。换源成功后可能和 current.source 不同。 */
   playSource: string;
 }
@@ -105,17 +113,19 @@ export const player = reactive<PlayerState>({
   queueOpen: false,
   desktopStage: false,
   coverParticles: false,
+  spectrumAtmosphere: false,
   playSource: '',
 });
 
 export async function restorePlaybackPrefs(): Promise<void> {
-  const [quality, volume, rate, crossfade, handoff, coverParticles] = await Promise.all([
+  const [quality, volume, rate, crossfade, handoff, coverParticles, spectrumAtmosphere] = await Promise.all([
     getPref('quality', 'standard'),
     getPref('playerVolume', 0.8),
     getPref('playbackRate', 1),
     getPref(CROSSFADE_PREF_KEY, 0),
     getPrefBool(HANDOFF_PREF_KEY, false),
     getPrefBool(COVER_PARTICLES_PREF_KEY, false),
+    getPrefBool(SPECTRUM_ATMOSPHERE_PREF_KEY, false),
   ]);
   setQuality(String(quality || 'standard'), false);
   setVolume(Number(volume), false);
@@ -123,6 +133,7 @@ export async function restorePlaybackPrefs(): Promise<void> {
   setCrossfadeMs(Number(crossfade), false);
   setSingleSourceHandoff(handoff, false);
   setCoverParticles(coverParticles, false);
+  setSpectrumAtmosphere(spectrumAtmosphere, false);
 }
 
 export const hasCurrent: ComputedRef<boolean> = computed(() => !!player.current);
@@ -724,6 +735,8 @@ interface DesktopLyricPayload {
   rate?: number;
   /** 封面微尘开关。不附带歌词正文。 */
   coverParticles?: boolean;
+  /** 舞台频谱开关。频域柱另走抽样，不附带歌词正文。 */
+  spectrumAtmosphere?: boolean;
 }
 
 /** 播放态推进一步歌词轨。暂停不建行。 */
@@ -796,6 +809,7 @@ function syncOutputs(force = false): void {
     currentTime: player.progress,
     stage: player.desktopStage,
     coverParticles: player.coverParticles,
+    spectrumAtmosphere: player.spectrumAtmosphere,
   };
   // 舞台那一份要封面和播放态。歌词正文仍只在换歌时附上。
   if (player.desktopStage) {
@@ -829,6 +843,7 @@ export function forceSyncOutputs(): void {
 export function setDesktopStage(on: boolean): void {
   const next = !!on;
   player.desktopStage = next;
+  syncSpectrumFeed();
   if (next) {
     void callSafe('openDesktopLyric', ['stage'], null).then(() => forceSyncOutputs());
     return;
@@ -839,6 +854,7 @@ export function setDesktopStage(on: boolean): void {
 /** 打开桌面歌词条。若舞台正在投射，先收回便宜档，再把同一扇窗收成歌词条。 */
 export function openDesktopLyricWindow(): void {
   player.desktopStage = false;
+  syncSpectrumFeed();
   void callSafe('openDesktopLyric', ['lyric'], null).then(() => forceSyncOutputs());
 }
 
@@ -855,6 +871,7 @@ export function initOutputSync(): void {
   on('onSyncDesktopLyric', (data?: { closed?: boolean }) => {
     if (data && data.closed) {
       player.desktopStage = false;
+      syncSpectrumFeed();
       return;
     }
     forceSyncOutputs();
@@ -872,9 +889,16 @@ watch(() => lyricsState.items, () => {
 });
 
 // 播放态变化立即同步（不等 timeupdate）
-watch(() => player.playing, () => syncOutputs(true));
+watch(() => player.playing, () => {
+  syncOutputs(true);
+  syncSpectrumFeed();
+});
 watch(() => player.coverParticles, () => {
   if (_outputSyncReady) syncOutputs(true);
+});
+watch(() => player.spectrumAtmosphere, () => {
+  if (_outputSyncReady) syncOutputs(true);
+  syncSpectrumFeed();
 });
 
 /** 设置队列与当前项，不开始播放。已经在播时顺手预取新的邻居。 */
@@ -1210,11 +1234,85 @@ export function setCrossfadeMs(ms: number, persist = true): number {
   return n;
 }
 
+/** 正在出声的槽上抄一帧频域。只读 audioPool 里那只 analyser。交叉时按增益混合。 */
+const spectrumBins = new Uint8Array(128);
+
+export function copySoundingFrequency(): Uint8Array | null {
+  if (!player.playing) return null;
+  const parts: { id: string; weight: number }[] = [];
+  const consider = (el: HTMLAudioElement | null): void => {
+    if (!el || el.paused || !el.src || el.muted) return;
+    const weight = gainOf(el);
+    if (!(weight > 0)) return;
+    const id = elementId(el);
+    if (parts.some((part) => part.id === id)) return;
+    parts.push({ id, weight });
+  };
+  consider(activeEl);
+  if (xfade) {
+    consider(xfade.fromEl);
+    consider(xfade.toEl);
+  }
+  if (!parts.length) return null;
+  if (parts.length === 1) {
+    spectrumBins.fill(0);
+    return audibleSlots.copyFrequency(parts[0].id, spectrumBins) ? spectrumBins : null;
+  }
+  const chunks: { bytes: Uint8Array; weight: number }[] = [];
+  const tmp = new Uint8Array(spectrumBins.length);
+  for (let i = 0; i < parts.length; i++) {
+    tmp.fill(0);
+    if (!audibleSlots.copyFrequency(parts[i].id, tmp)) continue;
+    chunks.push({ bytes: tmp.slice(), weight: parts[i].weight });
+  }
+  if (!mixFrequencyChunks(chunks, spectrumBins)) return null;
+  return spectrumBins;
+}
+
+let spectrumTimer: ReturnType<typeof setInterval> | null = null;
+
+function stopSpectrumFeed(): void {
+  if (spectrumTimer != null) {
+    clearInterval(spectrumTimer);
+    spectrumTimer = null;
+  }
+}
+
+/** 舞台投到桌面时，把正在出声的频谱柱抽样送过去。只带柱，不带歌词。 */
+function syncSpectrumFeed(): void {
+  const live = player.spectrumAtmosphere && player.playing && player.desktopStage;
+  if (!live) {
+    stopSpectrumFeed();
+    return;
+  }
+  if (spectrumTimer != null) return;
+  const tick = (): void => {
+    if (!player.spectrumAtmosphere || !player.playing || !player.desktopStage) {
+      stopSpectrumFeed();
+      return;
+    }
+    const raw = copySoundingFrequency();
+    const spectrum = raw ? shapeBands(raw, 16) : [];
+    void callSafe('syncDesktopLyric', [{ spectrum }], null);
+  };
+  if (typeof setInterval !== 'function') return;
+  tick();
+  spectrumTimer = setInterval(tick, DESKTOP_SPECTRUM_SAMPLE_MS);
+}
+
 /** 封面微尘。默认关。不改交叉档位，也不重做歌词轨。 */
 export function setCoverParticles(on: boolean, persist = true): boolean {
   const next = on === true;
   player.coverParticles = next;
   if (persist) void setPref(COVER_PARTICLES_PREF_KEY, next);
+  return next;
+}
+
+/** 舞台频谱。默认关。不改交叉档位，也不重做歌词轨。 */
+export function setSpectrumAtmosphere(on: boolean, persist = true): boolean {
+  const next = on === true;
+  player.spectrumAtmosphere = next;
+  if (persist) void setPref(SPECTRUM_ATMOSPHERE_PREF_KEY, next);
   return next;
 }
 

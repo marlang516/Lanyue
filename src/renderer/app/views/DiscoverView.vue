@@ -16,6 +16,7 @@ import { platformName } from '../core/format';
 import DiscoverRankList from '../components/data/DiscoverRankList.vue';
 import PlaylistPeek from '../components/data/PlaylistPeek.vue';
 import CoverDustLayer from '../components/player/CoverDustLayer.vue';
+import SpectrumAtmosphereLayer from '../components/player/SpectrumAtmosphereLayer.vue';
 import Icon from '../components/common/Icon.vue';
 
 const sec = computed(() => activeSection());
@@ -264,6 +265,10 @@ function openStage(): void {
           <div class="veil"></div>
           <CoverDustLayer
             v-if="player.coverParticles"
+            surface="main"
+          />
+          <SpectrumAtmosphereLayer
+            v-if="player.spectrumAtmosphere"
             surface="main"
           />
           <div

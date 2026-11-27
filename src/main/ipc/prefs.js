@@ -71,6 +71,8 @@ const ALLOWED_PREF_KEYS = new Set([
   'singleSourceHandoff',
   // 封面微尘（播放设置写，舞台 / 全屏歌词 / 舞台投桌面读；默认关）
   'coverParticles',
+  // 舞台频谱氛围（播放设置写，舞台 / 全屏歌词 / 舞台投桌面读；默认关）
+  'spectrumAtmosphere',
   // 歌词区显隐与逐曲偏移覆盖（player/lyrics.js 读写）
   'lyricsVisible', 'lyricOverrides',
   // 搜索页「不感兴趣」屏蔽清单（views/dismissed.js 读写）

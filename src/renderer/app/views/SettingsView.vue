@@ -3,7 +3,7 @@ import { onMounted } from 'vue';
 import {
   settings, TABS, loadSettings, setTab,
   chooseTheme, chooseLanguage, chooseQuality, changeVolume, changeRate,
-  changeCrossfade, changeHandoff, changeCoverParticles, changeLyricOffset, chooseSaveDir,
+  changeCrossfade, changeHandoff, changeCoverParticles, changeSpectrumAtmosphere, changeLyricOffset, chooseSaveDir,
   toggleCookieEditor, saveCookie, verifyCookie, clearCookie, openLogin,
   saveTemplate, deleteTemplate, activateTemplate,
   exportData, importData, checkUpdate, downloadUpdate, restartInstall,
@@ -168,6 +168,25 @@ function onVolumeInput(e: Event) {
               :class="{ 'ly-btn-primary': player.coverParticles }"
               :aria-pressed="player.coverParticles"
               @click="changeCoverParticles(true)"
+            >开</button>
+          </div>
+        </div>
+
+        <div class="group">
+          <h4>舞台频谱</h4>
+          <p class="hint">播放时，在播放舞台和全屏歌词上轻轻铺一层很淡的频谱，跟着正在出声的这首起伏。默认关闭。打开「舞台投桌面」时，同一层出现在现有的那一扇桌面窗上，不改系统壁纸，也不挡住歌词和关闭按钮。</p>
+          <div class="row">
+            <button
+              class="ly-btn ly-btn-sm"
+              :class="{ 'ly-btn-primary': !player.spectrumAtmosphere }"
+              :aria-pressed="!player.spectrumAtmosphere"
+              @click="changeSpectrumAtmosphere(false)"
+            >关</button>
+            <button
+              class="ly-btn ly-btn-sm"
+              :class="{ 'ly-btn-primary': player.spectrumAtmosphere }"
+              :aria-pressed="player.spectrumAtmosphere"
+              @click="changeSpectrumAtmosphere(true)"
             >开</button>
           </div>
         </div>
